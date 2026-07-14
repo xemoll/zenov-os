@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip release]')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -70,7 +70,7 @@ jobs:
 
       - name: Write release notes
         run: |
-          cat > /tmp/release-notes.md <<'EOF'
+          cat > /tmp/release-notes.md <<'NOTES'
           # ZenovOS 0.1.0 — deep native update
 
           Version remains **0.1.0**. This release replaces the earlier Python-driven 16-bit prototype with a verified native stack implemented with Zenov `.zv`, assembler and freestanding C++17.
@@ -102,7 +102,7 @@ jobs:
           ```
 
           Every attached binary was rebuilt and booted in QEMU by this release workflow. Verify downloads with `SHA256SUMS`.
-          EOF
+          NOTES
 
       - name: Create or update GitHub Release v0.1.0
         env:
@@ -125,6 +125,38 @@ jobs:
               --latest
           fi
           gh release upload v0.1.0 dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Record verified release publication
+        run: |
+          set -euo pipefail
+          mkdir -p docs/releases
+          cat > docs/releases/v0.1.0.md <<STATUS
+          # ZenovOS v0.1.0 publication status
+
+          Status: **published and verified**
+
+          Source commit: \`$GITHUB_SHA\`
+          Workflow run: \`$GITHUB_RUN_ID\`
+          Target: \`i686-zenov-none\`
+          Python runtime: \`false\`
+
+          Published assets:
+
+          - \`ZenovOS-0.1.0.img\`
+          - \`ZenovOS-0.1.0-KERNEL.BIN\`
+          - \`ZenovOS-0.1.0-kernel.elf\`
+          - \`ZenovOS-0.1.0-kernel.map\`
+          - \`ZenovOS-0.1.0-build-manifest.json\`
+          - \`ZenovOS-0.1.0-serial.log\`
+          - \`ZenovOS-0.1.0-QEMU.png\`
+          - \`ZenovOS-0.1.0-QEMU.ppm\`
+          - \`SHA256SUMS\`
+
+          The release workflow rebuilt the system, booted it in QEMU, verified COM1 markers and deterministic output, updated tag \`v0.1.0\`, and uploaded all assets before writing this file.
+          STATUS
+          git add docs/releases/v0.1.0.md
+          git commit -m "docs: record v0.1.0 release publication [skip release]"
+          git push origin HEAD:main
 
       - name: Upload workflow evidence
         if: always()
