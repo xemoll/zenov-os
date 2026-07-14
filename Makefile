@@ -1,10 +1,10 @@
 .PHONY: all clean test
 
 all:
-	./build.sh
+	bash build.sh
 
 test:
-	./build.sh --clean --test
+	bash build.sh --clean --test
 
 clean:
 	rm -rf build
