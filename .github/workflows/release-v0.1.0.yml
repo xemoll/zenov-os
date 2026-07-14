@@ -38,73 +38,80 @@ jobs:
       - name: Verify native 0.1.0 build
         run: make clean test
 
-      - name: Prepare release assets
+      - name: Prepare installation package
         run: |
           set -euo pipefail
-          mkdir -p dist
-          cp build/zenov-os.img dist/ZenovOS-0.1.0.img
-          cp build/KERNEL.BIN dist/ZenovOS-0.1.0-KERNEL.BIN
-          cp build/kernel.elf dist/ZenovOS-0.1.0-kernel.elf
-          cp build/kernel.map dist/ZenovOS-0.1.0-kernel.map
-          cp build/build-manifest.json dist/ZenovOS-0.1.0-build-manifest.json
-          cp build/qemu/serial.log dist/ZenovOS-0.1.0-serial.log
-          cp build/qemu/screenshot.ppm dist/ZenovOS-0.1.0-QEMU.ppm
-          cp docs/screenshots/zenov-os-0.1.0.png dist/ZenovOS-0.1.0-QEMU.png
+          rm -rf dist package
+          mkdir -p dist package
+          cp build/zenov-os.img dist/ZenovOS-0.1.0-x86.img
+          cp dist/ZenovOS-0.1.0-x86.img package/
+          cat > dist/INSTALL.txt <<'INSTALL'
+          ZenovOS 0.1.0
+          =================
+
+          ZenovOS 0.1.0 is distributed as a bootable 1.44 MiB x86 floppy image.
+          It does not yet install itself to a hard disk.
+
+          QEMU
+          -----
+          qemu-system-i386 -drive file=ZenovOS-0.1.0-x86.img,format=raw,if=floppy -boot a -m 32M
+
+          Virtual machine
+          ---------------
+          Create a 32-bit x86 virtual machine, enable legacy BIOS boot, attach
+          ZenovOS-0.1.0-x86.img as the first floppy drive, then boot from it.
+
+          Physical media
+          --------------
+          The image may be written to a 1.44 MiB floppy disk or used with firmware
+          that supports USB floppy emulation. Double-check the destination device.
+
+          Linux example:
+          sudo dd if=ZenovOS-0.1.0-x86.img of=/dev/fd0 bs=64K conv=fsync status=progress
+
+          Verification
+          ------------
+          sha256sum -c SHA256SUMS.txt
+          INSTALL
+          cp dist/INSTALL.txt package/
+          (
+            cd package
+            zip -9 ../dist/ZenovOS-0.1.0-x86.zip ZenovOS-0.1.0-x86.img INSTALL.txt
+          )
           (
             cd dist
-            sha256sum ZenovOS-0.1.0* > SHA256SUMS
+            sha256sum ZenovOS-0.1.0-x86.img ZenovOS-0.1.0-x86.zip > SHA256SUMS.txt
           )
-          test "$(stat -c%s dist/ZenovOS-0.1.0.img)" -eq 1474560
-          grep -q '"version": "0.1.0"' dist/ZenovOS-0.1.0-build-manifest.json
-          grep -q '"python_runtime": false' dist/ZenovOS-0.1.0-build-manifest.json
-          grep -q ZENOVOS_BOOT_OK dist/ZenovOS-0.1.0-serial.log
-          grep -q 'Kernel online' dist/ZenovOS-0.1.0-serial.log
-          grep -q 'zenov> ' dist/ZenovOS-0.1.0-serial.log
+          test "$(stat -c%s dist/ZenovOS-0.1.0-x86.img)" -eq 1474560
+          grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
+          grep -q ZENOVOS_UI_READY build/qemu/serial.log
+          grep -q 'zenov> ' build/qemu/serial.log
 
       - name: Point v0.1.0 tag to verified main
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git tag -f -a v0.1.0 "$GITHUB_SHA" -m "ZenovOS 0.1.0 deep native update"
+          git tag -f -a v0.1.0 "$GITHUB_SHA" -m "ZenovOS 0.1.0"
           git push origin refs/tags/v0.1.0 --force
 
       - name: Write release notes
         run: |
           cat > /tmp/release-notes.md <<'NOTES'
-          # ZenovOS 0.1.0 — deep native update
+          # ZenovOS 0.1.0
 
-          Version remains **0.1.0**. This release replaces the earlier Python-driven 16-bit prototype with a verified native stack implemented with Zenov `.zv`, assembler and freestanding C++17.
+          Bootable x86 system image for QEMU, virtual machines and compatible floppy media.
 
-          ## Runtime
+          ## Download
 
-          - BIOS/FAT12 boot with E820 discovery
-          - A20, flat GDT and 32-bit i686 protected mode
-          - IDT exception diagnostics and panic path
-          - remapped PIC, 100 Hz PIT and IRQ-driven PS/2 keyboard
-          - VGA terminal mirrored to COM1
-          - line editing, shift/caps and command history
-          - CPUID, RTC, memory-map and uptime diagnostics
-          - read-only VFS generated from `kernel/main.zv`
+          - `ZenovOS-0.1.0-x86.zip` — image and installation instructions
+          - `ZenovOS-0.1.0-x86.img` — raw bootable floppy image
+          - `INSTALL.txt` — setup instructions
+          - `SHA256SUMS.txt` — download verification
 
-          ## Native toolchain
-
-          - native C++17 Zenov stage0 lexer/parser/validator/generator
-          - native C++17 FAT12 image builder and verifier
-          - no Python source or Python runtime dependency
-          - deterministic FAT12 image and build manifest
-
-          ## Verified boot markers
-
-          ```text
-          ZENOVOS_BOOT_OK
-          Kernel online. Protected-mode services ready.
-          zenov>
-          ```
-
-          Every attached binary was rebuilt and booted in QEMU by this release workflow. Verify downloads with `SHA256SUMS`.
+          ZenovOS 0.1.0 currently boots directly from the image. It does not yet include a hard-disk installer.
           NOTES
 
-      - name: Create or update GitHub Release v0.1.0
+      - name: Replace GitHub Release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -113,18 +120,26 @@ jobs:
             gh release edit v0.1.0 \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "ZenovOS 0.1.0 — Deep Native Update" \
+              --title "ZenovOS 0.1.0" \
               --notes-file /tmp/release-notes.md \
               --latest
+            while IFS= read -r asset; do
+              [[ -z "$asset" ]] || gh release delete-asset v0.1.0 "$asset" --repo "$GITHUB_REPOSITORY" --yes
+            done < <(gh release view v0.1.0 --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
           else
             gh release create v0.1.0 \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "ZenovOS 0.1.0 — Deep Native Update" \
+              --title "ZenovOS 0.1.0" \
               --notes-file /tmp/release-notes.md \
               --latest
           fi
-          gh release upload v0.1.0 dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload v0.1.0 \
+            dist/ZenovOS-0.1.0-x86.img \
+            dist/ZenovOS-0.1.0-x86.zip \
+            dist/INSTALL.txt \
+            dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY"
 
       - name: Record verified release publication
         run: |
@@ -140,31 +155,30 @@ jobs:
           Target: \`i686-zenov-none\`
           Python runtime: \`false\`
 
-          Published assets:
+          Public installation assets:
 
-          - \`ZenovOS-0.1.0.img\`
-          - \`ZenovOS-0.1.0-KERNEL.BIN\`
-          - \`ZenovOS-0.1.0-kernel.elf\`
-          - \`ZenovOS-0.1.0-kernel.map\`
-          - \`ZenovOS-0.1.0-build-manifest.json\`
-          - \`ZenovOS-0.1.0-serial.log\`
-          - \`ZenovOS-0.1.0-QEMU.png\`
-          - \`ZenovOS-0.1.0-QEMU.ppm\`
-          - \`SHA256SUMS\`
+          - \`ZenovOS-0.1.0-x86.img\`
+          - \`ZenovOS-0.1.0-x86.zip\`
+          - \`INSTALL.txt\`
+          - \`SHA256SUMS.txt\`
 
-          The release workflow rebuilt the system, booted it in QEMU, verified COM1 markers and deterministic output, updated tag \`v0.1.0\`, and uploaded all assets before writing this file.
+          Kernel symbols, maps, logs, manifests and screenshots remain internal CI evidence and are not published as end-user release downloads.
           STATUS
           git add docs/releases/v0.1.0.md
           git commit -m "docs: record v0.1.0 release publication [skip release]"
           git push origin HEAD:main
 
-      - name: Upload workflow evidence
+      - name: Upload CI evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zenov-os-v0.1.0-release-evidence
+          name: zenov-os-v0.1.0-ci-evidence
           if-no-files-found: error
           path: |
             dist/
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/build-manifest.json
             build/qemu/serial.log
             build/qemu/screenshot.ppm
