@@ -19,7 +19,10 @@ jobs:
       - name: Verify no Python source remains
         run: test -z "$(find . -name '*.py' -print)"
       - name: Run native checks and build
-        run: make clean check
+        run: |
+          mkdir -p ci-logs
+          set -o pipefail
+          make clean check 2>&1 | tee ci-logs/native-build.log
       - name: Boot protected-mode kernel in QEMU
         run: make qemu
       - name: Verify deterministic rebuild
@@ -47,3 +50,4 @@ jobs:
             build/build-manifest.json
             build/qemu/serial.log
             build/qemu/screenshot.ppm
+            ci-logs/native-build.log
