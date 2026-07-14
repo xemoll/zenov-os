@@ -2,17 +2,17 @@ fn main() {
     system_name("ZenovOS");
     system_version("0.1.0");
     shell_prompt("zenov> ");
-    theme(10, 0);
+    theme(7, 0);
 
-    boot_message("ZenovOS 0.1.0 protected-mode kernel");
-    boot_message("Zenov + assembler + freestanding C++");
-    boot_message("Type help to inspect the system surface.");
+    boot_message("Loading ZenovOS 0.1.0");
+    boot_message("Preparing memory and interrupts");
+    boot_message("Starting system console");
 
-    shell_command("about", "ZenovOS is an independent operating system implemented with Zenov, assembler and freestanding C++.");
-    shell_command("license", "Original ZenovOS code is BSD-2-Clause. The FAT12 loader retains its x16-PRos MIT notice.");
-    shell_command("status", "Protected mode, IDT, PIC, PIT, IRQ keyboard, serial console and read-only VFS are active.");
+    shell_command("about", "ZenovOS is a small x86 operating system built with Zenov, assembler and C++.");
+    shell_command("license", "ZenovOS uses the BSD-2-Clause license. FAT12 loader lineage is documented separately.");
+    shell_command("status", "Ready. Keyboard, timer, serial console and read-only files are available.");
 
-    vfs_file("README", "ZenovOS 0.1.0\nA protected-mode operating-system foundation built with Zenov, assembler and C++.\n");
-    vfs_file("SYSTEM", "Architecture: i686 protected mode\nBoot: BIOS FAT12\nKernel: freestanding C++17\nConfiguration: Zenov .zv\n");
-    vfs_file("COMMANDS", "help info ver uname cpu mem uptime ticks date time echo calc color ls cat history bootlog clear reboot halt panic\n");
+    vfs_file("README", "ZenovOS 0.1.0\nType help to list commands.\n");
+    vfs_file("SYSTEM", "Target: i686-zenov-none\nBoot: BIOS FAT12\nKernel: freestanding C++17\nConfiguration: Zenov .zv\n");
+    vfs_file("COMMANDS", "help info ver uname cpu mem memmap uptime ticks date time echo calc color ls cat history bootlog clear reboot halt panic\n");
 }
