@@ -18,6 +18,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86
       - name: Verify no Python source remains
         run: test -z "$(find . -name '*.py' -print)"
+      - name: Verify source encoding
+        run: |
+          while IFS= read -r file; do
+            iconv -f UTF-8 -t UTF-8 "$file" >/dev/null
+          done < <(find kernel tools boot -type f \( -name '*.cpp' -o -name '*.inc' -o -name '*.S' -o -name '*.zv' -o -name '*.ld' \) -print)
       - name: Run native checks and build
         run: |
           mkdir -p ci-logs
