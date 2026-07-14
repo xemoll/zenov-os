@@ -97,10 +97,10 @@ qemu: all
 test: check qemu deterministic
 
 deterministic: all
-	@cp $(BUILD)/build-manifest.json /tmp/zenov-os-manifest-before.json
-	@$(MAKE) --no-print-directory clean all
-	@diff -u /tmp/zenov-os-manifest-before.json $(BUILD)/build-manifest.json
-	@echo 'deterministic rebuild: OK'
+	@rm -rf /tmp/zenov-os-deterministic
+	@$(MAKE) --no-print-directory BUILD=/tmp/zenov-os-deterministic all
+	@diff -u $(BUILD)/build-manifest.json /tmp/zenov-os-deterministic/build-manifest.json
+	@echo 'deterministic rebuild: OK (primary QEMU artifacts preserved)'
 
 inspect: all
 	readelf -h $(BUILD)/kernel.elf
