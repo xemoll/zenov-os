@@ -1,18 +1,18 @@
 fn main() {
-    console_clear();
-    console_set_color(0x0a);
-    console_println("ZenovOS 0.1.0");
-    console_set_color(0x07);
-    console_println("A bootable operating-system slice generated from Zenov source.");
-    console_println("Stage0 profile: BIOS x86 real mode, FAT12, deterministic build.");
-    say "";
+    system_name("ZenovOS");
+    system_version("0.1.0");
     shell_prompt("zenov> ");
-    shell_command("help", "Commands: help info ver about cls reboot halt");
-    shell_command("info", "ZenovOS kernel source is kernel/main.zv");
-    shell_command("ver", "ZenovOS 0.1.0 / Zenov bare-metal stage0");
-    shell_command("about", "Zenov language, .zv source, independent system runtime.");
-    shell_builtin("cls", 1);
-    shell_builtin("reboot", 2);
-    shell_builtin("halt", 3);
-    shell_run();
+    theme(10, 0);
+
+    boot_message("ZenovOS 0.1.0 protected-mode kernel");
+    boot_message("Zenov + assembler + freestanding C++");
+    boot_message("Type help to inspect the system surface.");
+
+    shell_command("about", "ZenovOS is an independent operating system implemented with Zenov, assembler and freestanding C++.");
+    shell_command("license", "Original ZenovOS code is BSD-2-Clause. The FAT12 loader retains its x16-PRos MIT notice.");
+    shell_command("status", "Protected mode, IDT, PIC, PIT, IRQ keyboard, serial console and read-only VFS are active.");
+
+    vfs_file("README", "ZenovOS 0.1.0\nA protected-mode operating-system foundation built with Zenov, assembler and C++.\n");
+    vfs_file("SYSTEM", "Architecture: i686 protected mode\nBoot: BIOS FAT12\nKernel: freestanding C++17\nConfiguration: Zenov .zv\n");
+    vfs_file("COMMANDS", "help info ver uname cpu mem uptime ticks date time echo calc color ls cat history bootlog clear reboot halt panic\n");
 }

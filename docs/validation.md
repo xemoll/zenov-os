@@ -1,24 +1,17 @@
-# Validation contract
+# ZenovOS 0.1.0 validation contract
 
-Every pull request must pass the `ZenovOS CI` workflow.
+Every deep-update commit must prove that the repository contains no Python
+source, native host tools compile with strict C++17 warnings, the freestanding
+32-bit ELF has no undefined symbols, the FAT12 image validates, and QEMU reaches
+the interactive `zenov> ` prompt through the protected-mode kernel.
 
-The workflow must:
+Required CI evidence:
 
-1. run the deterministic stage0 compiler tests;
-2. assemble a 512-byte boot sector with the `0xAA55` signature;
-3. compile `kernel/main.zv` into a non-empty bounded kernel;
-4. create a deterministic 1.44 MiB FAT12 disk image;
-5. boot the image in QEMU and observe `ZENOVOS_BOOT_OK` on COM1;
-6. capture a non-empty framebuffer screendump;
-7. rebuild and compare `build-manifest.json` byte-for-byte;
-8. upload the image, kernel, boot sector, serial log, screenshot and manifest.
-
-The current locally verified standalone tree produced:
-
-```text
-BOOT.BIN:     512 bytes
-after kernel path normalization, KERNEL.BIN: 951 bytes
-zenov-os.img: 1,474,560 bytes
-```
-
-Local checks do not replace the GitHub Actions result; both are recorded separately.
+1. Zenov stage0 positive and negative self-tests;
+2. 512-byte boot sector with `0xAA55` signature;
+3. bounded `KERNEL.BIN` and inspectable `kernel.elf`;
+4. deterministic 1.44 MiB FAT12 image;
+5. COM1 markers `ZENOVOS_BOOT_OK`, `Kernel online`, and `zenov> `;
+6. non-empty QEMU screendump;
+7. byte-identical rebuild manifest;
+8. published image, ELF, map, manifest, serial log and screenshot artifacts.
