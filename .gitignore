@@ -26,3 +26,10 @@ yarn-error.log*
 
 # Environment files (local configs)
 /.env.*
+
+# ZenovOS build outputs
+/build/
+__pycache__/
+*.pyc
+*.o
+.DS_Store
