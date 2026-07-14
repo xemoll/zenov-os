@@ -93,22 +93,22 @@ std::string cpp_escape(const std::string& input) {
 
 std::string generate(const Config& config) {
     std::ostringstream out;
-    out << "#pragma once\n#include <stdint.h>\n\nnamespace zenov_generated {\n";
+    out << "#pragma once\n\nnamespace zenov_generated {\n";
     out << "struct NamedText { const char* name; const char* text; };\n";
     out << "inline constexpr char kSystemName[] = \"" << cpp_escape(config.system_name) << "\";\n";
     out << "inline constexpr char kVersion[] = \"" << cpp_escape(config.version) << "\";\n";
     out << "inline constexpr char kPrompt[] = \"" << cpp_escape(config.prompt) << "\";\n";
-    out << "inline constexpr uint8_t kForeground = " << static_cast<unsigned>(config.foreground) << ";\n";
-    out << "inline constexpr uint8_t kBackground = " << static_cast<unsigned>(config.background) << ";\n";
+    out << "inline constexpr unsigned char kForeground = " << static_cast<unsigned>(config.foreground) << ";\n";
+    out << "inline constexpr unsigned char kBackground = " << static_cast<unsigned>(config.background) << ";\n";
     out << "inline constexpr const char* kBootMessages[] = {\n";
     for (const auto& value : config.boot_messages) out << "    \"" << cpp_escape(value) << "\",\n";
-    out << "};\ninline constexpr uint32_t kBootMessageCount = sizeof(kBootMessages) / sizeof(kBootMessages[0]);\n";
+    out << "};\ninline constexpr unsigned int kBootMessageCount = sizeof(kBootMessages) / sizeof(kBootMessages[0]);\n";
     out << "inline constexpr NamedText kStaticCommands[] = {\n";
     for (const auto& item : config.commands) out << "    {\"" << cpp_escape(item.first) << "\", \"" << cpp_escape(item.second) << "\"},\n";
-    out << "};\ninline constexpr uint32_t kStaticCommandCount = sizeof(kStaticCommands) / sizeof(kStaticCommands[0]);\n";
+    out << "};\ninline constexpr unsigned int kStaticCommandCount = sizeof(kStaticCommands) / sizeof(kStaticCommands[0]);\n";
     out << "inline constexpr NamedText kFiles[] = {\n";
     for (const auto& item : config.files) out << "    {\"" << cpp_escape(item.first) << "\", \"" << cpp_escape(item.second) << "\"},\n";
-    out << "};\ninline constexpr uint32_t kFileCount = sizeof(kFiles) / sizeof(kFiles[0]);\n";
+    out << "};\ninline constexpr unsigned int kFileCount = sizeof(kFiles) / sizeof(kFiles[0]);\n";
     out << "}\n";
     return out.str();
 }
