@@ -1,0 +1,138 @@
+name: Publish ZenovOS v0.1.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/release-v0.1.0.yml"
+      - "boot/**"
+      - "kernel/**"
+      - "tools/**"
+      - "tests/**"
+      - "Makefile"
+      - "Zenov.toml"
+      - "README.md"
+      - "docs/screenshots/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zenov-os-v0.1.0-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install native toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86 zip
+
+      - name: Verify native 0.1.0 build
+        run: make clean test
+
+      - name: Prepare release assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp build/zenov-os.img dist/ZenovOS-0.1.0.img
+          cp build/KERNEL.BIN dist/ZenovOS-0.1.0-KERNEL.BIN
+          cp build/kernel.elf dist/ZenovOS-0.1.0-kernel.elf
+          cp build/kernel.map dist/ZenovOS-0.1.0-kernel.map
+          cp build/build-manifest.json dist/ZenovOS-0.1.0-build-manifest.json
+          cp build/qemu/serial.log dist/ZenovOS-0.1.0-serial.log
+          cp build/qemu/screenshot.ppm dist/ZenovOS-0.1.0-QEMU.ppm
+          cp docs/screenshots/zenov-os-0.1.0.png dist/ZenovOS-0.1.0-QEMU.png
+          (
+            cd dist
+            sha256sum ZenovOS-0.1.0* > SHA256SUMS
+          )
+          test "$(stat -c%s dist/ZenovOS-0.1.0.img)" -eq 1474560
+          grep -q '"version": "0.1.0"' dist/ZenovOS-0.1.0-build-manifest.json
+          grep -q '"python_runtime": false' dist/ZenovOS-0.1.0-build-manifest.json
+          grep -q ZENOVOS_BOOT_OK dist/ZenovOS-0.1.0-serial.log
+          grep -q 'Kernel online' dist/ZenovOS-0.1.0-serial.log
+          grep -q 'zenov> ' dist/ZenovOS-0.1.0-serial.log
+
+      - name: Point v0.1.0 tag to verified main
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -f -a v0.1.0 "$GITHUB_SHA" -m "ZenovOS 0.1.0 deep native update"
+          git push origin refs/tags/v0.1.0 --force
+
+      - name: Write release notes
+        run: |
+          cat > /tmp/release-notes.md <<'EOF'
+          # ZenovOS 0.1.0 — deep native update
+
+          Version remains **0.1.0**. This release replaces the earlier Python-driven 16-bit prototype with a verified native stack implemented with Zenov `.zv`, assembler and freestanding C++17.
+
+          ## Runtime
+
+          - BIOS/FAT12 boot with E820 discovery
+          - A20, flat GDT and 32-bit i686 protected mode
+          - IDT exception diagnostics and panic path
+          - remapped PIC, 100 Hz PIT and IRQ-driven PS/2 keyboard
+          - VGA terminal mirrored to COM1
+          - line editing, shift/caps and command history
+          - CPUID, RTC, memory-map and uptime diagnostics
+          - read-only VFS generated from `kernel/main.zv`
+
+          ## Native toolchain
+
+          - native C++17 Zenov stage0 lexer/parser/validator/generator
+          - native C++17 FAT12 image builder and verifier
+          - no Python source or Python runtime dependency
+          - deterministic FAT12 image and build manifest
+
+          ## Verified boot markers
+
+          ```text
+          ZENOVOS_BOOT_OK
+          Kernel online. Protected-mode services ready.
+          zenov>
+          ```
+
+          Every attached binary was rebuilt and booted in QEMU by this release workflow. Verify downloads with `SHA256SUMS`.
+          EOF
+
+      - name: Create or update GitHub Release v0.1.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v0.1.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit v0.1.0 \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "ZenovOS 0.1.0 — Deep Native Update" \
+              --notes-file /tmp/release-notes.md \
+              --latest
+          else
+            gh release create v0.1.0 \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "ZenovOS 0.1.0 — Deep Native Update" \
+              --notes-file /tmp/release-notes.md \
+              --latest
+          fi
+          gh release upload v0.1.0 dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Upload workflow evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-v0.1.0-release-evidence
+          if-no-files-found: error
+          path: |
+            dist/
+            build/qemu/serial.log
+            build/qemu/screenshot.ppm
