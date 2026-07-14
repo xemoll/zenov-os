@@ -1,4 +1,4 @@
-name: ZenovOS CI
+name: ZenovOS 0.1.0 CI
 
 on:
   push:
@@ -9,32 +9,41 @@ permissions:
   contents: read
 
 jobs:
-  build-and-boot:
+  native-build-and-boot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Install build and emulation dependencies
-        run: sudo apt-get update && sudo apt-get install -y binutils qemu-system-x86
-      - name: Run compiler tests
-        run: python3 tests/test_stage0_compiler.py
-      - name: Build and boot ZenovOS
-        run: bash build.sh --clean --test
+      - name: Install native toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86
+      - name: Verify no Python source remains
+        run: test -z "$(find . -name '*.py' -print)"
+      - name: Run native checks and build
+        run: make clean check
+      - name: Boot protected-mode kernel in QEMU
+        run: make qemu
       - name: Verify deterministic rebuild
+        run: make deterministic
+      - name: Inspect kernel format
         run: |
-          cp build/build-manifest.json /tmp/manifest-before.json
-          bash build.sh
-          diff -u /tmp/manifest-before.json build/build-manifest.json
-      - name: Upload verified artifacts
+          readelf -h build/kernel.elf
+          test "$(stat -c%s build/BOOT.BIN)" -eq 512
+          test "$(stat -c%s build/KERNEL.BIN)" -le 61440
+          grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
+          grep -q 'Kernel online' build/qemu/serial.log
+          grep -q 'zenov> ' build/qemu/serial.log
+      - name: Upload verified 0.1.0 artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zenov-os-stage0
+          name: zenov-os-0.1.0-deep
           if-no-files-found: error
           path: |
-            build/zenov-os.img
-            build/KERNEL.BIN
             build/BOOT.BIN
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/zenov-os.img
             build/build-manifest.json
             build/qemu/serial.log
             build/qemu/screenshot.ppm

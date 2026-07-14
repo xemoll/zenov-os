@@ -1,11 +1,11 @@
 # Repository boundary
 
-This repository owns ZenovOS: boot code, kernel `.zv` source, OS runtime,
-drivers, filesystems, shell, applications, disk images, QEMU checks and release
-artifacts.
+`xemoll/zenov-os` owns the operating system: boot path, kernel, drivers,
+filesystem image, shell, native tools, tests and release artifacts.
 
-The separate `xemoll/zenov` repository owns the Zenov language, compiler,
-runtime, standard library, target definitions and reusable freestanding APIs.
+`xemoll/zenov` owns the Zenov language, compiler, runtime contracts and target
+ABI. ZenovOS consumes Zenov but does not embed the language repository.
 
-ZenovOS consumes released or pinned Zenov toolchains. It must not be embedded
-as a source subtree in the Zenov compiler repository.
+Version `0.1.0` is intentionally developed in place until its protected-mode
+foundation, diagnostics and native toolchain are stable. This deep update does
+not change the public version number.

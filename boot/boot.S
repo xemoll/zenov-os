@@ -1,6 +1,5 @@
-/* ZenovOS FAT12 bootloader.
- * Derived from x16-PRos bootloader by PRoX2011, MIT License.
- * Modifications Copyright (c) 2026 xemoll / Zenov contributors.
+/* ZenovOS BIOS FAT12 boot sector.
+ * FAT12 loader lineage: x16-PRos by PRoX2011 (MIT); see THIRD_PARTY.md.
  */
 .intel_syntax noprefix
 .code16
@@ -8,7 +7,7 @@
 .global _start
 
 _start:
-    jmp main
+    jmp short boot_start
     nop
 
 bpbOEM:               .ascii "ZENOVOS "
@@ -27,18 +26,21 @@ bpbTotalSectorsBig:   .long 0
 bsDriveNumber:        .byte 0
 bsUnused:             .byte 0
 bsExtBootSignature:   .byte 0x29
-bsSerialNumber:       .long 0x5a454e4f
+bsSerialNumber:       .long 0x5a4f5331
 bsVolumeLabel:        .ascii "ZENOVOS    "
 bsFileSystem:         .ascii "FAT12   "
+
+boot_start:
+    jmp main
 
 print:
     lodsb
     test al, al
-    jz .Lprint_done
+    jz .done
     mov ah, 0x0e
     int 0x10
     jmp print
-.Lprint_done:
+.done:
     ret
 
 absoluteSector: .byte 0
@@ -50,7 +52,7 @@ cluster_lba:
     xor cx, cx
     mov cl, byte ptr [bpbSectorsPerCluster]
     mul cx
-    add ax, word ptr [datasector]
+    add ax, word ptr [dataSector]
     ret
 
 lba_to_chs:
@@ -65,9 +67,9 @@ lba_to_chs:
     ret
 
 read_sectors:
-.Lread_main:
+.next_sector:
     mov di, 5
-.Lread_retry:
+.retry:
     push ax
     push bx
     push cx
@@ -79,28 +81,23 @@ read_sectors:
     mov dh, byte ptr [absoluteHead]
     mov dl, byte ptr [bsDriveNumber]
     int 0x13
-    jnc .Lread_success
+    jnc .success
     xor ax, ax
     int 0x13
     dec di
     pop cx
     pop bx
     pop ax
-    jnz .Lread_retry
-    int 0x18
-.Lread_success:
+    jnz .retry
+    jmp failure
+.success:
     pop cx
     pop bx
     pop ax
     add bx, word ptr [bpbBytesPerSector]
-    jnc .Lread_next
-    mov dx, es
-    cmp dx, 0x2000
-    je failure
-    int 0x18
-.Lread_next:
+    jc failure
     inc ax
-    loop .Lread_main
+    loop .next_sector
     ret
 
 main:
@@ -110,13 +107,12 @@ main:
     mov es, ax
     xor ax, ax
     mov ss, ax
-    mov sp, 0xffff
+    mov sp, 0x7c00
     sti
     mov byte ptr [bsDriveNumber], dl
     mov si, OFFSET FLAT:msgLoading
     call print
 
-load_root:
     xor cx, cx
     xor dx, dx
     mov ax, 0x20
@@ -126,14 +122,14 @@ load_root:
     mov al, byte ptr [bpbNumberOfFATs]
     mul word ptr [bpbSectorsPerFAT]
     add ax, word ptr [bpbReservedSectors]
-    mov word ptr [datasector], ax
-    add word ptr [datasector], cx
+    mov word ptr [dataSector], ax
+    add word ptr [dataSector], cx
     mov bx, 0x0200
     call read_sectors
 
     mov cx, word ptr [bpbRootEntries]
     mov di, 0x0200
-.Lfind_kernel:
+.find_kernel:
     push cx
     mov cx, 11
     mov si, OFFSET FLAT:imageName
@@ -143,7 +139,7 @@ load_root:
     je load_fat
     pop cx
     add di, 0x20
-    loop .Lfind_kernel
+    loop .find_kernel
     jmp failure
 
 load_fat:
@@ -156,7 +152,8 @@ load_fat:
     mov ax, word ptr [bpbReservedSectors]
     mov bx, 0x0200
     call read_sectors
-    mov ax, 0x2000
+
+    mov ax, 0x1000
     mov es, ax
     xor bx, bx
     push bx
@@ -178,21 +175,22 @@ load_image:
     add bx, cx
     mov dx, word ptr [bx]
     test ax, 1
-    jnz .Lodd_cluster
+    jnz .odd_cluster
     and dx, 0x0fff
-    jmp .Lcluster_done
-.Lodd_cluster:
+    jmp .cluster_done
+.odd_cluster:
     shr dx, 4
-.Lcluster_done:
+.cluster_done:
     mov word ptr [cluster], dx
     cmp dx, 0x0ff0
     jb load_image
 
     mov si, OFFSET FLAT:msgDone
     call print
+    mov dl, byte ptr [bsDriveNumber]
     .byte 0xea
     .word 0x0000
-    .word 0x2000
+    .word 0x1000
 
 failure:
     mov si, OFFSET FLAT:msgFailure
@@ -202,12 +200,12 @@ failure:
     int 0x19
     jmp .
 
-datasector: .word 0
+dataSector: .word 0
 cluster:    .word 0
 imageName:  .ascii "KERNEL  BIN"
-msgLoading: .asciz "\r\nZenovOS loading"
+msgLoading: .asciz "\r\nZenovOS 0.1.0 loading"
 msgDone:    .asciz ".\r\n"
-msgFailure: .asciz "\r\nKERNEL.BIN missing. Press a key.\r\n"
+msgFailure: .asciz "\r\nBoot failure. Press a key.\r\n"
 
 .org 510
 .word 0xaa55

@@ -4,7 +4,7 @@ version = "0.1.0"
 entry = "kernel/main.zv"
 
 [target]
-triple = "x86-zenov-bios-stage0"
+triple = "i686-zenov-none"
 format = "flat-binary"
 filesystem = "fat12"
 boot = "bios"
@@ -12,3 +12,9 @@ boot = "bios"
 [language]
 name = "Zenov"
 extension = ".zv"
+
+[implementation]
+zenov = "system manifest and generated kernel configuration"
+assembler = "boot, protected-mode entry, interrupts"
+cpp = "freestanding kernel, drivers, shell and native build tools"
+python = false
