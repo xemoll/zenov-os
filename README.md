@@ -39,7 +39,7 @@ Build the image:
 ```bash
 git clone https://github.com/xemoll/zenov-os.git
 cd zenov-os
-./build.sh --clean
+bash build.sh --clean
 ```
 
 Outputs:
@@ -55,7 +55,7 @@ build/build-manifest.json
 Run all checks, including QEMU when it is installed:
 
 ```bash
-./build.sh --clean --test
+bash build.sh --clean --test
 ```
 
 ## Source contract
