@@ -4,7 +4,9 @@ set -euo pipefail
 QEMU="${QEMU:-qemu-system-i386}"
 IMAGE="${1:-build/zenov-os.img}"
 OUT="${2:-build/qemu}"
-MARKER="ZENOVOS_BOOT_OK"
+BOOT_MARKER="ZENOVOS_BOOT_OK"
+UI_MARKER="ZENOVOS_UI_READY"
+PROMPT="zenov> "
 mkdir -p "$OUT"
 rm -f "$OUT/serial.log" "$OUT/screenshot.ppm" "$OUT/monitor.log" "$OUT/qemu.stderr" "$OUT/marker.ok"
 SCREENSHOT="$(cd "$OUT" && pwd)/screenshot.ppm"
@@ -12,8 +14,11 @@ SERIAL="$(cd "$OUT" && pwd)/serial.log"
 MARKER_FILE="$(cd "$OUT" && pwd)/marker.ok"
 
 controller() {
-  for _ in $(seq 1 120); do
-    if [[ -f "$SERIAL" ]] && grep -q "$MARKER" "$SERIAL"; then
+  for _ in $(seq 1 150); do
+    if [[ -f "$SERIAL" ]] \
+      && grep -q "$BOOT_MARKER" "$SERIAL" \
+      && grep -q "$UI_MARKER" "$SERIAL" \
+      && grep -q "$PROMPT" "$SERIAL"; then
       : > "$MARKER_FILE"
       break
     fi
@@ -23,13 +28,14 @@ controller() {
     echo quit
     return 1
   fi
+  sleep 0.4
   echo "screendump $SCREENSHOT"
   sleep 0.5
   echo quit
 }
 
 set +e
-controller | timeout 15s "$QEMU" \
+controller | timeout 18s "$QEMU" \
   -drive "file=$IMAGE,format=raw,if=floppy" \
   -boot a -m 32M -display none \
   -serial "file:$SERIAL" \
@@ -44,8 +50,9 @@ if [[ $status -ne 0 ]]; then
   cat "$SERIAL" >&2 || true
   exit 1
 fi
-grep -q "$MARKER" "$SERIAL" || { echo "qemu-smoke: serial marker missing" >&2; exit 1; }
+grep -q "$BOOT_MARKER" "$SERIAL" || { echo "qemu-smoke: boot marker missing" >&2; exit 1; }
+grep -q "$UI_MARKER" "$SERIAL" || { echo "qemu-smoke: UI-ready marker missing" >&2; exit 1; }
 grep -q "Kernel online" "$SERIAL" || { echo "qemu-smoke: kernel-online marker missing" >&2; exit 1; }
-grep -q "zenov> " "$SERIAL" || { echo "qemu-smoke: shell prompt missing" >&2; exit 1; }
+grep -q "$PROMPT" "$SERIAL" || { echo "qemu-smoke: shell prompt missing" >&2; exit 1; }
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: framebuffer screenshot missing" >&2; exit 1; }
 printf 'qemu-smoke: OK serial=%s screenshot=%s\n' "$SERIAL" "$SCREENSHOT"
