@@ -99,12 +99,13 @@ Unsupported syntax fails compilation. It is not silently ignored.
 6. Port shell and applications from the 16-bit compatibility profile to the
    64-bit kernel profile.
 
-## Licensing
-
-ZenovOS is licensed under MIT; see `LICENSE`. The FAT12
-loader is derived from MIT-licensed x16-PRos; see `THIRD_PARTY.md`.
-
-
 ## Repository separation
 
-ZenovOS is maintained independently from the Zenov compiler repository. See `REPOSITORY.md`.
+ZenovOS is maintained independently from the Zenov compiler repository. See
+`REPOSITORY.md`.
+
+## Licensing
+
+Original ZenovOS code is licensed under BSD-2-Clause; see `LICENSE`.
+The FAT12 loader contains MIT-licensed work derived from x16-PRos; see
+`THIRD_PARTY.md`.
