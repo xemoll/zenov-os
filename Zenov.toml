@@ -1,0 +1,14 @@
+[package]
+name = "zenov-os"
+version = "0.1.0"
+entry = "kernel/main.zv"
+
+[target]
+triple = "x86-zenov-bios-stage0"
+format = "flat-binary"
+filesystem = "fat12"
+boot = "bios"
+
+[language]
+name = "Zenov"
+extension = ".zv"
