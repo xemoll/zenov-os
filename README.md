@@ -5,6 +5,13 @@ and **freestanding C++17**. The deep 0.1.0 update keeps the version number
 unchanged while replacing the earlier Python-driven 16-bit prototype with a
 native protected-mode kernel and native build tools.
 
+## System preview
+
+This image was captured by the mandatory QEMU CI smoke test from the verified
+0.1.0 FAT12 image. It is not a mockup or concept render.
+
+![ZenovOS 0.1.0 running in QEMU](docs/screenshots/zenov-os-0.1.0.png)
+
 ## Current system surface
 
 - BIOS/FAT12 boot path with deterministic 1.44 MiB image generation.
@@ -18,6 +25,30 @@ native protected-mode kernel and native build tools.
 - read-only VFS generated from `kernel/main.zv`.
 - native C++ Zenov stage0 compiler, FAT12 builder and image verifier.
 - no Python source and no Python dependency.
+
+## Verified build
+
+GitHub Actions boots the generated image in QEMU and requires all of these
+markers on COM1 before accepting a build:
+
+```text
+ZENOVOS_BOOT_OK
+Kernel online. Protected-mode services ready.
+zenov> 
+```
+
+Verified 0.1.0 artifact sizes:
+
+```text
+BOOT.BIN       512 bytes
+KERNEL.BIN     12,369 bytes
+kernel.elf     19,916 bytes
+zenov-os.img   1,474,560 bytes
+```
+
+The CI suite also checks source encoding, absence of Python files, native Zenov
+stage0 self-tests, FAT12 structure, undefined ELF symbols and a byte-identical
+rebuild manifest.
 
 ## Built-in shell commands
 
