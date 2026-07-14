@@ -1,0 +1,40 @@
+name: ZenovOS CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and emulation dependencies
+        run: sudo apt-get update && sudo apt-get install -y binutils qemu-system-x86
+      - name: Run compiler tests
+        run: python3 tests/test_stage0_compiler.py
+      - name: Build and boot ZenovOS
+        run: bash build.sh --clean --test
+      - name: Verify deterministic rebuild
+        run: |
+          cp build/build-manifest.json /tmp/manifest-before.json
+          bash build.sh
+          diff -u /tmp/manifest-before.json build/build-manifest.json
+      - name: Upload verified artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-stage0
+          if-no-files-found: error
+          path: |
+            build/zenov-os.img
+            build/KERNEL.BIN
+            build/BOOT.BIN
+            build/build-manifest.json
+            build/qemu/serial.log
+            build/qemu/screenshot.ppm
