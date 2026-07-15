@@ -4,15 +4,16 @@ fn main() {
     shell_prompt("zenov> ");
     theme(7, 0);
 
-    boot_message("Loading ZenovOS 0.1.0");
-    boot_message("Preparing memory and interrupts");
-    boot_message("Starting system console");
+    boot_message("ZenovOS 0.1.0");
+    boot_message("i686 protected-mode kernel");
+    boot_message("VGA console and COM1 diagnostics");
 
-    shell_command("about", "ZenovOS is a small x86 operating system built with Zenov, assembler and C++.");
-    shell_command("license", "ZenovOS uses the BSD-2-Clause license. FAT12 loader lineage is documented separately.");
-    shell_command("status", "Ready. Keyboard, timer, serial console and read-only files are available.");
+    shell_command("about", "ZenovOS is a compact x86 operating system built with Zenov, assembler and freestanding C++.");
+    shell_command("license", "ZenovOS source is BSD-2-Clause. Third-party boot-loader lineage is listed in THIRD_PARTY.md.");
 
-    vfs_file("README", "ZenovOS 0.1.0\nType help to list commands.\n");
-    vfs_file("SYSTEM", "Target: i686-zenov-none\nBoot: BIOS FAT12\nKernel: freestanding C++17\nConfiguration: Zenov .zv\n");
-    vfs_file("COMMANDS", "help info ver uname cpu mem memmap uptime ticks date time echo calc color ls cat history bootlog clear reboot halt panic\n");
+    vfs_file("WELCOME", "Welcome to ZenovOS 0.1.0.\n\nPress F1 for commands, F2 for system details, F3 for files and F4 to return home.\nTab completes commands. Esc clears the current line.\n");
+    vfs_file("SYSTEM", "Product: ZenovOS 0.1.0\nTarget: i686-zenov-none\nBoot: legacy BIOS / FAT12\nKernel: 32-bit freestanding C++17\nConfiguration: Zenov .zv\nConsole: VGA text mode + COM1\n");
+    vfs_file("GUIDE", "Useful commands:\n  status      service overview\n  devices     detected interfaces\n  files       list built-in documents\n  open NAME   read a document\n  theme NAME  select midnight, graphite or amber\n");
+    vfs_file("COMMANDS", "home help info status devices disk cpu mem memmap uptime date time files open echo calc theme history bootlog clear reboot halt\n");
+    vfs_file("INSTALL", "ZenovOS 0.1.0 boots from its FAT12 image. The current release does not install to a hard disk. See INSTALL.txt in the release package for QEMU and virtual-machine instructions.\n");
 }
