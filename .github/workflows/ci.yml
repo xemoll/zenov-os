@@ -14,37 +14,56 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+
       - name: Install native toolchain and QEMU
-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86 zip unzip
+
       - name: Verify no Python source remains
         run: test -z "$(find . -name '*.py' -print)"
+
       - name: Verify source encoding
         run: |
           while IFS= read -r file; do
             iconv -f UTF-8 -t UTF-8 "$file" >/dev/null
-          done < <(find kernel tools boot -type f \( -name '*.cpp' -o -name '*.inc' -o -name '*.S' -o -name '*.zv' -o -name '*.ld' \) -print)
+          done < <(find kernel tools boot packaging -type f \( -name '*.cpp' -o -name '*.inc' -o -name '*.S' -o -name '*.zv' -o -name '*.ld' -o -name '*.sh' -o -name '*.txt' \) -print)
+
       - name: Run native checks and build
         run: |
           mkdir -p ci-logs
           set -o pipefail
           make clean check 2>&1 | tee ci-logs/native-build.log
-      - name: Boot protected-mode kernel in QEMU
+
+      - name: Boot and exercise console in QEMU
         run: make qemu
-      - name: Verify deterministic rebuild
+
+      - name: Verify deterministic installation package
+        run: |
+          bash tools/package_release.sh build/zenov-os.img dist package
+          bash tools/package_release.sh build/zenov-os.img dist-rebuild package-rebuild
+          cmp dist/ZenovOS-0.1.0-x86.img dist-rebuild/ZenovOS-0.1.0-x86.img
+          cmp dist/ZenovOS-0.1.0-x86.zip dist-rebuild/ZenovOS-0.1.0-x86.zip
+          cmp dist/SHA256SUMS.txt dist-rebuild/SHA256SUMS.txt
+
+      - name: Verify deterministic system rebuild
         run: make deterministic
-      - name: Inspect kernel format
+
+      - name: Inspect kernel and runtime evidence
         run: |
           readelf -h build/kernel.elf
           test "$(stat -c%s build/BOOT.BIN)" -eq 512
           test "$(stat -c%s build/KERNEL.BIN)" -le 61440
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
+          grep -q ZENOVOS_UI_READY build/qemu/serial.log
           grep -q 'Kernel online' build/qemu/serial.log
+          grep -q 'COMMAND REFERENCE' build/qemu/serial.log
+          grep -q 'SYSTEM STATUS' build/qemu/serial.log
           grep -q 'zenov> ' build/qemu/serial.log
-      - name: Upload verified 0.1.0 artifacts
+
+      - name: Upload verified 0.1.0 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zenov-os-0.1.0-deep
+          name: zenov-os-0.1.0-ci
           if-no-files-found: error
           path: |
             build/BOOT.BIN
@@ -55,4 +74,5 @@ jobs:
             build/build-manifest.json
             build/qemu/serial.log
             build/qemu/screenshot.ppm
+            dist/
             ci-logs/native-build.log
