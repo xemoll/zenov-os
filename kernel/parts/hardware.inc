@@ -35,7 +35,7 @@ void pic_remap() {
     out8(0x21, 0x04); io_wait(); out8(0xA1, 0x02); io_wait();
     out8(0x21, 0x01); io_wait(); out8(0xA1, 0x01); io_wait();
     (void)master_mask; (void)slave_mask;
-    out8(0x21, 0xFC);  // timer + keyboard
+    out8(0x21, 0xFC);
     out8(0xA1, 0xFF);
 }
 void pic_eoi(uint8_t irq) { if (irq >= 8) out8(0xA0, 0x20); out8(0x20, 0x20); }
@@ -48,6 +48,16 @@ void pit_init(uint32_t hz) {
 
 constexpr uint16_t key_up = 0x100;
 constexpr uint16_t key_down = 0x101;
+constexpr uint16_t key_left = 0x102;
+constexpr uint16_t key_right = 0x103;
+constexpr uint16_t key_home = 0x104;
+constexpr uint16_t key_end = 0x105;
+constexpr uint16_t key_delete = 0x106;
+constexpr uint16_t key_f1 = 0x110;
+constexpr uint16_t key_f2 = 0x111;
+constexpr uint16_t key_f3 = 0x112;
+constexpr uint16_t key_f4 = 0x113;
+constexpr uint16_t key_escape = 0x114;
 volatile uint16_t key_queue[128];
 volatile uint32_t key_head = 0, key_tail = 0;
 bool shift_pressed = false, caps_lock = false, extended_scancode = false;
@@ -93,9 +103,21 @@ void keyboard_scancode(uint8_t code) {
     if (code == 0x2A || code == 0x36) { shift_pressed = !released; extended_scancode = false; return; }
     if (released) { extended_scancode = false; return; }
     if (extended_scancode) {
-        if (code == 0x48) key_push(key_up); else if (code == 0x50) key_push(key_down);
-        extended_scancode = false; return;
+        if (code == 0x48) key_push(key_up);
+        else if (code == 0x50) key_push(key_down);
+        else if (code == 0x4B) key_push(key_left);
+        else if (code == 0x4D) key_push(key_right);
+        else if (code == 0x47) key_push(key_home);
+        else if (code == 0x4F) key_push(key_end);
+        else if (code == 0x53) key_push(key_delete);
+        extended_scancode = false;
+        return;
     }
+    if (code == 0x01) { key_push(key_escape); return; }
+    if (code == 0x3B) { key_push(key_f1); return; }
+    if (code == 0x3C) { key_push(key_f2); return; }
+    if (code == 0x3D) { key_push(key_f3); return; }
+    if (code == 0x3E) { key_push(key_f4); return; }
     if (code == 0x3A) { caps_lock = !caps_lock; return; }
     if (code == 0x1C) { key_push('\n'); return; }
     if (code == 0x0E) { key_push('\b'); return; }
@@ -114,21 +136,21 @@ struct InterruptFrame {
 [[noreturn]] void panic(const char* message, const InterruptFrame* frame = nullptr) {
     disable_interrupts();
     console::set_color(15, 4);
-    console::line("\n*** ZENOVOS KERNEL PANIC ***");
+    console::line("\nZENOVOS KERNEL PANIC");
     console::line(message);
     if (frame) {
         console::write("vector="); console::unsigned_dec(frame->vector);
         console::write(" error="); console::hex(frame->error);
         console::write(" eip="); console::hex(frame->eip); console::put('\n');
     }
-    console::line("System halted. Inspect COM1 output for diagnostics.");
+    console::line("System halted. Diagnostic output is available on COM1.");
     halt_forever();
 }
 
 extern "C" void interrupt_dispatch(InterruptFrame* frame) {
     if (frame->vector == 32) { ++timer_ticks; pic_eoi(0); return; }
     if (frame->vector == 33) { keyboard_scancode(in8(0x60)); pic_eoi(1); return; }
-    panic("unhandled CPU exception", frame);
+    panic("Unhandled CPU exception.", frame);
 }
 
 bool cpuid_available() {
@@ -159,4 +181,4 @@ Rtc rtc_read() {
 }
 void two_digits(uint8_t value) { console::put(static_cast<char>('0' + value / 10)); console::put(static_cast<char>('0' + value % 10)); }
 
-char history[8][80];
+char history[16][80];
