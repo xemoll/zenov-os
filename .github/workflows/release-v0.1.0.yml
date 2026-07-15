@@ -33,7 +33,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install native toolchain and QEMU
-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86 zip
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86 zip unzip
 
       - name: Verify native 0.1.0 build
         run: make clean test
@@ -45,46 +45,104 @@ jobs:
           mkdir -p dist package
           cp build/zenov-os.img dist/ZenovOS-0.1.0-x86.img
           cp dist/ZenovOS-0.1.0-x86.img package/
+
           cat > dist/INSTALL.txt <<'INSTALL'
-          ZenovOS 0.1.0
-          =================
+          ZenovOS 0.1.0 — installation and boot guide
+          =================================================
 
-          ZenovOS 0.1.0 is distributed as a bootable 1.44 MiB x86 floppy image.
-          It does not yet install itself to a hard disk.
+          ZenovOS 0.1.0 is a bootable 1.44 MiB x86 FAT12 image. This version
+          runs directly from the image and does not install itself to a hard disk.
 
-          QEMU
-          -----
+          QUICK START
+          -----------
+          1. Extract ZenovOS-0.1.0-x86.zip.
+          2. Install QEMU if it is not already available.
+          3. Run ./run-qemu.sh on Linux/macOS or run-qemu.cmd on Windows.
+
+          QEMU — MANUAL COMMAND
+          ---------------------
           qemu-system-i386 -drive file=ZenovOS-0.1.0-x86.img,format=raw,if=floppy -boot a -m 32M
 
-          Virtual machine
-          ---------------
-          Create a 32-bit x86 virtual machine, enable legacy BIOS boot, attach
-          ZenovOS-0.1.0-x86.img as the first floppy drive, then boot from it.
+          VIRTUALBOX
+          ----------
+          1. Create a new 32-bit "Other/Unknown" virtual machine.
+          2. Use legacy BIOS, one CPU and at least 32 MiB RAM.
+          3. Add a floppy controller and attach ZenovOS-0.1.0-x86.img.
+          4. Put the floppy device first in the boot order and start the VM.
 
-          Physical media
-          --------------
-          The image may be written to a 1.44 MiB floppy disk or used with firmware
-          that supports USB floppy emulation. Double-check the destination device.
+          PHYSICAL FLOPPY
+          ---------------
+          The image can be written to a real 1.44 MiB floppy. Check the destination
+          device carefully before writing; the command overwrites it completely.
 
           Linux example:
           sudo dd if=ZenovOS-0.1.0-x86.img of=/dev/fd0 bs=64K conv=fsync status=progress
 
-          Verification
-          ------------
+          VERIFY THE DOWNLOAD
+          -------------------
+          Linux/macOS:
           sha256sum -c SHA256SUMS.txt
+
+          Windows PowerShell:
+          Get-FileHash .\ZenovOS-0.1.0-x86.img -Algorithm SHA256
+          Get-FileHash .\ZenovOS-0.1.0-x86.zip -Algorithm SHA256
+
+          SYSTEM CONTROLS
+          ---------------
+          F1       command reference
+          F2       system details
+          F3       built-in files
+          F4       home dashboard
+          Tab      command completion
+          Esc      clear current input
+          Up/Down  command history
           INSTALL
+
+          cat > package/run-qemu.sh <<'SH'
+          #!/usr/bin/env sh
+          set -eu
+          base_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+          image="$base_dir/ZenovOS-0.1.0-x86.img"
+          command -v qemu-system-i386 >/dev/null 2>&1 || {
+            echo "qemu-system-i386 was not found. Install QEMU and try again." >&2
+            exit 1
+          }
+          exec qemu-system-i386 -drive "file=$image,format=raw,if=floppy" -boot a -m 32M
+          SH
+          chmod +x package/run-qemu.sh
+
+          cat > package/run-qemu.cmd <<'CMD'
+          @echo off
+          setlocal
+          set "IMAGE=%~dp0ZenovOS-0.1.0-x86.img"
+          where qemu-system-i386.exe >nul 2>nul
+          if errorlevel 1 (
+            echo qemu-system-i386.exe was not found. Install QEMU and add it to PATH.
+            exit /b 1
+          )
+          qemu-system-i386.exe -drive file="%IMAGE%",format=raw,if=floppy -boot a -m 32M
+          CMD
+
           cp dist/INSTALL.txt package/
+          TZ=UTC touch -t 202601010000 package/ZenovOS-0.1.0-x86.img package/INSTALL.txt package/run-qemu.sh package/run-qemu.cmd
           (
             cd package
-            zip -9 ../dist/ZenovOS-0.1.0-x86.zip ZenovOS-0.1.0-x86.img INSTALL.txt
+            zip -X -9 ../dist/ZenovOS-0.1.0-x86.zip \
+              ZenovOS-0.1.0-x86.img INSTALL.txt run-qemu.sh run-qemu.cmd
           )
           (
             cd dist
             sha256sum ZenovOS-0.1.0-x86.img ZenovOS-0.1.0-x86.zip > SHA256SUMS.txt
           )
+
           test "$(stat -c%s dist/ZenovOS-0.1.0-x86.img)" -eq 1474560
+          unzip -Z1 dist/ZenovOS-0.1.0-x86.zip | sort > /tmp/package-files.txt
+          printf '%s\n' INSTALL.txt ZenovOS-0.1.0-x86.img run-qemu.cmd run-qemu.sh | sort > /tmp/expected-files.txt
+          diff -u /tmp/expected-files.txt /tmp/package-files.txt
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
           grep -q ZENOVOS_UI_READY build/qemu/serial.log
+          grep -q 'COMMAND REFERENCE' build/qemu/serial.log
+          grep -q 'SYSTEM STATUS' build/qemu/serial.log
           grep -q 'zenov> ' build/qemu/serial.log
 
       - name: Point v0.1.0 tag to verified main
@@ -99,16 +157,19 @@ jobs:
           cat > /tmp/release-notes.md <<'NOTES'
           # ZenovOS 0.1.0
 
-          Bootable x86 system image for QEMU, virtual machines and compatible floppy media.
+          Bootable x86 system image for QEMU, VirtualBox and compatible floppy media.
 
-          ## Download
+          ## Recommended download
 
-          - `ZenovOS-0.1.0-x86.zip` — image and installation instructions
-          - `ZenovOS-0.1.0-x86.img` — raw bootable floppy image
-          - `INSTALL.txt` — setup instructions
+          - `ZenovOS-0.1.0-x86.zip` — boot image, installation guide and QEMU launchers for Linux/macOS and Windows
+
+          ## Other files
+
+          - `ZenovOS-0.1.0-x86.img` — raw bootable FAT12 image
+          - `INSTALL.txt` — setup and controls reference
           - `SHA256SUMS.txt` — download verification
 
-          ZenovOS 0.1.0 currently boots directly from the image. It does not yet include a hard-disk installer.
+          ZenovOS 0.1.0 boots directly from the image. It does not yet install to a hard disk.
           NOTES
 
       - name: Replace GitHub Release assets
@@ -162,7 +223,7 @@ jobs:
           - \`INSTALL.txt\`
           - \`SHA256SUMS.txt\`
 
-          Kernel symbols, maps, logs, manifests and screenshots remain internal CI evidence and are not published as end-user release downloads.
+          The ZIP contains the boot image, installation guide and QEMU launchers for Linux/macOS and Windows. Kernel symbols, maps, logs, manifests and screenshots remain internal CI evidence.
           STATUS
           git add docs/releases/v0.1.0.md
           git commit -m "docs: record v0.1.0 release publication [skip release]"
