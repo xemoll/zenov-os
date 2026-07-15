@@ -114,6 +114,11 @@ void write_at(uint32_t target_row, uint32_t target_column, const char* text, uin
     uint32_t x = target_column;
     while (*text && x < width) vga[target_row * width + x++] = styled_cell(*text++, foreground, background);
 }
+uint32_t decimal_digits(uint32_t value) {
+    uint32_t digits = 1;
+    while (value >= 10) { value /= 10; ++digits; }
+    return digits;
+}
 void write_uint_at(uint32_t target_row, uint32_t target_column, uint32_t value, uint8_t foreground, uint8_t background) {
     char buffer[11]; uint32_t count = 0;
     do { buffer[count++] = static_cast<char>('0' + value % 10); value /= 10; } while (value && count < sizeof(buffer));
@@ -137,9 +142,10 @@ void refresh_status() {
     write_at(1, 1, "SESSION  LOCAL", palette.body_fg, palette.body_bg);
     write_at(1, 31, "i686 / protected", palette.muted, palette.body_bg);
     write_at(1, 61, "READY", palette.good, palette.body_bg);
-    write_at(1, 69, "UP", palette.muted, palette.body_bg);
-    write_uint_at(1, 72, timer_ticks / 100U, palette.body_fg, palette.body_bg);
-    write_at(1, 78, "s", palette.muted, palette.body_bg);
+    const uint32_t uptime = timer_ticks / 100U;
+    write_at(1, 68, "UP", palette.muted, palette.body_bg);
+    write_uint_at(1, 71, uptime, palette.body_fg, palette.body_bg);
+    write_at(1, 71 + decimal_digits(uptime), "s", palette.muted, palette.body_bg);
 }
 void draw_chrome() {
     fill_row(0, ' ', palette.header_fg, palette.header_bg);
