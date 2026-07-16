@@ -83,7 +83,7 @@ controller_first() {
   wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
 
   local long_payload
-  long_payload="longinput$(printf 'a%.0s' {1..160})end511ok"
+  long_payload="$(printf 'a%.0s' {1..160})${LONG_INPUT_MARKER}"
   send_command "echo $long_payload"
   wait_for_serial "$serial" "$LONG_INPUT_MARKER" || { echo quit; return 1; }
 
