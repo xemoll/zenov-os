@@ -1,7 +1,7 @@
-# ZenovOS ZEX1 application ABI
+# ZenovOS 0.1.1 native application ABI
 
-ZEX1 is the first native executable format for ZenovOS 0.1.0. It is intentionally
-small, deterministic and independent from Windows PE and DOS MZ executables.
+ZenovOS 0.1.1 executes validated ZEX1 containers and static ELF32/i386 files in
+ring 3. Neither format provides Windows PE or DOS MZ compatibility.
 
 ## Execution model
 
@@ -10,16 +10,16 @@ small, deterministic and independent from Windows PE and DOS MZ executables.
 - code selector: `0x1B`
 - data and stack selector: `0x23`
 - linear user window: `0x00400000` through `0x004FFFFF`
-- segment-relative application address: `0x00000000` through `0x000FFFFF`
+- segment-relative address range: `0x00000000` through `0x000FFFFF`
 - initial stack pointer: `0x000FF000`
 - system-call gate: `INT 0x80`
-- one foreground process at a time in 0.1.0
+- memory pages: present, writable and user-accessible within the mapped window
+- scheduling: one foreground application at a time
 
-The user code and data descriptors have a 1 MiB byte-granular limit. Application
-pointers passed to the kernel are segment-relative offsets, not kernel linear
-addresses.
+Application pointers passed in registers are segment-relative offsets. The kernel
+validates each complete range before translating it to the linear user window.
 
-## Container header
+## ZEX1 container
 
 All fields are little-endian. The header is exactly 32 bytes.
 
@@ -39,51 +39,78 @@ struct ZexHeader {
 The loader rejects an incorrect magic, unsupported version, oversized image,
 out-of-range entry point, invalid stack request or checksum mismatch.
 
+## ELF32 profile
+
+The 0.1.1 ELF loader accepts a deliberately narrow profile:
+
+- ELF class 32;
+- little-endian;
+- `ET_EXEC`;
+- `EM_386`;
+- static image with at least one `PT_LOAD` segment;
+- segment virtual addresses relative to the 1 MiB user window;
+- no interpreter, dynamic linking or relocations at runtime;
+- every program-header and segment range validated before copying.
+
+The loader zeroes each `PT_LOAD` region between `p_filesz` and `p_memsz`. Files
+outside this profile are rejected.
+
 ## System calls
 
 System calls use `EAX` for the call number. Return values are written to `EAX`.
+`0xFFFFFFFF` represents failure unless stated otherwise.
 
 | EAX | Name | Inputs | Result |
 |---:|---|---|---|
 | 0 | `exit` | `EBX` = exit code | returns to the kernel shell |
-| 1 | `write_console` | `EBX` = buffer offset, `ECX` = byte count | bytes written or `0xFFFFFFFF` |
+| 1 | `write_console` | `EBX` = buffer offset, `ECX` = byte count | bytes written |
 | 2 | `get_ticks` | none | PIT ticks since boot |
+| 3 | `file_read` | `EBX` = path offset, `ECX` = output offset, `EDX` = capacity | bytes read |
+| 4 | `file_write` | `EBX` = path, `ECX` = data, `EDX` = size, `ESI` = append flag | bytes written |
+| 5 | `file_stat` | `EBX` = path, `ECX` = `UserFileInfo` output | `0` on success |
+| 6 | `system_version` | `EBX` = output, `ECX` = capacity | version string length |
+| 7 | `sync` | none | `0` after metadata flush |
 
-`write_console` validates the complete user buffer against the 1 MiB user
-segment before reading it.
+`file_stat` writes:
 
-## Application build
-
-The reference application is assembled and linked independently from the
-kernel:
-
-```bash
-as --32 user/hello.S -o build/hello-user.o
-ld -m elf_i386 -T user/linker.ld -o build/hello-user.elf build/hello-user.o
-objcopy -O binary build/hello-user.elf build/hello-user.bin
-build/zex-pack build/hello-user.bin build/HELLO.ZEX
+```c
+struct UserFileInfo {
+    uint32_t type;       // 1 file, 2 directory
+    uint32_t size;
+    uint32_t checksum;
+};
 ```
 
-The deterministic ZenovFS builder installs it as `/data/apps/hello.zex`.
-Inside ZenovOS it is launched with:
+Paths are null-terminated strings of at most 95 bytes. File calls operate on the
+mounted `/data` ZenovFS volume. The application never receives raw ATA access.
+
+## Reference applications
+
+`HELLO.ZEX` validates the compact container and console syscall:
 
 ```text
 run HELLO
 ```
 
-## Current limitations
+`FILEIO.ELF` validates the ELF loader plus version, write, stat, read and sync
+calls. It creates `/data/apps/userio.txt`, verifies the payload and exits cleanly:
 
-ZEX1 in version 0.1.0 does not yet provide paging, multiple simultaneous
-processes, signals, dynamic linking, shared libraries, file descriptors or
-process spawning. Those features require a later ABI revision rather than an
-undocumented change to ZEX1.
+```text
+run FILEIO.ELF
+```
+
+## Stability and limitations
+
+The syscall numbers above form the 0.1.1 ABI. Future incompatible changes require
+an explicit ABI revision.
+
+Version 0.1.1 still lacks preemptive multitasking, per-process page directories,
+file descriptors, process spawning, signals, shared libraries and dynamic
+linking. Paging now enforces kernel/user page permissions, while the GDT retains
+the 1 MiB application boundary.
 
 ## `.exe` compatibility
 
-A filename ending in `.exe` does not make a program compatible. ZenovOS does
-not currently implement either:
-
-- the DOS MZ execution environment and DOS interrupt services; or
-- the Windows PE loader and Win32/NT APIs.
-
-Such files are rejected rather than executed in ring 0.
+A filename ending in `.exe` does not make a program compatible. ZenovOS does not
+implement the DOS MZ environment or the Windows PE/Win32 environment. Unsupported
+files are rejected rather than executed in kernel mode.
