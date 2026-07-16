@@ -22,7 +22,12 @@ SECTIONS
     *(.bss*)
     __bss_end = .;
   } :data
-  .stack (NOLOAD) : ALIGN(16) {
+  .kernel_stack (NOLOAD) : ALIGN(16) {
+    __kernel_stack_bottom = .;
+    . += 16384;
+    __kernel_stack_top = .;
+  } :data
+  .ring3_kernel_stack (NOLOAD) : ALIGN(16) {
     __stack_bottom = .;
     . += 16384;
     __stack_top = .;
