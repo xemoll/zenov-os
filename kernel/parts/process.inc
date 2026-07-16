@@ -117,16 +117,18 @@ bool run(const char* input) {
     if (!input || !*input) return false;
     if (string_starts_with(input, "/data") || input[0] == '/') {
         if (!storage::path_copy(requested, input, sizeof(requested))) return false;
-    } else if (string_starts_with(input, "apps/")) {
+    } else if (string_starts_with(input, "apps/") || string_starts_with(input, "APPS/")) {
         if (!storage::path_copy(requested, "/data/", sizeof(requested)) ||
             !storage::path_append(requested, input, sizeof(requested))) return false;
+        lower_in_place(requested);
     } else {
         if (!storage::path_copy(requested, "/data/apps/", sizeof(requested)) ||
             !storage::path_append(requested, input, sizeof(requested))) return false;
+        lower_in_place(requested);
         const uint32_t length = static_cast<uint32_t>(string_length(requested));
         bool has_extension = false;
         for (uint32_t i = 0; i < length; ++i) if (requested[i] == '.') has_extension = true;
-        if (!has_extension && !storage::path_append(requested, ".ZEX", sizeof(requested))) return false;
+        if (!has_extension && !storage::path_append(requested, ".zex", sizeof(requested))) return false;
     }
 
     uint32_t file_size = 0;
