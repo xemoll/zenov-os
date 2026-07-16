@@ -63,6 +63,7 @@ syscall_entry:
     mov gs, ax
     mov ss, ax
     mov esp, [saved_kernel_esp]
+    sti
     ret
 
 .section .data,"aw"
