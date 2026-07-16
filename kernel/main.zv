@@ -1,20 +1,6 @@
 fn main() {
-    system_name("ZenovOS");
-    system_version("0.1.1");
-    shell_prompt("zenov> ");
-    theme(7, 0);
-
-    boot_message("ZenovOS 0.1.1");
-    boot_message("i686 protected mode with paging and ring-3 applications");
-    boot_message("FAT12 boot, ATA PIO storage and ZenovFS1");
-
-    shell_command("about", "ZenovOS is a compact 32-bit x86 operating system with paging, persistent storage and isolated native applications.");
-    shell_command("license", "ZenovOS source is BSD-2-Clause. Third-party boot-loader lineage is listed in THIRD_PARTY.md.");
-
-    vfs_file("WELCOME", "Welcome to ZenovOS 0.1.1.\n\nThe kernel now enables paging and tracks physical memory frames. Persistent files are stored on /data using ZenovFS1.\nRun HELLO starts the ZEX1 application. Run FILEIO.ELF exercises the ELF32 loader and file syscalls.\nPress F1 for the complete command reference.\n");
-    vfs_file("SYSTEM", "Product: ZenovOS 0.1.1\nTarget: i686-zenov-none\nBoot: legacy BIOS / FAT12\nMemory: E820 PMM + 4 KiB paging\nData: ATA PIO / ZenovFS1\nKernel: ring 0, freestanding C++17 and assembler\nApplications: ZEX1 and ELF32, ring 3, INT 0x80\nConfiguration: Zenov .zv\nConsole: VGA text mode + COM1\n");
-    vfs_file("STORAGE", "Persistent commands:\n  mount, df, fsck, sync, pwd, cd, ls\n  mkdir, touch, write, append\n  cat, stat, cp, mv, rm\n\nEvery file is checksummed and remains on the data image after reboot.\n");
-    vfs_file("APPLICATIONS", "Native ZenovOS programs can use ZEX1 or validated static ELF32.\n\nCommands:\n  apps          list installed applications\n  run HELLO     launch the ZEX1 sample\n  run FILEIO.ELF launch the ELF32 file-syscall sample\n\nWindows PE and DOS MZ .exe files are not compatible yet.\n");
-    vfs_file("COMMANDS", "home help info status devices disk mount df fsck sync pmm vm pwd cd ls files cat mkdir touch write append rm cp mv stat apps run cpu mem memmap uptime date time echo calc theme history bootlog clear reboot halt\n");
-    vfs_file("INSTALL", "ZenovOS 0.1.1 boots from the FAT12 system image and mounts a separate writable ATA data image. Keep both images together when using QEMU or VirtualBox. The release does not yet install itself to a physical hard disk.\n");
+    include("config/system.zv");
+    include("config/boot.zv");
+    include("config/shell.zv");
+    include("config/files.zv");
 }
