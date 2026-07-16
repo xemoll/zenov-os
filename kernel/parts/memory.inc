@@ -15,6 +15,9 @@ void mark_free(uint32_t frame) { frame_bitmap[frame / 32U] &= ~(1U << (frame % 3
 bool is_used(uint32_t frame) { return (frame_bitmap[frame / 32U] & (1U << (frame % 32U))) != 0; }
 uint32_t align_up(uint32_t value) { return (value + page_size - 1U) & ~(page_size - 1U); }
 uint32_t align_down(uint32_t value) { return value & ~(page_size - 1U); }
+uint32_t free_bytes() { return available_frames * page_size; }
+uint32_t allocated_bytes() { return allocated_frames * page_size; }
+uint32_t managed_bytes() { return managed_limit; }
 
 void release_usable_range(uint32_t start, uint32_t end) {
     if (end <= start || start >= managed_limit) return;
@@ -82,18 +85,14 @@ void init() {
     }
     const uint32_t before = available_frames;
     const uintptr_t test_frame = allocate_frame();
-    if (!test_frame || allocated_frames != 1 || available_frames + 1U != before || !free_frame(test_frame) ||
-        allocated_frames != 0 || available_frames != before) {
+    if (!test_frame || allocated_bytes() != page_size || available_frames + 1U != before || !free_frame(test_frame) ||
+        allocated_bytes() != 0 || available_frames != before) {
         initialized = false;
         serial::line("PMM_SELFTEST_FAILED");
         return;
     }
     serial::line("PMM_OK");
 }
-
-uint32_t free_bytes() { return available_frames * page_size; }
-uint32_t allocated_bytes() { return allocated_frames * page_size; }
-uint32_t managed_bytes() { return managed_limit; }
 }
 
 namespace paging {
