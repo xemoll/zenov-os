@@ -1,7 +1,7 @@
 @echo off
 setlocal
-set "BOOT_IMAGE=%~dp0ZenovOS-0.1.0-x86.img"
-set "DATA_IMAGE=%~dp0ZenovOS-0.1.0-data.img"
+set "BOOT_IMAGE=%~dp0ZenovOS-0.1.1-x86.img"
+set "DATA_IMAGE=%~dp0ZenovOS-0.1.1-data.img"
 
 where qemu-system-i386.exe >nul 2>nul
 if errorlevel 1 (
