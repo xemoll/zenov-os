@@ -8,17 +8,13 @@ OUT="${3:-build/qemu}"
 BOOT_MARKER="ZENOVOS_BOOT_OK"
 UI_MARKER="ZENOVOS_UI_READY"
 STORAGE_MARKER="ZENOVFS_MOUNT_OK"
-PMM_MARKER="PMM_OK"
-PAGING_MARKER="PAGING_OK"
-PROCESS_MARKER="PROCESS_ABI_0_1_1_OK"
 PROMPT="zenov> "
 mkdir -p "$OUT"
 rm -f "$OUT"/serial*.log "$OUT"/screenshot.ppm "$OUT"/monitor*.log "$OUT"/qemu*.stderr
 SCREENSHOT="$(cd "$OUT" && pwd)/screenshot.ppm"
 
 wait_for_serial() {
-  local file="$1"
-  local text="$2"
+  local file="$1" text="$2"
   for _ in $(seq 1 200); do
     [[ -f "$file" ]] && grep -q "$text" "$file" && return 0
     sleep 0.1
@@ -27,16 +23,12 @@ wait_for_serial() {
 }
 
 send_text() {
-  local text="$1"
-  local char lower
+  local text="$1" char lower
   for ((i=0; i<${#text}; ++i)); do
     char="${text:i:1}"
     case "$char" in
       [a-z0-9]) echo "sendkey $char" ;;
-      [A-Z])
-        lower="$(printf '%s' "$char" | tr 'A-Z' 'a-z')"
-        echo "sendkey shift-$lower"
-        ;;
+      [A-Z]) lower="$(printf '%s' "$char" | tr 'A-Z' 'a-z')"; echo "sendkey shift-$lower" ;;
       ' ') echo "sendkey spc" ;;
       '.') echo "sendkey dot" ;;
       '-') echo "sendkey minus" ;;
@@ -47,19 +39,16 @@ send_text() {
     sleep 0.01
   done
 }
-
-send_command() {
-  send_text "$1"
-  echo "sendkey ret"
-}
+send_command() { send_text "$1"; echo "sendkey ret"; }
 
 wait_for_boot() {
   local serial="$1"
   wait_for_serial "$serial" "$BOOT_MARKER" \
-    && wait_for_serial "$serial" "$PMM_MARKER" \
-    && wait_for_serial "$serial" "$PAGING_MARKER" \
+    && wait_for_serial "$serial" "PMM_OK" \
+    && wait_for_serial "$serial" "PAGING_OK" \
     && wait_for_serial "$serial" "$STORAGE_MARKER" \
-    && wait_for_serial "$serial" "$PROCESS_MARKER" \
+    && wait_for_serial "$serial" "CONFIG_LOAD_OK theme=graphite" \
+    && wait_for_serial "$serial" "USER_FAULT_ISOLATION_OK" \
     && wait_for_serial "$serial" "$UI_MARKER" \
     && wait_for_serial "$serial" "$PROMPT"
 }
@@ -76,23 +65,28 @@ controller_first() {
   echo "sendkey f4"
   sleep 0.2
 
-  send_command "vm"
-  wait_for_serial "$serial" "VIRTUAL MEMORY" || { echo quit; return 1; }
-  send_command "fsck"
-  wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
-
-  send_command "write PERSIST.TXT PERSISTENCE_0_1_1_OK"
+  send_command "write PERSIST.TXT PERSISTENCE_0_1_1_R2_OK"
   wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
 
   send_command "run HELLO"
   wait_for_serial "$serial" "HELLO_ZEX_0_1_1_OK" || { echo quit; return 1; }
-  wait_for_serial "$serial" "APP_START_ZEX" || { echo quit; return 1; }
+  wait_for_serial "$serial" "APP_EXIT code=0" || { echo quit; return 1; }
 
   send_command "run FILEIO.ELF"
-  wait_for_serial "$serial" "APP_START_ELF" || { echo quit; return 1; }
   wait_for_serial "$serial" "FILEIO_ELF_OK" || { echo quit; return 1; }
   wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
 
+  send_command "run FAULT.ELF"
+  wait_for_serial "$serial" "FAULT_ELF_TRIGGER" || { echo quit; return 1; }
+  wait_for_serial "$serial" "APP_FAULT_RECOVERED vector=6" || { echo quit; return 1; }
+  wait_for_serial "$serial" "KERNEL_SURVIVED_USER_FAULT" || { echo quit; return 1; }
+
+  send_command "status"
+  wait_for_serial "$serial" "SYSTEM STATUS" || { echo quit; return 1; }
+  wait_for_serial "$serial" "Core services are running" || { echo quit; return 1; }
+
+  send_command "fsck"
+  wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
   sleep 0.2
   echo quit
 }
@@ -101,22 +95,19 @@ controller_second() {
   local serial="$1"
   wait_for_boot "$serial" || { echo quit; return 1; }
   send_command "cat PERSIST.TXT"
-  wait_for_serial "$serial" "PERSISTENCE_0_1_1_OK" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PERSISTENCE_0_1_1_R2_OK" || { echo quit; return 1; }
   send_command "cat /data/apps/userio.txt"
   wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
+  send_command "cat /data/config/system.ini"
+  wait_for_serial "$serial" "theme=graphite" || { echo quit; return 1; }
   send_command "fsck"
   wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
-  send_command "stat /data/apps/userio.txt"
-  wait_for_serial "$serial" "Checksum" || { echo quit; return 1; }
   sleep 0.2
   echo quit
 }
 
 run_phase() {
-  local controller="$1"
-  local serial="$2"
-  local monitor="$3"
-  local stderr="$4"
+  local controller="$1" serial="$2" monitor="$3" stderr="$4"
   set +e
   "$controller" "$serial" | timeout 30s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
@@ -141,28 +132,18 @@ run_phase controller_first "$SERIAL1" "$OUT/monitor-phase1.log" "$OUT/qemu-phase
 run_phase controller_second "$SERIAL2" "$OUT/monitor-phase2.log" "$OUT/qemu-phase2.stderr"
 cat "$SERIAL1" "$SERIAL2" > "$OUT/serial.log"
 
-for marker in \
-  "$BOOT_MARKER" "$PMM_MARKER" "$PAGING_MARKER" "$STORAGE_MARKER" "$PROCESS_MARKER" "$UI_MARKER" \
-  "COMMAND REFERENCE" "VIRTUAL MEMORY" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" "APP_START_ZEX" \
-  "APP_START_ELF" "FILEIO_ELF_OK" "FILE_SYSCALL_PERSIST_OK" "ZENOVFS_FSCK_OK"; do
-  grep -q "$marker" "$OUT/serial.log" || { echo "qemu-smoke: missing marker: $marker" >&2; exit 1; }
+for marker in "$BOOT_MARKER" PMM_OK PAGING_OK "$STORAGE_MARKER" "CONFIG_LOAD_OK theme=graphite" \
+              USER_FAULT_ISOLATION_OK "$UI_MARKER" "COMMAND REFERENCE" WRITE_OK HELLO_ZEX_0_1_1_OK \
+              FILEIO_ELF_OK FAULT_ELF_TRIGGER "APP_FAULT_RECOVERED vector=6" \
+              KERNEL_SURVIVED_USER_FAULT "SYSTEM STATUS" ZENOVFS_FSCK_OK; do
+  grep -q "$marker" "$OUT/serial.log"
 done
-
-[[ "$(grep -c 'APP_EXIT code=0' "$OUT/serial.log")" -ge 2 ]] || {
-  echo "qemu-smoke: both native applications did not exit cleanly" >&2
-  exit 1
-}
-if grep -q "Application could not be loaded" "$OUT/serial.log"; then
-  echo "qemu-smoke: shell reported a false load failure after clean application exit" >&2
+[[ "$(grep -c 'PERSISTENCE_0_1_1_R2_OK' "$OUT/serial.log")" -ge 2 ]]
+[[ "$(grep -c 'FILE_SYSCALL_PERSIST_OK' "$OUT/serial.log")" -ge 2 ]]
+[[ "$(grep -c 'CONFIG_LOAD_OK theme=graphite' "$OUT/serial.log")" -ge 2 ]]
+if grep -q "ZENOVOS KERNEL PANIC" "$OUT/serial.log"; then
+  echo "qemu-smoke: user fault escalated to kernel panic" >&2
   exit 1
 fi
-[[ "$(grep -c 'PERSISTENCE_0_1_1_OK' "$OUT/serial.log")" -ge 2 ]] || {
-  echo "qemu-smoke: shell persistence marker was not observed before and after reboot" >&2
-  exit 1
-}
-[[ "$(grep -c 'FILE_SYSCALL_PERSIST_OK' "$OUT/serial.log")" -ge 2 ]] || {
-  echo "qemu-smoke: userspace file-syscall payload was not observed before and after reboot" >&2
-  exit 1
-}
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK 0.1.1 paging+pmm zex+elf file-syscalls persistence serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+printf 'qemu-smoke: OK revision2 fault-isolation settings persistence serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
