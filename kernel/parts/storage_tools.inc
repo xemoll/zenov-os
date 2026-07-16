@@ -23,7 +23,11 @@ bool query(const char* input, FileInfo& info) {
 
 bool sync_metadata() {
     if (!zfs_mounted) return false;
-    if (!ata0.write_sector(0, reinterpret_cast<const uint8_t*>(&zfs_super))) return false;
+    ++zfs_super.generation;
+    if (!ata0.write_sector(0, reinterpret_cast<const uint8_t*>(&zfs_super))) {
+        --zfs_super.generation;
+        return false;
+    }
     const uint8_t* source = reinterpret_cast<const uint8_t*>(zfs_entries);
     for (uint32_t sector = 0; sector < zfs_super.entry_sectors; ++sector) {
         if (!ata0.write_sector(1U + sector, source + sector * sector_size)) return false;
@@ -32,11 +36,14 @@ bool sync_metadata() {
 }
 
 bool valid_stored_path(const char* path) {
-    if (!path || path[0] != '/' || path[1] == 0 || string_length(path) >= sizeof(ZfsEntry::path)) return false;
-    for (uint32_t i = 0; path[i]; ++i) {
+    if (!path || path[0] != '/') return false;
+    uint32_t length = 0;
+    while (length < 48U && path[length]) ++length;
+    if (length < 2U || length >= 48U || path[length - 1U] == '/') return false;
+    for (uint32_t i = 0; i < length; ++i) {
         const char value = path[i];
-        if (value >= 'A' && value <= 'Z') return false;
-        if (value == '/' && path[i + 1] == '/') return false;
+        if (value < 32 || value > 126 || (value >= 'A' && value <= 'Z')) return false;
+        if (value == '/' && i + 1U < length && path[i + 1U] == '/') return false;
     }
     return true;
 }
