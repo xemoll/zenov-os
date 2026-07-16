@@ -10,7 +10,6 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 
 #include "parts/core.inc"
 #include "parts/hardware.inc"
-[[maybe_unused]] auto* const legacy_history_storage = history;
 #include "parts/memory.inc"
 #include "parts/storage.inc"
 #include "parts/storage_tools.inc"
