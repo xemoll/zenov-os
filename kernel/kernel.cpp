@@ -13,6 +13,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/memory.inc"
 #include "parts/storage.inc"
 #include "parts/storage_tools.inc"
+#include "parts/storage_guard.inc"
 #include "parts/settings.inc"
 #include "parts/process.inc"
 #include "parts/hardening.inc"
@@ -23,13 +24,14 @@ extern "C" void kernel_main() {
     serial::init();
     serial::line("ZENOVOS_BOOT_OK");
     for (uint32_t i = 0; i < zenov_generated::kBootMessageCount; ++i) serial::line(zenov_generated::kBootMessages[i]);
-    serial::line("Initializing IDT, physical memory, paging, storage, settings, TSS, PIC, PIT and keyboard IRQ...");
+    serial::line("Initializing IDT, physical memory, paging, storage verification, settings, TSS, PIC, PIT and keyboard IRQ...");
 
     console::set_color(zenov_generated::kForeground, zenov_generated::kBackground);
     idt_init();
     pmm::init();
     paging::init();
     storage::init();
+    storage::verify_boot_integrity();
     settings::init();
     process::init();
     pic_remap();
@@ -37,7 +39,7 @@ extern "C" void kernel_main() {
     enable_interrupts();
 
     serial::line("USER_FAULT_ISOLATION_OK");
-    serial::line("Kernel online. Paging, persistent settings, storage and isolated ring-3 services ready.");
+    serial::line("Kernel online. Paging, verified storage, persistent settings and isolated ring-3 services ready.");
     console::show_home();
     serial::line("ZENOVOS_UI_READY");
     shell_run();
