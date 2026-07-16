@@ -41,6 +41,7 @@ extern "C" void kernel_main() {
     serial::line("USER_FAULT_ISOLATION_OK");
     serial::line("Kernel online. Paging, verified storage, persistent settings and isolated ring-3 services ready.");
     console::show_home();
+    console::show_hardening_status();
     serial::line("ZENOVOS_UI_READY");
     shell_run();
 }
