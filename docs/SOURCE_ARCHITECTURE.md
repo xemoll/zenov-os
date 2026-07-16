@@ -15,11 +15,11 @@ Stage0 expands exact line-form `include("relative/path.zv");` directives before 
 
 The stage0 self-test compiles 200 static command declarations and verifies deterministic generation. Release 0.1.1 accepts up to 256 boot messages, 256 static commands and 256 generated VFS documents. Command responses are limited to 4 KiB, individual generated documents to 16 KiB and aggregate generated command/document text to 48 KiB. These are explicit kernel-image safety budgets, not accidental tiny-file limits.
 
-The interactive shell uses capacities emitted by Zenov configuration. The release profile sets a 512-byte line buffer (511 usable characters plus the terminator) and 128 history entries. Editing uses a horizontal viewport, so the command is not capped by the remaining columns of the 80-column VGA row.
+The interactive shell uses capacities emitted by Zenov configuration. The release profile sets a 512-byte line buffer (511 usable characters plus the terminator) and 128 history entries. Editing uses a horizontal viewport, so the command is not capped by the remaining columns of the 80-column VGA row. The keyboard IRQ ring contains 1024 events; this prevents the old 128-event queue from truncating rapid or automated long input before the editor sees it.
 
 ## Verification
 
-`make check` verifies generated capacities and runs the 200-declaration/include self-test. `tests/qemu_smoke.sh` enters an `echo` command longer than the legacy 80-byte buffer and requires a suffix marker located beyond that old boundary. The same run then verifies paging, ZenovFS, both application formats, file syscalls and persistence across a second QEMU boot.
+`make check` verifies generated capacities and runs the 200-declaration/include self-test. `tests/qemu_smoke.sh` enters an `echo` command longer than both the legacy 80-byte line buffer and the legacy 128-event keyboard queue, then requires a suffix marker located beyond those old boundaries. The same run verifies paging, ZenovFS, both application formats, file syscalls and persistence across a second QEMU boot.
 
 The build manifest hashes the composition root and every `kernel/config/*.zv` module and records:
 
