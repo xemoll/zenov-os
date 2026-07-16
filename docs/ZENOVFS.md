@@ -24,8 +24,9 @@ reboot.
 | reserved | 17–31 | future metadata and recovery records |
 | data slots | 32 onward | one fixed 64 KiB slot per entry |
 
-Every file record contains a used flag, type, normalized lowercase absolute path,
-file length and FNV-1a payload checksum.
+Every file record contains a used flag, type, normalized absolute path, file
+length and FNV-1a payload checksum. Names are case-sensitive, so `Notes.txt` and
+`NOTES.TXT` are distinct paths.
 
 ## Seeded 0.1.1 tree
 
@@ -75,7 +76,7 @@ The host-side `zenovfs-verify` tool validates:
 
 - exact image geometry and superblock fields;
 - entry-table capacity;
-- unique normalized lowercase paths;
+- unique printable absolute paths;
 - valid parent directories;
 - supported entry types;
 - slot bounds;
