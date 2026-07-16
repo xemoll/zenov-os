@@ -8,9 +8,17 @@
 .global saved_kernel_esp
 
 user_enter:
-    mov eax, [esp + 4]
-    mov edx, [esp + 8]
+    # user_enter is called through the i386 C ABI. The application may freely
+    # modify its registers, so preserve all callee-saved kernel registers before
+    # storing the return stack.
+    push ebp
+    push ebx
+    push esi
+    push edi
     mov [saved_kernel_esp], esp
+
+    mov eax, [esp + 20]
+    mov edx, [esp + 24]
 
     mov cx, 0x23
     mov ds, cx
@@ -63,6 +71,10 @@ syscall_entry:
     mov gs, ax
     mov ss, ax
     mov esp, [saved_kernel_esp]
+    pop edi
+    pop esi
+    pop ebx
+    pop ebp
     sti
     ret
 
