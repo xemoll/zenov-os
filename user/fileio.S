@@ -124,3 +124,5 @@ file_info:
     .skip 12
 file_buffer:
     .skip 128
+
+.section .note.GNU-stack,"",@progbits

@@ -22,3 +22,5 @@ message:
     .ascii "HELLO_ZEX_0_1_1_OK\n"
     .ascii "ZenovOS native ZEX1 application returned through INT 0x80.\n"
 message_end:
+
+.section .note.GNU-stack,"",@progbits
