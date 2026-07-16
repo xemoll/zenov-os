@@ -81,3 +81,5 @@ syscall_entry:
 .section .data,"aw"
 saved_kernel_esp:
     .long 0
+
+.section .note.GNU-stack,"",@progbits
