@@ -128,6 +128,10 @@ grep -q "COMMAND REFERENCE" "$OUT/serial.log"
 grep -q "WRITE_OK" "$OUT/serial.log"
 grep -q "HELLO_ZEX_OK" "$OUT/serial.log"
 grep -q "APP_EXIT code=0" "$OUT/serial.log"
+if grep -q "Application could not be loaded" "$OUT/serial.log"; then
+  echo "qemu-smoke: shell reported a false load failure after clean application exit" >&2
+  exit 1
+fi
 [[ "$(grep -c 'PERSISTENCE_OK' "$OUT/serial.log")" -ge 2 ]] || {
   echo "qemu-smoke: persistence marker was not observed before and after reboot" >&2
   exit 1
