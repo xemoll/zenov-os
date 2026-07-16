@@ -1,3 +1,5 @@
+extern "C" void syscall_entry();
+
 struct [[gnu::packed]] BootInfo { uint32_t magic; uint8_t drive; uint8_t e820_count; uint16_t reserved; };
 struct [[gnu::packed]] E820Entry {
     uint32_t base_low, base_high, length_low, length_high, type, attributes;
@@ -14,16 +16,17 @@ struct [[gnu::packed]] IdtEntry { uint16_t low; uint16_t selector; uint8_t zero;
 struct [[gnu::packed]] IdtPointer { uint16_t limit; uint32_t base; };
 IdtEntry idt[256];
 
-void idt_set(uint8_t vector, uintptr_t address) {
+void idt_set(uint8_t vector, uintptr_t address, uint8_t flags = 0x8E) {
     idt[vector].low = static_cast<uint16_t>(address & 0xFFFF);
     idt[vector].selector = 0x08;
     idt[vector].zero = 0;
-    idt[vector].flags = 0x8E;
+    idt[vector].flags = flags;
     idt[vector].high = static_cast<uint16_t>(address >> 16);
 }
 void idt_init() {
     memset(idt, 0, sizeof(idt));
     for (uint32_t i = 0; i < 34; ++i) idt_set(static_cast<uint8_t>(i), reinterpret_cast<uintptr_t>(isr_stub_table[i]));
+    idt_set(0x80, reinterpret_cast<uintptr_t>(syscall_entry), 0xEE);
     const IdtPointer pointer{static_cast<uint16_t>(sizeof(idt) - 1), reinterpret_cast<uint32_t>(&idt[0])};
     asm volatile("lidt %0" : : "m"(pointer));
 }
