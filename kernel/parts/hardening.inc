@@ -24,6 +24,14 @@ const char* exception_name(uint32_t vector) {
     }
 }
 
+namespace console {
+void show_hardening_status() {
+    write_at(19, 3, "Hardening", palette.muted, palette.body_bg);
+    write_at(19, 16, "R2: user faults contained / boot FS verified", palette.good, palette.body_bg);
+    write_at(0, 68, "0.1.1-r2", palette.header_fg, palette.header_bg);
+}
+}
+
 extern "C" uint32_t process_fault_dispatch(InterruptFrame* frame) {
     if (!frame || saved_kernel_esp == 0 || (frame->cs & 3U) != 3U) return 0;
 
@@ -39,8 +47,7 @@ extern "C" uint32_t process_fault_dispatch(InterruptFrame* frame) {
     char digits[11]; uint32_t count = 0, value = frame->vector;
     do { digits[count++] = static_cast<char>('0' + value % 10U); value /= 10U; } while (value && count < sizeof(digits));
     while (count) serial::put(digits[--count]);
-    serial::write(" error=");
-    serial::write("0x");
+    serial::write(" error=0x");
     static constexpr char hex_table[] = "0123456789ABCDEF";
     for (int shift = 28; shift >= 0; shift -= 4) serial::put(hex_table[(frame->error >> shift) & 0xF]);
     serial::write(" eip=0x");
