@@ -36,14 +36,14 @@ jobs:
       - name: Crash ring3 app, recover shell and verify reboot persistence
         run: make qemu
 
-      - name: Verify deterministic installation package
+      - name: Verify deterministic revision 2 installation package
         run: |
           bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
           bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist-rebuild package-rebuild
-          cmp dist/ZenovOS-0.1.1-x86.img dist-rebuild/ZenovOS-0.1.1-x86.img
-          cmp dist/ZenovOS-0.1.1-x86.zip dist-rebuild/ZenovOS-0.1.1-x86.zip
+          cmp dist/ZenovOS-0.1.1-r2-x86.img dist-rebuild/ZenovOS-0.1.1-r2-x86.img
+          cmp dist/ZenovOS-0.1.1-r2-x86.zip dist-rebuild/ZenovOS-0.1.1-r2-x86.zip
           cmp dist/SHA256SUMS.txt dist-rebuild/SHA256SUMS.txt
-          unzip -p dist/ZenovOS-0.1.1-x86.zip ZenovOS-0.1.1-data.img | cmp - build/zenov-data.img
+          unzip -p dist/ZenovOS-0.1.1-r2-x86.zip ZenovOS-0.1.1-r2-data.img | cmp - build/zenov-data.img
 
       - name: Verify deterministic system rebuild
         run: make deterministic
