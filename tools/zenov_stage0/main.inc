@@ -9,9 +9,11 @@ int main(int argc, char** argv) {
                       << "       zenov-stage0 --self-test\n";
             return 2;
         }
-        const Config config = compile_source(read_file(argv[1]));
+        const Config config = compile_file(argv[1]);
         write_file(argv[3], generate(config));
-        std::cout << "zenov-stage0: generated " << argv[3] << " from " << argv[1] << "\n";
+        std::cout << "zenov-stage0: generated " << argv[3] << " from " << argv[1]
+                  << " (includes enabled, shell=" << config.shell_line_capacity << "x"
+                  << config.shell_history_capacity << ")\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zenov-stage0: error: " << error.what() << "\n";
