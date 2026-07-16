@@ -1,9 +1,8 @@
 # ZenovFS1 persistent volume
 
-ZenovOS 0.1.1 boots from a read-only FAT12 floppy image and mounts a separate
-ATA PIO disk at `/data`. The separation keeps the verified boot path immutable
-while allowing user files, configuration and native applications to survive a
-reboot.
+ZenovOS 0.1.1 boots from a read-only FAT12 system image and mounts a separate
+ATA PIO disk at `/data`. Revision 2 adds a mandatory full integrity pass before
+persistent configuration or applications may consume the mounted volume.
 
 ## Device layout
 
@@ -21,20 +20,20 @@ reboot.
 |---|---:|---|
 | superblock | 0 | format, geometry, label and generation |
 | entry table | 1–16 | 128 fixed 64-byte file/directory records |
-| reserved | 17–31 | future metadata and recovery records |
+| reserved | 17–31 | future metadata/recovery records |
 | data slots | 32 onward | one fixed 64 KiB slot per entry |
 
 Every file record contains a used flag, type, normalized absolute path, file
-length and FNV-1a payload checksum. Names are case-sensitive, so `Notes.txt` and
-`NOTES.TXT` are distinct paths.
+length and FNV-1a payload checksum. Names are case-sensitive.
 
-## Seeded 0.1.1 tree
+## Seeded Revision 2 tree
 
 ```text
 /data
 ├── apps
 │   ├── hello.zex
-│   └── fileio.elf
+│   ├── fileio.elf
+│   └── fault.elf
 ├── config
 │   └── system.ini
 └── docs
@@ -42,62 +41,74 @@ length and FNV-1a payload checksum. Names are case-sensitive, so `Notes.txt` and
     └── release.txt
 ```
 
-`system.ini` is a persistent configuration seed rather than a compile-time file.
-The current kernel exposes it through normal VFS operations; automatic setting
-application will be expanded in a later release.
+`system.ini` is now active runtime configuration. The kernel reads its console
+`theme` after the boot-time filesystem check; the shipped image selects
+`graphite`. Invalid values or an unavailable volume fall back to compiled
+defaults and emit a serial diagnostic.
 
 ## Supported operations
 
 ```text
-mount
-df
-fsck
-sync
-pwd
-cd <path>
-ls [path]
-mkdir <path>
-touch <file>
-write <file> <text>
-append <file> <text>
-cat <file>
-stat <path>
-cp <source> <destination>
-mv <source> <destination>
-rm <path>
+mount  df  fsck  sync  pwd  cd  ls
+mkdir  touch  write  append  cat  stat
+cp  mv  rm
 ```
 
 Directories must be empty before removal. A directory containing descendants
 cannot currently be renamed. File writes are limited to 64 KiB per entry.
 
-## Integrity and persistence
+## Integrity model
 
 The host-side `zenovfs-verify` tool validates:
 
-- exact image geometry and superblock fields;
-- entry-table capacity;
-- unique printable absolute paths;
-- valid parent directories;
-- supported entry types;
-- slot bounds;
-- every file checksum;
-- required 0.1.1 seed files.
+- exact image size, magic, geometry and entry-table capacity;
+- unique printable absolute paths and valid parent directories;
+- supported entry types and file-slot bounds;
+- every complete file checksum;
+- the required Revision 2 seed tree.
 
-The kernel `fsck` command independently repeats metadata, parent, duplicate and
-payload-checksum validation through the ATA driver. `sync` writes the superblock
-and complete entry table and advances the generation counter.
+`make check` also mutates a copy of the image and requires the host verifier to
+reject it.
 
-CI tests two independent QEMU processes using the same runtime data disk. The
-first boot creates a shell file and runs `FILEIO.ELF`, which creates a second file
-through userspace syscalls. The second boot reads both files and performs another
-kernel `fsck`.
+The kernel performs the same class of checks through ATA PIO:
 
-The pristine release data image is copied before mutation, so deterministic
-build verification is not contaminated by the persistence test.
+1. `mount()` validates the superblock and loads the entry table.
+2. `verify_boot_integrity()` walks all used entries, validates metadata/parents,
+   reads every file and verifies every payload checksum.
+3. Only a successful pass emits `ZENOVFS_BOOT_FSCK_OK` and permits settings or
+   applications to use `/data`.
+4. A failure emits `ZENOVFS_BOOT_FSCK_FAILED`, clears the mounted state and boots
+   the console in degraded mode with built-in configuration.
+5. Manual `fsck` repeats the check while the volume is online.
+
+The degraded QEMU scenario leaves the superblock and metadata structurally valid
+but mutates a seeded payload byte. This proves that quarantine is caused by the
+full checksum pass rather than only by mount rejection.
+
+## Persistence verification
+
+CI uses the same runtime disk in two independent QEMU processes:
+
+- the shell writes `PERSIST.TXT`;
+- `FILEIO.ELF` creates `/data/apps/userio.txt` through syscalls;
+- QEMU exits completely;
+- a second QEMU process reads both payloads and runs `fsck` again.
+
+A third QEMU process uses the payload-corrupted disk and must still reach a
+working console with `/data` disabled. Any kernel panic fails the workflow.
+
+The pristine release image is never mutated by runtime tests; CI works on copies,
+so deterministic build comparison remains meaningful.
+
+## Sync behavior
+
+`sync` writes the superblock and full entry table and advances the generation
+counter. Individual file mutations also flush the affected entry after payload
+I/O. This is not a journal or a transactional filesystem.
 
 ## Current limitations
 
-ZenovFS1 remains a bounded recovery/development filesystem:
+ZenovFS1 remains a bounded development/recovery filesystem:
 
 - fixed file slots rather than dynamic extents;
 - no crash journal or atomic multi-entry transaction;

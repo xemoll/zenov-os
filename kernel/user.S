@@ -5,12 +5,12 @@
 
 .global user_enter
 .global syscall_entry
+.global user_return_to_kernel
 .global saved_kernel_esp
 
 user_enter:
-    # user_enter is called through the i386 C ABI. The application may freely
-    # modify its registers, so preserve all callee-saved kernel registers before
-    # storing the return stack.
+    # Called through the i386 C ABI. Applications may modify every register, so
+    # preserve the complete callee-saved kernel context before entering ring 3.
     push ebp
     push ebx
     push esi
@@ -54,7 +54,7 @@ syscall_entry:
     call syscall_dispatch
     add esp, 4
     test eax, eax
-    jnz .return_to_kernel
+    jnz user_return_to_kernel
 
     pop gs
     pop fs
@@ -63,14 +63,19 @@ syscall_entry:
     popad
     iretd
 
-.return_to_kernel:
+# Shared non-local return used by the exit syscall and by contained ring-3
+# exceptions. The interrupted userspace/TSS stack is intentionally abandoned;
+# the exact kernel C call frame saved by user_enter is restored instead.
+user_return_to_kernel:
     mov ax, 0x10
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov esp, [saved_kernel_esp]
+    mov edx, [saved_kernel_esp]
+    mov dword ptr [saved_kernel_esp], 0
+    mov esp, edx
     pop edi
     pop esi
     pop ebx

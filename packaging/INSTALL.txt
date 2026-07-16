@@ -1,18 +1,21 @@
-ZenovOS 0.1.1 — installation and boot guide
-=================================================
+ZenovOS 0.1.1 Revision 2 — installation and boot guide
+============================================================
 
-ZenovOS 0.1.1 uses two images:
+This is a large reliability update that keeps the operating-system version at
+0.1.1 while publishing a separate immutable release revision.
 
-- ZenovOS-0.1.1-x86.img   bootable 1.44 MiB FAT12 system image
-- ZenovOS-0.1.1-data.img  persistent 16 MiB ATA/ZenovFS data volume
+Required images:
 
-The system boots from the FAT12 image. User files, configuration and native
-applications are stored on the separate writable data image and survive a reboot.
+- ZenovOS-0.1.1-r2-x86.img   bootable 1.44 MiB FAT12 system image
+- ZenovOS-0.1.1-r2-data.img  persistent 16 MiB ATA/ZenovFS data volume
+
+The system boots from the FAT12 image. User files, runtime console settings and
+native applications are stored on the writable data image and survive a reboot.
 This release does not yet install itself to a physical hard disk.
 
 QUICK START
 -----------
-1. Extract ZenovOS-0.1.1-x86.zip.
+1. Extract ZenovOS-0.1.1-r2-x86.zip.
 2. Keep both IMG files in the same directory.
 3. Install QEMU if it is not already available.
 4. Run ./run-qemu.sh on Linux/macOS or run-qemu.cmd on Windows.
@@ -20,26 +23,41 @@ QUICK START
 QEMU — MANUAL COMMAND
 ---------------------
 qemu-system-i386 \
-  -drive file=ZenovOS-0.1.1-x86.img,format=raw,if=floppy \
-  -drive file=ZenovOS-0.1.1-data.img,format=raw,if=ide,index=0,media=disk \
+  -drive file=ZenovOS-0.1.1-r2-x86.img,format=raw,if=floppy \
+  -drive file=ZenovOS-0.1.1-r2-data.img,format=raw,if=ide,index=0,media=disk \
   -boot a -m 32M
 
 VIRTUALBOX
 ----------
 1. Create a new 32-bit "Other/Unknown" virtual machine.
 2. Use legacy BIOS, one CPU and at least 32 MiB RAM.
-3. Attach ZenovOS-0.1.1-x86.img to a floppy controller.
-4. Attach ZenovOS-0.1.1-data.img as an IDE hard disk.
+3. Attach ZenovOS-0.1.1-r2-x86.img to a floppy controller.
+4. Attach ZenovOS-0.1.1-r2-data.img as an IDE hard disk.
 5. Put the floppy device first in the boot order and start the VM.
 
-MEMORY AND SYSTEM DIAGNOSTICS
------------------------------
-ZenovOS 0.1.1 enables 4 KiB paging and an E820 physical frame allocator.
+MEMORY AND PROCESS ISOLATION
+----------------------------
+ZenovOS enables 4 KiB paging and an E820 physical frame allocator. Ring-3 CPU
+exceptions are now contained: the affected application is terminated, its
+vector/error/EIP are reported, and the kernel console remains available.
 
 pmm      physical frame counts and managed memory
 vm       CR0, CR3 and active kernel/user mappings
 mem      E820, heap and free-frame summary
 memmap   BIOS E820 regions
+
+To run the verified invalid-opcode containment test:
+
+run FAULT.ELF
+
+Expected markers include APP_FAULT_RECOVERED, KERNEL_SURVIVED_USER_FAULT and an
+application exit code of 134. A kernel panic is not expected.
+
+PERSISTENT SETTINGS
+-------------------
+The kernel reads /data/config/system.ini during boot. Revision 2 applies the
+configured VGA theme and emits CONFIG_LOAD_OK on COM1. The shipped configuration
+uses the graphite theme. The file remains a normal checksummed ZenovFS file.
 
 PERSISTENT STORAGE
 ------------------
@@ -62,7 +80,7 @@ mount
 
 NATIVE APPLICATIONS
 -------------------
-ZenovOS 0.1.1 supports two validated native formats:
+Supported validated native formats:
 
 - ZEX1, the compact deterministic ZenovOS executable container
 - static 32-bit little-endian i386 ELF executables within the user window
@@ -71,12 +89,11 @@ Included applications:
 
 run HELLO
 run FILEIO.ELF
+run FAULT.ELF
 
-FILEIO.ELF validates the 0.1.1 file syscall ABI by writing, statting, reading and
-checking /data/apps/userio.txt before returning to the shell.
-
-ZEX/ELF support does not provide Windows PE or DOS MZ compatibility. Arbitrary
-Windows or DOS .exe files are not supported.
+FILEIO.ELF validates file write/stat/read/content/sync syscalls. FAULT.ELF raises
+#UD deliberately and proves that a bad ring-3 application no longer halts the OS.
+Windows PE and DOS MZ .exe files remain unsupported.
 
 VERIFY THE DOWNLOAD
 -------------------
