@@ -108,11 +108,12 @@ std::vector<std::uint8_t> text_bytes(const std::string& text) {
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 3) {
-            std::cerr << "usage: zenovfs-builder <hello.zex> <output.img>\n";
+        if (argc != 4) {
+            std::cerr << "usage: zenovfs-builder <hello.zex> <fileio.elf> <output.img>\n";
             return 2;
         }
         const auto hello = read_all(argv[1]);
+        const auto fileio = read_all(argv[2]);
         std::vector<std::uint8_t> disk(static_cast<std::size_t>(kTotalSectors) * kSectorSize, 0);
         std::array<Entry, kEntryCount> entries{};
         Superblock super{{'Z', 'E', 'N', 'O', 'V', 'F', 'S', '1'}, 1u, kTotalSectors,
@@ -122,21 +123,31 @@ int main(int argc, char** argv) {
         add_directory(entries, 0, "/apps");
         add_directory(entries, 1, "/docs");
         add_file(disk, entries, 2, "/docs/readme.txt", text_bytes(
-            "ZenovFS persistent volume\n"
+            "ZenovFS persistent volume for ZenovOS 0.1.1\n"
             "Files written under /data survive a reboot.\n"
-            "Use ls, cat, write, append, mkdir, touch, rm, cp, mv and stat.\n"));
+            "Use fsck to verify every stored file checksum.\n"));
         add_file(disk, entries, 3, "/apps/hello.zex", hello);
+        add_file(disk, entries, 4, "/apps/fileio.elf", fileio);
+        add_file(disk, entries, 5, "/docs/release.txt", text_bytes(
+            "ZenovOS 0.1.1 enables paging, a physical frame allocator, ELF32 loading,\n"
+            "file syscalls, persistent configuration and deterministic two-boot tests.\n"));
+        add_directory(entries, 6, "/config");
+        add_file(disk, entries, 7, "/config/system.ini", text_bytes(
+            "[system]\nversion=0.1.1\n"
+            "[console]\ntheme=midnight\nprompt=zenov>\n"
+            "[storage]\nmount=/data\nfilesystem=ZenovFS1\n"));
 
         std::memcpy(disk.data(), &super, sizeof(super));
         std::memcpy(disk.data() + kSectorSize, entries.data(), sizeof(entries));
 
-        std::ofstream output(argv[2], std::ios::binary | std::ios::trunc);
+        std::ofstream output(argv[3], std::ios::binary | std::ios::trunc);
         if (!output) throw std::runtime_error("cannot open output image");
         output.write(reinterpret_cast<const char*>(disk.data()), static_cast<std::streamsize>(disk.size()));
         if (!output) throw std::runtime_error("cannot write output image");
 
-        std::cout << "zenovfs-builder: OK sectors=" << kTotalSectors
-                  << " entries=" << kEntryCount << " app=" << hello.size() << "\n";
+        std::cout << "zenovfs-builder: OK version=0.1.1 sectors=" << kTotalSectors
+                  << " entries=" << kEntryCount << " hello=" << hello.size()
+                  << " fileio=" << fileio.size() << "\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zenovfs-builder: " << error.what() << "\n";
