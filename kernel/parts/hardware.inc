@@ -61,19 +61,20 @@ constexpr uint16_t key_f2 = 0x111;
 constexpr uint16_t key_f3 = 0x112;
 constexpr uint16_t key_f4 = 0x113;
 constexpr uint16_t key_escape = 0x114;
-volatile uint16_t key_queue[128];
+constexpr uint32_t key_queue_capacity = 1024;
+volatile uint16_t key_queue[key_queue_capacity];
 volatile uint32_t key_head = 0, key_tail = 0;
 bool shift_pressed = false, caps_lock = false, extended_scancode = false;
 
 void key_push(uint16_t key) {
-    const uint32_t next = (key_head + 1) % 128;
+    const uint32_t next = (key_head + 1) % key_queue_capacity;
     if (next != key_tail) { key_queue[key_head] = key; key_head = next; }
 }
 uint16_t key_pop_blocking() {
     for (;;) {
         disable_interrupts();
         if (key_tail != key_head) {
-            const uint16_t key = key_queue[key_tail]; key_tail = (key_tail + 1) % 128; enable_interrupts(); return key;
+            const uint16_t key = key_queue[key_tail]; key_tail = (key_tail + 1) % key_queue_capacity; enable_interrupts(); return key;
         }
         asm volatile("sti; hlt; cli");
     }
@@ -182,6 +183,5 @@ Rtc rtc_read() {
     if ((status & 0x02) == 0 && (value.hour & 0x80)) value.hour = static_cast<uint8_t>(((value.hour & 0x7F) + 12) % 24);
     return value;
 }
-void two_digits(uint8_t value) { console::put(static_cast<char>('0' + value / 10)); console::put(static_cast<char>('0' + value % 10)); }
 
-char history[16][80];
+void two_digits(uint8_t value) { console::put(static_cast<char>('0' + value / 10)); console::put(static_cast<char>('0' + value % 10)); }

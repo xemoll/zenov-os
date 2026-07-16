@@ -1,0 +1,3 @@
+shell_command("about", "ZenovOS 0.1.1 is a compact 32-bit x86 operating system with paging, persistent storage, isolated native applications and a modular Zenov-owned configuration surface.");
+shell_command("license", "ZenovOS source is BSD-2-Clause. Third-party boot-loader lineage is listed in THIRD_PARTY.md.");
+shell_command("limits", "Interactive command capacity: 511 characters. History: 128 commands. Static Zenov configuration: recursive include modules, 256 commands, 256 VFS files, 4096-byte command responses and 16384-byte VFS documents.");

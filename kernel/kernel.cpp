@@ -14,8 +14,15 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/storage.inc"
 #include "parts/storage_tools.inc"
 #include "parts/process.inc"
-#include "parts/input.inc"
+#include "parts/input_v2.inc"
+#define history shell_history
+#define history_count shell_history_count
+#define shell_run shell_run_legacy_80
 #include "parts/commands.inc"
+#undef shell_run
+#undef history_count
+#undef history
+#include "parts/shell_runtime.inc"
 
 extern "C" void kernel_main() {
     serial::init();

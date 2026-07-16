@@ -11,6 +11,8 @@ KERNEL_FLAGS := -m32 -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
   -fno-pic -fno-pie -fno-threadsafe-statics -fno-unwind-tables \
   -fno-asynchronous-unwind-tables -nostdlib -I$(BUILD)
 KERNEL_PARTS := $(wildcard kernel/parts/*.inc)
+ZENOV_STAGE0_SRC := tools/zenov_stage0.cpp $(wildcard tools/zenov_stage0/*.inc)
+ZENOV_CONFIG_SRC := $(shell find kernel/config -type f -name '*.zv' -print 2>/dev/null | sort)
 
 .PHONY: all clean check test qemu deterministic inspect
 
@@ -19,8 +21,8 @@ all: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(BUILD)/build-manifest.json
 $(BUILD):
 	mkdir -p $(BUILD) $(BUILD)/generated
 
-$(BUILD)/zenov-stage0: tools/zenov_stage0.cpp | $(BUILD)
-	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+$(BUILD)/zenov-stage0: $(ZENOV_STAGE0_SRC) | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tools/zenov_stage0.cpp -o $@
 
 $(BUILD)/fat12-builder: tools/fat12_builder.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
@@ -37,8 +39,8 @@ $(BUILD)/zenovfs-builder: tools/zenovfs_builder.cpp | $(BUILD)
 $(BUILD)/zenovfs-verify: tools/zenovfs_verify.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
-$(BUILD)/generated/zenov_config.hpp: kernel/main.zv $(BUILD)/zenov-stage0 | $(BUILD)
-	$(BUILD)/zenov-stage0 $< -o $@
+$(BUILD)/generated/zenov_config.hpp: kernel/main.zv $(ZENOV_CONFIG_SRC) $(BUILD)/zenov-stage0 | $(BUILD)
+	$(BUILD)/zenov-stage0 kernel/main.zv -o $@
 
 $(BUILD)/boot.o: boot/boot.S | $(BUILD)
 	$(AS) --32 $< -o $@
@@ -104,7 +106,7 @@ $(BUILD)/zenov-data.img: $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF $(BUILD)/zenovfs
 	@test "$$(od -An -tc -N8 $@ | tr -d ' \n')" = "ZENOVFS1"
 	$(BUILD)/zenovfs-verify $@
 
-$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF kernel/main.zv kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS)
+$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS)
 	@boot_hash="$$(sha256sum $(BUILD)/BOOT.BIN | cut -d' ' -f1)"; \
 	 kernel_hash="$$(sha256sum $(BUILD)/KERNEL.BIN | cut -d' ' -f1)"; \
 	 elf_hash="$$(sha256sum $(BUILD)/kernel.elf | cut -d' ' -f1)"; \
@@ -112,10 +114,10 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(BU
 	 data_hash="$$(sha256sum $(BUILD)/zenov-data.img | cut -d' ' -f1)"; \
 	 zex_hash="$$(sha256sum $(BUILD)/HELLO.ZEX | cut -d' ' -f1)"; \
 	 fileio_hash="$$(sha256sum $(BUILD)/FILEIO.ELF | cut -d' ' -f1)"; \
-	 source_hash="$$(sha256sum kernel/main.zv | cut -d' ' -f1)"; \
+	 source_hash="$$(cat kernel/main.zv $(ZENOV_CONFIG_SRC) | sha256sum | cut -d' ' -f1)"; \
 	 printf '%s\n' \
 	 '{' \
-	 '  "format": "zenov-os-build-v4",' \
+	 '  "format": "zenov-os-build-v5",' \
 	 '  "product": "ZenovOS",' \
 	 '  "version": "0.1.1",' \
 	 '  "target": "i686-zenov-none",' \
@@ -123,6 +125,9 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(BU
 	 '  "memory": "E820 PMM / 4 KiB paging",' \
 	 '  "persistent_storage": "ATA PIO / ZenovFS1",' \
 	 '  "application_abi": "ZEX1 + ELF32 ring3 / int 0x80",' \
+	 '  "configuration": "modular Zenov includes",' \
+	 '  "shell_line_capacity": 512,' \
+	 '  "shell_history_capacity": 128,' \
 	 "  \"zenov_source_sha256\": \"$$source_hash\"," \
 	 '  "outputs": {' \
 	 "    \"BOOT.BIN\": {\"bytes\": $$(stat -c%s $(BUILD)/BOOT.BIN), \"sha256\": \"$$boot_hash\"}," \
@@ -140,11 +145,12 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify all
 	$(BUILD)/image-verify $(BUILD)/zenov-os.img
 	$(BUILD)/zenovfs-verify $(BUILD)/zenov-data.img
 	@! find . -path './build' -prune -o -name '*.py' -print | grep -q .
-	@grep -q 'system_version("0.1.1")' kernel/main.zv
+	@grep -q 'system_version("0.1.1")' kernel/config/system.zv
+	@grep -q 'kShellLineCapacity = 512' $(BUILD)/generated/zenov_config.hpp
+	@grep -q 'kShellHistoryCapacity = 128' $(BUILD)/generated/zenov_config.hpp
 	@grep -q '"version": "0.1.1"' $(BUILD)/build-manifest.json
-	@grep -q '"memory": "E820 PMM / 4 KiB paging"' $(BUILD)/build-manifest.json
-	@grep -q '"application_abi": "ZEX1 + ELF32 ring3 / int 0x80"' $(BUILD)/build-manifest.json
-	@echo 'static checks: OK (0.1.1 paging, persistent volume, ZEX1 and ELF32 built)'
+	@grep -q '"configuration": "modular Zenov includes"' $(BUILD)/build-manifest.json
+	@echo 'static checks: OK (0.1.1 modular configuration, scalable shell, paging, storage, ZEX1 and ELF32)'
 
 qemu: all
 	@mkdir -p $(BUILD)/qemu
