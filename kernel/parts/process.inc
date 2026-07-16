@@ -66,10 +66,10 @@ void init() {
     memset(&kernel_tss, 0, sizeof(kernel_tss));
     kernel_tss.esp0 = reinterpret_cast<uintptr_t>(&__stack_top);
     kernel_tss.ss0 = 0x10;
-    kernel_tss.iomap_base = sizeof(Tss);
+    kernel_tss.iomap_base = static_cast<uint16_t>(sizeof(Tss));
     descriptor_set_tss(reinterpret_cast<uintptr_t>(&kernel_tss), sizeof(Tss) - 1U);
     const uint16_t selector = 0x28;
-    asm volatile("ltr %0" : : "r"(selector));
+    asm volatile("ltr %w0" : : "r"(selector));
     application_buffer = static_cast<uint8_t*>(heap::allocate(64U * 1024U, 16));
     initialized = application_buffer != nullptr;
     serial::line(initialized ? "Process: ring-3 ZEX runtime online" : "Process: application buffer allocation failed");
@@ -116,15 +116,17 @@ bool run(const char* input) {
     char requested[48];
     if (!input || !*input) return false;
     if (string_starts_with(input, "/data") || input[0] == '/') {
-        if (!path_copy(requested, input, sizeof(requested))) return false;
+        if (!storage::path_copy(requested, input, sizeof(requested))) return false;
     } else if (string_starts_with(input, "apps/")) {
-        if (!path_copy(requested, "/data/", sizeof(requested)) || !path_append(requested, input, sizeof(requested))) return false;
+        if (!storage::path_copy(requested, "/data/", sizeof(requested)) ||
+            !storage::path_append(requested, input, sizeof(requested))) return false;
     } else {
-        if (!path_copy(requested, "/data/apps/", sizeof(requested)) || !path_append(requested, input, sizeof(requested))) return false;
+        if (!storage::path_copy(requested, "/data/apps/", sizeof(requested)) ||
+            !storage::path_append(requested, input, sizeof(requested))) return false;
         const uint32_t length = static_cast<uint32_t>(string_length(requested));
         bool has_extension = false;
         for (uint32_t i = 0; i < length; ++i) if (requested[i] == '.') has_extension = true;
-        if (!has_extension && !path_append(requested, ".ZEX", sizeof(requested))) return false;
+        if (!has_extension && !storage::path_append(requested, ".ZEX", sizeof(requested))) return false;
     }
 
     uint32_t file_size = 0;
