@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -64,7 +66,7 @@ std::vector<std::uint8_t> read_all(const std::filesystem::path& path) {
     }
     input.seekg(0, std::ios::beg);
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
-    if (!bytes.empty()) input.read(reinterpret_cast<char*>(bytes.data()), size);
+    if (!bytes.empty()) input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
     if (!input && !bytes.empty()) throw std::runtime_error("cannot read seed file");
     return bytes;
 }
@@ -117,13 +119,13 @@ int main(int argc, char** argv) {
                          kEntryCount, kEntrySectors, kDataStart, kSlotSectors, 1u,
                          {'Z', 'E', 'N', 'O', 'V', 'D', 'A', 'T', 'A', 0}, {0}};
 
-        add_directory(entries, 0, "/apps");
-        add_directory(entries, 1, "/docs");
-        add_file(disk, entries, 2, "/docs/README.TXT", text_bytes(
+        add_directory(entries, 0, "/APPS");
+        add_directory(entries, 1, "/DOCS");
+        add_file(disk, entries, 2, "/DOCS/README.TXT", text_bytes(
             "ZenovFS persistent volume\n"
             "Files written under /data survive a reboot.\n"
             "Use ls, cat, write, append, mkdir, touch, rm, cp, mv and stat.\n"));
-        add_file(disk, entries, 3, "/apps/HELLO.ZEX", hello);
+        add_file(disk, entries, 3, "/APPS/HELLO.ZEX", hello);
 
         std::memcpy(disk.data(), &super, sizeof(super));
         std::memcpy(disk.data() + kSectorSize, entries.data(), sizeof(entries));
