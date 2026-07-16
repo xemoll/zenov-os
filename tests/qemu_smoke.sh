@@ -13,6 +13,15 @@ SCREENSHOT="$(cd "$OUT" && pwd)/screenshot.ppm"
 SERIAL="$(cd "$OUT" && pwd)/serial.log"
 MARKER_FILE="$(cd "$OUT" && pwd)/marker.ok"
 
+wait_for_serial() {
+  local text="$1"
+  for _ in $(seq 1 100); do
+    [[ -f "$SERIAL" ]] && grep -q "$text" "$SERIAL" && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 controller() {
   for _ in $(seq 1 150); do
     if [[ -f "$SERIAL" ]] \
@@ -28,14 +37,31 @@ controller() {
     echo quit
     return 1
   fi
+
   sleep 0.4
   echo "screendump $SCREENSHOT"
-  sleep 0.5
+  sleep 0.4
+
+  # F1 must open the command reference without typed input.
+  echo "sendkey f1"
+  wait_for_serial "COMMAND REFERENCE" || { echo quit; return 1; }
+
+  # F4 returns to the home view. Then "sta<Tab>" must complete to status.
+  echo "sendkey f4"
+  sleep 0.2
+  echo "sendkey s"
+  echo "sendkey t"
+  echo "sendkey a"
+  echo "sendkey tab"
+  echo "sendkey ret"
+  wait_for_serial "SYSTEM STATUS" || { echo quit; return 1; }
+
+  sleep 0.2
   echo quit
 }
 
 set +e
-controller | timeout 18s "$QEMU" \
+controller | timeout 20s "$QEMU" \
   -drive "file=$IMAGE,format=raw,if=floppy" \
   -boot a -m 32M -display none \
   -serial "file:$SERIAL" \
@@ -54,5 +80,7 @@ grep -q "$BOOT_MARKER" "$SERIAL" || { echo "qemu-smoke: boot marker missing" >&2
 grep -q "$UI_MARKER" "$SERIAL" || { echo "qemu-smoke: UI-ready marker missing" >&2; exit 1; }
 grep -q "Kernel online" "$SERIAL" || { echo "qemu-smoke: kernel-online marker missing" >&2; exit 1; }
 grep -q "$PROMPT" "$SERIAL" || { echo "qemu-smoke: shell prompt missing" >&2; exit 1; }
+grep -q "COMMAND REFERENCE" "$SERIAL" || { echo "qemu-smoke: F1 shortcut failed" >&2; exit 1; }
+grep -q "SYSTEM STATUS" "$SERIAL" || { echo "qemu-smoke: Tab completion/status command failed" >&2; exit 1; }
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK serial=%s screenshot=%s\n' "$SERIAL" "$SCREENSHOT"
+printf 'qemu-smoke: OK boot/UI/keyboard/completion serial=%s screenshot=%s\n' "$SERIAL" "$SCREENSHOT"

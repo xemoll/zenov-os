@@ -1,0 +1,50 @@
+ZenovOS 0.1.0 — installation and boot guide
+=================================================
+
+ZenovOS 0.1.0 is a bootable 1.44 MiB x86 FAT12 image. This version
+runs directly from the image and does not install itself to a hard disk.
+
+QUICK START
+-----------
+1. Extract ZenovOS-0.1.0-x86.zip.
+2. Install QEMU if it is not already available.
+3. Run ./run-qemu.sh on Linux/macOS or run-qemu.cmd on Windows.
+
+QEMU — MANUAL COMMAND
+---------------------
+qemu-system-i386 -drive file=ZenovOS-0.1.0-x86.img,format=raw,if=floppy -boot a -m 32M
+
+VIRTUALBOX
+----------
+1. Create a new 32-bit "Other/Unknown" virtual machine.
+2. Use legacy BIOS, one CPU and at least 32 MiB RAM.
+3. Add a floppy controller and attach ZenovOS-0.1.0-x86.img.
+4. Put the floppy device first in the boot order and start the VM.
+
+PHYSICAL FLOPPY
+---------------
+The image can be written to a real 1.44 MiB floppy. Check the destination
+device carefully before writing; the command overwrites it completely.
+
+Linux example:
+sudo dd if=ZenovOS-0.1.0-x86.img of=/dev/fd0 bs=64K conv=fsync status=progress
+
+VERIFY THE DOWNLOAD
+-------------------
+Linux/macOS:
+sha256sum -c SHA256SUMS.txt
+
+Windows PowerShell:
+Get-FileHash .\ZenovOS-0.1.0-x86.img -Algorithm SHA256
+Get-FileHash .\ZenovOS-0.1.0-x86.zip -Algorithm SHA256
+
+SYSTEM CONTROLS
+---------------
+F1       command reference
+F2       system details
+F3       built-in files
+F4       home dashboard
+Tab      command completion
+Esc      clear current input
+Up/Down  command history
+Left/Right, Home/End and Delete edit the current command.

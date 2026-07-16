@@ -7,6 +7,7 @@ on:
       - ".github/workflows/release-v0.1.0.yml"
       - "boot/**"
       - "kernel/**"
+      - "packaging/**"
       - "tools/**"
       - "tests/**"
       - "Makefile"
@@ -33,58 +34,18 @@ jobs:
           fetch-depth: 0
 
       - name: Install native toolchain and QEMU
-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86 zip
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86 zip unzip
 
       - name: Verify native 0.1.0 build
         run: make clean test
 
-      - name: Prepare installation package
+      - name: Build deterministic installation package
         run: |
-          set -euo pipefail
-          rm -rf dist package
-          mkdir -p dist package
-          cp build/zenov-os.img dist/ZenovOS-0.1.0-x86.img
-          cp dist/ZenovOS-0.1.0-x86.img package/
-          cat > dist/INSTALL.txt <<'INSTALL'
-          ZenovOS 0.1.0
-          =================
-
-          ZenovOS 0.1.0 is distributed as a bootable 1.44 MiB x86 floppy image.
-          It does not yet install itself to a hard disk.
-
-          QEMU
-          -----
-          qemu-system-i386 -drive file=ZenovOS-0.1.0-x86.img,format=raw,if=floppy -boot a -m 32M
-
-          Virtual machine
-          ---------------
-          Create a 32-bit x86 virtual machine, enable legacy BIOS boot, attach
-          ZenovOS-0.1.0-x86.img as the first floppy drive, then boot from it.
-
-          Physical media
-          --------------
-          The image may be written to a 1.44 MiB floppy disk or used with firmware
-          that supports USB floppy emulation. Double-check the destination device.
-
-          Linux example:
-          sudo dd if=ZenovOS-0.1.0-x86.img of=/dev/fd0 bs=64K conv=fsync status=progress
-
-          Verification
-          ------------
-          sha256sum -c SHA256SUMS.txt
-          INSTALL
-          cp dist/INSTALL.txt package/
-          (
-            cd package
-            zip -9 ../dist/ZenovOS-0.1.0-x86.zip ZenovOS-0.1.0-x86.img INSTALL.txt
-          )
-          (
-            cd dist
-            sha256sum ZenovOS-0.1.0-x86.img ZenovOS-0.1.0-x86.zip > SHA256SUMS.txt
-          )
-          test "$(stat -c%s dist/ZenovOS-0.1.0-x86.img)" -eq 1474560
+          bash tools/package_release.sh build/zenov-os.img dist package
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
           grep -q ZENOVOS_UI_READY build/qemu/serial.log
+          grep -q 'COMMAND REFERENCE' build/qemu/serial.log
+          grep -q 'SYSTEM STATUS' build/qemu/serial.log
           grep -q 'zenov> ' build/qemu/serial.log
 
       - name: Point v0.1.0 tag to verified main
@@ -99,16 +60,19 @@ jobs:
           cat > /tmp/release-notes.md <<'NOTES'
           # ZenovOS 0.1.0
 
-          Bootable x86 system image for QEMU, virtual machines and compatible floppy media.
+          Bootable x86 system image for QEMU, VirtualBox and compatible floppy media.
 
-          ## Download
+          ## Recommended download
 
-          - `ZenovOS-0.1.0-x86.zip` — image and installation instructions
-          - `ZenovOS-0.1.0-x86.img` — raw bootable floppy image
-          - `INSTALL.txt` — setup instructions
+          - `ZenovOS-0.1.0-x86.zip` — boot image, installation guide and QEMU launchers for Linux/macOS and Windows
+
+          ## Other files
+
+          - `ZenovOS-0.1.0-x86.img` — raw bootable FAT12 image
+          - `INSTALL.txt` — setup and controls reference
           - `SHA256SUMS.txt` — download verification
 
-          ZenovOS 0.1.0 currently boots directly from the image. It does not yet include a hard-disk installer.
+          ZenovOS 0.1.0 boots directly from the image. It does not yet install to a hard disk.
           NOTES
 
       - name: Replace GitHub Release assets
@@ -162,7 +126,7 @@ jobs:
           - \`INSTALL.txt\`
           - \`SHA256SUMS.txt\`
 
-          Kernel symbols, maps, logs, manifests and screenshots remain internal CI evidence and are not published as end-user release downloads.
+          The ZIP contains the boot image, installation guide and QEMU launchers for Linux/macOS and Windows. Kernel symbols, maps, logs, manifests and screenshots remain internal CI evidence.
           STATUS
           git add docs/releases/v0.1.0.md
           git commit -m "docs: record v0.1.0 release publication [skip release]"
