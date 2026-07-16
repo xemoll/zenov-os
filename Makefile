@@ -117,7 +117,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(BU
 	 "    \"zenov-data.img\": {\"bytes\": $$(stat -c%s $(BUILD)/zenov-data.img), \"sha256\": \"$$data_hash\"}," \
 	 "    \"HELLO.ZEX\": {\"bytes\": $$(stat -c%s $(BUILD)/HELLO.ZEX), \"sha256\": \"$$zex_hash\"}" \
 	 '  }' \
-	 '}' > $@
+	 '  }' > $@
 
 check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify all
 	$(BUILD)/zenov-stage0 --self-test
@@ -129,7 +129,9 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify all
 	@echo 'static checks: OK (version pinned, persistent volume and ZEX ABI built)'
 
 qemu: all
-	bash tests/qemu_smoke.sh $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(BUILD)/qemu
+	@mkdir -p $(BUILD)/qemu
+	@cp $(BUILD)/zenov-data.img $(BUILD)/qemu/zenov-data-runtime.img
+	bash tests/qemu_smoke.sh $(BUILD)/zenov-os.img $(BUILD)/qemu/zenov-data-runtime.img $(BUILD)/qemu
 
 test: check qemu deterministic
 
