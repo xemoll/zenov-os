@@ -119,13 +119,13 @@ int main(int argc, char** argv) {
                          kEntryCount, kEntrySectors, kDataStart, kSlotSectors, 1u,
                          {'Z', 'E', 'N', 'O', 'V', 'D', 'A', 'T', 'A', 0}, {0}};
 
-        add_directory(entries, 0, "/APPS");
-        add_directory(entries, 1, "/DOCS");
-        add_file(disk, entries, 2, "/DOCS/README.TXT", text_bytes(
+        add_directory(entries, 0, "/apps");
+        add_directory(entries, 1, "/docs");
+        add_file(disk, entries, 2, "/docs/readme.txt", text_bytes(
             "ZenovFS persistent volume\n"
             "Files written under /data survive a reboot.\n"
             "Use ls, cat, write, append, mkdir, touch, rm, cp, mv and stat.\n"));
-        add_file(disk, entries, 3, "/APPS/HELLO.ZEX", hello);
+        add_file(disk, entries, 3, "/apps/hello.zex", hello);
 
         std::memcpy(disk.data(), &super, sizeof(super));
         std::memcpy(disk.data() + kSectorSize, entries.data(), sizeof(entries));
