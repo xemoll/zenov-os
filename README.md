@@ -11,9 +11,10 @@ The home screen presents current system state, keyboard shortcuts and common
 storage/application actions. The header reports execution mode, readiness and
 uptime. Boot diagnostics remain on COM1 instead of filling the workspace.
 
-![ZenovOS 0.1.0 system console](docs/screenshots/zenov-os-0.1.0.png)
+![ZenovOS 0.1.0 persistent storage and ZEX console](docs/screenshots/zenov-os-0.1.0-storage-zex.svg)
 
-The screenshot is captured from a verified QEMU build. It is not a mockup.
+The image embeds the real framebuffer capture produced by the verified QEMU
+run. It is not a mockup.
 
 Console controls:
 
@@ -172,10 +173,10 @@ PERSISTENCE_OK
 zenov>
 ```
 
-CI also checks UTF-8 source integrity, absence of Python, Zenov parser failure
-cases, FAT12 structure, undefined ELF symbols, ZEX header/checksum validation,
-a byte-identical system/data/application rebuild and two byte-identical
-installation-package builds.
+CI also rejects a false post-exit load error, checks UTF-8 source integrity,
+absence of Python, Zenov parser failure cases, FAT12 structure, undefined ELF
+symbols, ZEX header/checksum validation, a byte-identical system/data/application
+rebuild and two byte-identical installation-package builds.
 
 ## Build from source
 
