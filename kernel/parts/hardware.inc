@@ -135,6 +135,7 @@ struct InterruptFrame {
     uint32_t edi, esi, ebp, esp_dummy, ebx, edx, ecx, eax;
     uint32_t vector, error, eip, cs, eflags;
 };
+extern "C" uint32_t process_fault_dispatch(InterruptFrame* frame);
 
 [[noreturn]] void panic(const char* message, const InterruptFrame* frame = nullptr) {
     disable_interrupts();
@@ -144,15 +145,21 @@ struct InterruptFrame {
     if (frame) {
         console::write("vector="); console::unsigned_dec(frame->vector);
         console::write(" error="); console::hex(frame->error);
-        console::write(" eip="); console::hex(frame->eip); console::put('\n');
+        console::write(" eip="); console::hex(frame->eip);
+        if (frame->vector == 14) {
+            uintptr_t address; asm volatile("mov %%cr2, %0" : "=r"(address));
+            console::write(" cr2="); console::hex(address);
+        }
+        console::put('\n');
     }
     console::line("System halted. Diagnostic output is available on COM1.");
     halt_forever();
 }
 
-extern "C" void interrupt_dispatch(InterruptFrame* frame) {
-    if (frame->vector == 32) { ++timer_ticks; pic_eoi(0); return; }
-    if (frame->vector == 33) { keyboard_scancode(in8(0x60)); pic_eoi(1); return; }
+extern "C" uint32_t interrupt_dispatch(InterruptFrame* frame) {
+    if (frame->vector == 32) { ++timer_ticks; pic_eoi(0); return 0; }
+    if (frame->vector == 33) { keyboard_scancode(in8(0x60)); pic_eoi(1); return 0; }
+    if (frame->vector < 32 && (frame->cs & 3U) == 3U && process_fault_dispatch(frame)) return 1;
     panic("Unhandled CPU exception.", frame);
 }
 
