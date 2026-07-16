@@ -7,6 +7,7 @@ on:
       - ".github/workflows/release-v0.1.0.yml"
       - "boot/**"
       - "kernel/**"
+      - "user/**"
       - "packaging/**"
       - "tools/**"
       - "tests/**"
@@ -27,7 +28,7 @@ jobs:
   publish:
     if: github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip release]')
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,11 +42,15 @@ jobs:
 
       - name: Build deterministic installation package
         run: |
-          bash tools/package_release.sh build/zenov-os.img dist package
+          bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
+          grep -q ZENOVFS_MOUNT_OK build/qemu/serial.log
           grep -q ZENOVOS_UI_READY build/qemu/serial.log
           grep -q 'COMMAND REFERENCE' build/qemu/serial.log
-          grep -q 'SYSTEM STATUS' build/qemu/serial.log
+          grep -q 'WRITE_OK' build/qemu/serial.log
+          grep -q 'HELLO_ZEX_OK' build/qemu/serial.log
+          grep -q 'APP_EXIT code=0' build/qemu/serial.log
+          test "$(grep -c PERSISTENCE_OK build/qemu/serial.log)" -ge 2
           grep -q 'zenov> ' build/qemu/serial.log
 
       - name: Point v0.1.0 tag to verified main
@@ -60,19 +65,21 @@ jobs:
           cat > /tmp/release-notes.md <<'NOTES'
           # ZenovOS 0.1.0
 
-          Bootable x86 system image for QEMU, VirtualBox and compatible floppy media.
+          Bootable 32-bit x86 system with persistent ATA storage and native ring-3 applications.
 
           ## Recommended download
 
-          - `ZenovOS-0.1.0-x86.zip` — boot image, installation guide and QEMU launchers for Linux/macOS and Windows
+          - `ZenovOS-0.1.0-x86.zip` — boot image, writable ZenovFS data image, installation guide and QEMU launchers for Linux/macOS and Windows
 
           ## Other files
 
-          - `ZenovOS-0.1.0-x86.img` — raw bootable FAT12 image
-          - `INSTALL.txt` — setup and controls reference
-          - `SHA256SUMS.txt` — download verification
+          - `ZenovOS-0.1.0-x86.img` — raw bootable FAT12 system image
+          - `INSTALL.txt` — setup, storage, application and controls reference
+          - `SHA256SUMS.txt` — public download verification
 
-          ZenovOS 0.1.0 boots directly from the image. It does not yet install to a hard disk.
+          The ZIP contains both required images. User files under `/data` persist across reboots. The included `HELLO.ZEX` application runs through the native ring-3 ZEX1 ABI.
+
+          Windows PE and DOS MZ `.exe` files are not yet supported.
           NOTES
 
       - name: Replace GitHub Release assets
@@ -118,6 +125,8 @@ jobs:
           Workflow run: \`$GITHUB_RUN_ID\`
           Target: \`i686-zenov-none\`
           Python runtime: \`false\`
+          Persistent storage: \`ATA PIO / ZenovFS1\`
+          Application ABI: \`ZEX1 ring 3 / INT 0x80\`
 
           Public installation assets:
 
@@ -126,7 +135,7 @@ jobs:
           - \`INSTALL.txt\`
           - \`SHA256SUMS.txt\`
 
-          The ZIP contains the boot image, installation guide and QEMU launchers for Linux/macOS and Windows. Kernel symbols, maps, logs, manifests and screenshots remain internal CI evidence.
+          The ZIP contains the boot image, writable data image, installation guide and QEMU launchers. Kernel symbols, maps, logs, manifests and screenshots remain internal CI evidence.
           STATUS
           git add docs/releases/v0.1.0.md
           git commit -m "docs: record v0.1.0 release publication [skip release]"
@@ -136,13 +145,18 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zenov-os-v0.1.0-ci-evidence
+          name: zenov-os-v0.1.0-storage-zex-evidence
           if-no-files-found: error
           path: |
             dist/
             build/KERNEL.BIN
             build/kernel.elf
             build/kernel.map
+            build/zenov-data.img
+            build/HELLO.ZEX
+            build/hello-user.elf
             build/build-manifest.json
             build/qemu/serial.log
+            build/qemu/serial-phase1.log
+            build/qemu/serial-phase2.log
             build/qemu/screenshot.ppm

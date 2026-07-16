@@ -11,7 +11,7 @@ permissions:
 jobs:
   native-build-and-boot:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -25,7 +25,7 @@ jobs:
         run: |
           while IFS= read -r file; do
             iconv -f UTF-8 -t UTF-8 "$file" >/dev/null
-          done < <(find kernel tools boot packaging -type f \( -name '*.cpp' -o -name '*.inc' -o -name '*.S' -o -name '*.zv' -o -name '*.ld' -o -name '*.sh' -o -name '*.txt' \) -print)
+          done < <(find kernel user tools boot packaging -type f \( -name '*.cpp' -o -name '*.inc' -o -name '*.S' -o -name '*.zv' -o -name '*.ld' -o -name '*.sh' -o -name '*.txt' \) -print)
 
       - name: Run native checks and build
         run: |
@@ -33,16 +33,17 @@ jobs:
           set -o pipefail
           make clean check 2>&1 | tee ci-logs/native-build.log
 
-      - name: Boot and exercise console in QEMU
+      - name: Boot, write, run app and verify reboot persistence
         run: make qemu
 
       - name: Verify deterministic installation package
         run: |
-          bash tools/package_release.sh build/zenov-os.img dist package
-          bash tools/package_release.sh build/zenov-os.img dist-rebuild package-rebuild
+          bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
+          bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist-rebuild package-rebuild
           cmp dist/ZenovOS-0.1.0-x86.img dist-rebuild/ZenovOS-0.1.0-x86.img
           cmp dist/ZenovOS-0.1.0-x86.zip dist-rebuild/ZenovOS-0.1.0-x86.zip
           cmp dist/SHA256SUMS.txt dist-rebuild/SHA256SUMS.txt
+          unzip -p dist/ZenovOS-0.1.0-x86.zip ZenovOS-0.1.0-data.img | cmp - build/zenov-data.img
 
       - name: Verify deterministic system rebuild
         run: make deterministic
@@ -50,20 +51,26 @@ jobs:
       - name: Inspect kernel and runtime evidence
         run: |
           readelf -h build/kernel.elf
+          readelf -h build/hello-user.elf
           test "$(stat -c%s build/BOOT.BIN)" -eq 512
           test "$(stat -c%s build/KERNEL.BIN)" -le 61440
+          test "$(stat -c%s build/zenov-data.img)" -eq 16777216
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
+          grep -q ZENOVFS_MOUNT_OK build/qemu/serial.log
           grep -q ZENOVOS_UI_READY build/qemu/serial.log
           grep -q 'Kernel online' build/qemu/serial.log
           grep -q 'COMMAND REFERENCE' build/qemu/serial.log
-          grep -q 'SYSTEM STATUS' build/qemu/serial.log
+          grep -q 'WRITE_OK' build/qemu/serial.log
+          grep -q 'HELLO_ZEX_OK' build/qemu/serial.log
+          grep -q 'APP_EXIT code=0' build/qemu/serial.log
+          test "$(grep -c PERSISTENCE_OK build/qemu/serial.log)" -ge 2
           grep -q 'zenov> ' build/qemu/serial.log
 
       - name: Upload verified 0.1.0 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zenov-os-0.1.0-ci
+          name: zenov-os-0.1.0-storage-zex-ci
           if-no-files-found: error
           path: |
             build/BOOT.BIN
@@ -71,8 +78,13 @@ jobs:
             build/kernel.elf
             build/kernel.map
             build/zenov-os.img
+            build/zenov-data.img
+            build/HELLO.ZEX
+            build/hello-user.elf
             build/build-manifest.json
             build/qemu/serial.log
+            build/qemu/serial-phase1.log
+            build/qemu/serial-phase2.log
             build/qemu/screenshot.ppm
             dist/
             ci-logs/native-build.log

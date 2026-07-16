@@ -1,48 +1,82 @@
 ZenovOS 0.1.0 — installation and boot guide
 =================================================
 
-ZenovOS 0.1.0 is a bootable 1.44 MiB x86 FAT12 image. This version
-runs directly from the image and does not install itself to a hard disk.
+ZenovOS 0.1.0 uses two images:
+
+- ZenovOS-0.1.0-x86.img   bootable 1.44 MiB FAT12 system image
+- ZenovOS-0.1.0-data.img  persistent 16 MiB ATA/ZenovFS data volume
+
+The system still boots from the FAT12 image. User files and native applications
+are stored on the separate writable data image and survive a reboot.
+This release does not yet install itself to a physical hard disk.
 
 QUICK START
 -----------
 1. Extract ZenovOS-0.1.0-x86.zip.
-2. Install QEMU if it is not already available.
-3. Run ./run-qemu.sh on Linux/macOS or run-qemu.cmd on Windows.
+2. Keep both IMG files in the same directory.
+3. Install QEMU if it is not already available.
+4. Run ./run-qemu.sh on Linux/macOS or run-qemu.cmd on Windows.
 
 QEMU — MANUAL COMMAND
 ---------------------
-qemu-system-i386 -drive file=ZenovOS-0.1.0-x86.img,format=raw,if=floppy -boot a -m 32M
+qemu-system-i386 \
+  -drive file=ZenovOS-0.1.0-x86.img,format=raw,if=floppy \
+  -drive file=ZenovOS-0.1.0-data.img,format=raw,if=ide,index=0,media=disk \
+  -boot a -m 32M
 
 VIRTUALBOX
 ----------
 1. Create a new 32-bit "Other/Unknown" virtual machine.
 2. Use legacy BIOS, one CPU and at least 32 MiB RAM.
-3. Add a floppy controller and attach ZenovOS-0.1.0-x86.img.
-4. Put the floppy device first in the boot order and start the VM.
+3. Attach ZenovOS-0.1.0-x86.img to a floppy controller.
+4. Attach ZenovOS-0.1.0-data.img as an IDE hard disk.
+5. Put the floppy device first in the boot order and start the VM.
+
+PERSISTENT STORAGE
+------------------
+ZenovFS is mounted at /data. Useful commands:
+
+pwd
+ls
+mkdir PROJECTS
+write NOTES.TXT hello
+append NOTES.TXT world
+cat NOTES.TXT
+cp NOTES.TXT COPY.TXT
+mv COPY.TXT ARCHIVE.TXT
+stat ARCHIVE.TXT
+rm ARCHIVE.TXT
+df
+mount
+
+NATIVE APPLICATIONS
+-------------------
+ZenovOS native applications use the validated ZEX1 format and execute in ring 3.
+The included test application is launched with:
+
+run HELLO
+
+ZEX is not Windows PE and is not DOS MZ. Windows/DOS .exe files are not yet
+compatible with ZenovOS.
 
 PHYSICAL FLOPPY
 ---------------
-The image can be written to a real 1.44 MiB floppy. Check the destination
-device carefully before writing; the command overwrites it completely.
-
-Linux example:
-sudo dd if=ZenovOS-0.1.0-x86.img of=/dev/fd0 bs=64K conv=fsync status=progress
+The boot image can be written to a real 1.44 MiB floppy. The persistent data
+image requires an ATA-compatible disk or an emulator-provided IDE disk.
+Check destination devices carefully before writing images.
 
 VERIFY THE DOWNLOAD
 -------------------
 Linux/macOS:
 sha256sum -c SHA256SUMS.txt
 
-Windows PowerShell:
-Get-FileHash .\ZenovOS-0.1.0-x86.img -Algorithm SHA256
-Get-FileHash .\ZenovOS-0.1.0-x86.zip -Algorithm SHA256
+The ZIP also includes IMAGE-SHA256SUMS.txt for the extracted boot and data images.
 
 SYSTEM CONTROLS
 ---------------
 F1       command reference
 F2       system details
-F3       built-in files
+F3       current persistent directory
 F4       home dashboard
 Tab      command completion
 Esc      clear current input

@@ -5,15 +5,16 @@ fn main() {
     theme(7, 0);
 
     boot_message("ZenovOS 0.1.0");
-    boot_message("i686 protected-mode kernel");
-    boot_message("VGA console and COM1 diagnostics");
+    boot_message("i686 protected-mode kernel with ring-3 applications");
+    boot_message("FAT12 boot, ATA PIO storage and ZenovFS1");
 
-    shell_command("about", "ZenovOS is a compact x86 operating system built with Zenov, assembler and freestanding C++.");
+    shell_command("about", "ZenovOS is a compact 32-bit x86 operating system with persistent storage and isolated native applications.");
     shell_command("license", "ZenovOS source is BSD-2-Clause. Third-party boot-loader lineage is listed in THIRD_PARTY.md.");
 
-    vfs_file("WELCOME", "Welcome to ZenovOS 0.1.0.\n\nPress F1 for commands, F2 for system details, F3 for files and F4 to return home.\nTab completes commands. Esc clears the current line.\n");
-    vfs_file("SYSTEM", "Product: ZenovOS 0.1.0\nTarget: i686-zenov-none\nBoot: legacy BIOS / FAT12\nKernel: 32-bit freestanding C++17\nConfiguration: Zenov .zv\nConsole: VGA text mode + COM1\n");
-    vfs_file("GUIDE", "Useful commands:\n  status      service overview\n  devices     detected interfaces\n  files       list built-in documents\n  open NAME   read a document\n  theme NAME  select midnight, graphite or amber\n");
-    vfs_file("COMMANDS", "home help info status devices disk cpu mem memmap uptime date time files open echo calc theme history bootlog clear reboot halt\n");
-    vfs_file("INSTALL", "ZenovOS 0.1.0 boots from its FAT12 image. The current release does not install to a hard disk. See INSTALL.txt in the release package for QEMU and virtual-machine instructions.\n");
+    vfs_file("WELCOME", "Welcome to ZenovOS 0.1.0.\n\nThe boot volume is read-only. Persistent files are stored on /data using ZenovFS1.\nRun HELLO starts the included native ZEX application in ring 3.\nPress F1 for the complete command reference.\n");
+    vfs_file("SYSTEM", "Product: ZenovOS 0.1.0\nTarget: i686-zenov-none\nBoot: legacy BIOS / FAT12\nData: ATA PIO / ZenovFS1\nKernel: ring 0, freestanding C++17 and assembler\nApplications: ZEX1, ring 3, INT 0x80\nConfiguration: Zenov .zv\nConsole: VGA text mode + COM1\n");
+    vfs_file("STORAGE", "Persistent commands:\n  mount, df, pwd, cd, ls\n  mkdir, touch, write, append\n  cat, stat, cp, mv, rm\n\nFiles are checksummed and remain on the data image after reboot.\n");
+    vfs_file("APPLICATIONS", "Native ZenovOS programs use the ZEX1 format.\n\nCommands:\n  apps       list installed applications\n  run HELLO  launch the included ring-3 test program\n\nWindows PE and DOS MZ .exe files are not compatible yet.\n");
+    vfs_file("COMMANDS", "home help info status devices disk mount df pwd cd ls files cat mkdir touch write append rm cp mv stat apps run cpu mem memmap uptime date time echo calc theme history bootlog clear reboot halt\n");
+    vfs_file("INSTALL", "ZenovOS 0.1.0 boots from the FAT12 system image and mounts a separate writable ATA data image. Keep both images together when using QEMU or VirtualBox. The release does not yet install itself to a physical hard disk.\n");
 }
