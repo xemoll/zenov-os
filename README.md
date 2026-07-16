@@ -2,9 +2,25 @@
 
 ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 provides E820-backed physical memory management, 4 KiB paging, a validated static ELF32 loader, userspace file syscalls, modular Zenov-owned system configuration and a scalable interactive shell while retaining the deterministic FAT12 boot path and writable ATA/ZenovFS data volume.
 
-![ZenovOS 0.1.1 system console](docs/screenshots/zenov-os-0.1.1-paging-elf.svg)
+![ZenovOS 0.1.1 system console](./docs/screenshots/zenov-os-0.1.1-ci-console.png)
 
-The image embeds the real 720×400 framebuffer capture produced by the QEMU CI run. It is not a mockup.
+This is the real 720×400 framebuffer captured by the successful QEMU CI run. The screenshot is stored as a normal PNG in the repository rather than an embedded data URI.
+
+## Development status
+
+The `main` branch contains the latest 0.1.1 architecture, long-input shell and ELF hardening work. The existing `v0.1.1` release remains the installable baseline; its assets should be rebuilt from the final `main` commit after the P0 completion work below is verified.
+
+The remaining 0.1.1 scope is deliberately focused on correctness and a complete Zenov-to-ZenovOS workflow rather than adding unrelated large subsystems.
+
+Priority order:
+
+1. enforce user page permissions and add actionable page-fault diagnostics;
+2. replace the monotonic kernel heap with a reusable, validated allocator;
+3. complete the foreground-process ABI with stable errors, console input and `argc/argv`;
+4. prove ZenovFS1 behavior under interrupted sector writes;
+5. compile and run a real `.zv` application in ring 3, with synchronized changes in the `zenov` repository.
+
+See [`docs/ROADMAP_0.1.1.md`](docs/ROADMAP_0.1.1.md) for acceptance markers, deferred features and the release rule.
 
 ## Release package
 
@@ -32,6 +48,8 @@ Version 0.1.1 provides:
 - a dedicated 16 KiB TSS transition stack, separate from the kernel call stack.
 
 Diagnostics are available through `pmm`, `vm`, `mem` and `memmap`.
+
+The current user mapping is still broadly writable. Segment-aware page permissions and negative protection tests are the first remaining P0 item.
 
 ## Native applications
 
@@ -89,6 +107,8 @@ The release data image includes:
 
 ZenovFS1 currently uses 128 fixed entries and 64 KiB file slots. Paths are case-sensitive. Complete file reads verify FNV-1a checksums. The host verifier and kernel `fsck` independently validate metadata, parent directories, duplicates, bounds and payload checksums.
 
+The next storage task is fault injection at sector-write boundaries. Incompatible variable extents or journaling are deferred to a future ZenovFS2 format.
+
 See [`docs/ZENOVFS.md`](docs/ZENOVFS.md).
 
 ## Zenov source architecture and shell scale
@@ -96,6 +116,8 @@ See [`docs/ZENOVFS.md`](docs/ZENOVFS.md).
 `kernel/main.zv` is a small composition root. Product identity, boot diagnostics, shell commands and generated system documents live in separate modules under `kernel/config/` and are assembled through guarded relative `include(...)` directives. Stage0 rejects include cycles, absolute paths, traversal outside the source root and nesting deeper than 16 levels.
 
 The release shell has a 512-byte input buffer with 511 usable characters, 128 history entries and a 1024-event keyboard IRQ queue. Long commands use a horizontal viewport instead of being truncated by the 80-column VGA display. Stage0 separately verifies a 200-declaration configuration and enforces explicit per-item and aggregate generated-text budgets.
+
+The remaining language milestone is a cross-repository path that compiles a `.zv` source file with `zenov`, packages it into the ZenovFS image and executes it as a ring-3 ZenovOS application.
 
 See [`docs/SOURCE_ARCHITECTURE.md`](docs/SOURCE_ARCHITECTURE.md).
 
@@ -162,7 +184,9 @@ bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist packa
 
 ## Current limitations
 
-ZenovOS remains an early protected-mode operating-system foundation. It does not yet provide multitasking, per-process page directories, a general heap with free/reuse, writable FAT16, a hard-disk installer, graphics, networking, USB, dynamic linking, permissions or DOS/Windows compatibility.
+ZenovOS remains an early protected-mode operating-system foundation. Version 0.1.1 still has one foreground process, a shared user page table, a monotonic kernel heap and no tested power-loss recovery for ZenovFS1.
+
+Multitasking, per-process address spaces, writable FAT16, a hard-disk installer, graphics, networking, USB, dynamic linking, permissions and DOS/Windows compatibility are explicitly deferred beyond the 0.1.1 completion scope.
 
 ## License
 
