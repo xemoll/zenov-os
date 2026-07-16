@@ -74,6 +74,10 @@ _start:
     jne .failed
 
     mov eax, SYS_WRITE_CONSOLE
+    mov ebx, OFFSET FLAT:file_buffer
+    mov ecx, file_payload_end - file_payload
+    int 0x80
+    mov eax, SYS_WRITE_CONSOLE
     mov ebx, OFFSET FLAT:success_message
     mov ecx, success_message_end - success_message
     int 0x80
