@@ -51,5 +51,3 @@ fn main() {
     expect_failure("fn main(){system_name(\"ZenovOS\");system_version(\"0.1.1\");shell_prompt(\"x\");boot_message(\"x\");vfs_file(\"R\",\"x\");vfs_file(\"R\",\"y\");}", "duplicate");
     std::cout << "zenov stage0 self-test: OK version=0.1.1\n";
 }
-
-} // namespace
