@@ -117,7 +117,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(BU
 	 "    \"zenov-data.img\": {\"bytes\": $$(stat -c%s $(BUILD)/zenov-data.img), \"sha256\": \"$$data_hash\"}," \
 	 "    \"HELLO.ZEX\": {\"bytes\": $$(stat -c%s $(BUILD)/HELLO.ZEX), \"sha256\": \"$$zex_hash\"}" \
 	 '  }' \
-	 '  }' > $@
+	 '}' > $@
 
 check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify all
 	$(BUILD)/zenov-stage0 --self-test
