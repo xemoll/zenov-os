@@ -73,7 +73,6 @@ std::string path_of(const Entry& entry) {
 bool valid_path(const std::string& path) {
     if (path.size() < 2 || path.front() != '/' || path.back() == '/' || path.find("//") != std::string::npos) return false;
     for (unsigned char value : path) {
-        if (value >= 'A' && value <= 'Z') return false;
         if (value < 32 || value > 126) return false;
     }
     return true;
