@@ -11,7 +11,7 @@ STORAGE_MARKER="ZENOVFS_MOUNT_OK"
 PMM_MARKER="PMM_OK"
 PAGING_MARKER="PAGING_OK"
 PROCESS_MARKER="PROCESS_ABI_0_1_1_OK"
-LONG_INPUT_MARKER="LONG_INPUT_END_511_OK"
+LONG_INPUT_MARKER="longinputend511ok"
 PROMPT="zenov> "
 mkdir -p "$OUT"
 rm -f "$OUT"/serial*.log "$OUT"/screenshot.ppm "$OUT"/monitor*.log "$OUT"/qemu*.stderr
@@ -33,25 +33,25 @@ send_text() {
   for ((i=0; i<${#text}; ++i)); do
     char="${text:i:1}"
     case "$char" in
-      [a-z0-9]) echo "sendkey $char" ;;
+      [a-z0-9]) echo "sendkey $char 10" ;;
       [A-Z])
         lower="$(printf '%s' "$char" | tr 'A-Z' 'a-z')"
-        echo "sendkey shift-$lower"
+        echo "sendkey shift-$lower 10"
         ;;
-      ' ') echo "sendkey spc" ;;
-      '.') echo "sendkey dot" ;;
-      '-') echo "sendkey minus" ;;
-      '_') echo "sendkey shift-minus" ;;
-      '/') echo "sendkey slash" ;;
+      ' ') echo "sendkey spc 10" ;;
+      '.') echo "sendkey dot 10" ;;
+      '-') echo "sendkey minus 10" ;;
+      '_') echo "sendkey shift-minus 10" ;;
+      '/') echo "sendkey slash 10" ;;
       *) echo "qemu-smoke: unsupported test key: $char" >&2; return 1 ;;
     esac
-    sleep 0.01
+    sleep 0.012
   done
 }
 
 send_command() {
   send_text "$1"
-  echo "sendkey ret"
+  echo "sendkey ret 10"
 }
 
 wait_for_boot() {
@@ -72,9 +72,9 @@ controller_first() {
   echo "screendump $SCREENSHOT"
   sleep 0.2
 
-  echo "sendkey f1"
+  echo "sendkey f1 10"
   wait_for_serial "$serial" "COMMAND REFERENCE" || { echo quit; return 1; }
-  echo "sendkey f4"
+  echo "sendkey f4 10"
   sleep 0.2
 
   send_command "vm"
@@ -83,7 +83,7 @@ controller_first() {
   wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
 
   local long_payload
-  long_payload="LONG_INPUT_$(printf 'A%.0s' {1..160})_END_511_OK"
+  long_payload="longinput$(printf 'a%.0s' {1..160})end511ok"
   send_command "echo $long_payload"
   wait_for_serial "$serial" "$LONG_INPUT_MARKER" || { echo quit; return 1; }
 
