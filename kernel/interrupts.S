@@ -2,6 +2,7 @@
 .section .text,"ax"
 .code32
 .extern interrupt_dispatch
+.extern user_return_to_kernel
 
 .macro ISR_NOERR number
 .global isr\number
@@ -68,6 +69,13 @@ isr_common:
     push esp
     call interrupt_dispatch
     add esp, 4
+
+    # interrupt_dispatch returns non-zero only when a ring-3 exception has been
+    # recorded and the current application must be terminated. Use the same
+    # trusted kernel-stack restoration path as the exit syscall.
+    test eax, eax
+    jnz user_return_to_kernel
+
     pop gs
     pop fs
     pop es
