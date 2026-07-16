@@ -3,6 +3,11 @@ name = "zenov-os"
 version = "0.1.1"
 entry = "kernel/main.zv"
 
+[release]
+revision = 2
+tag = "v0.1.1-r2"
+channel = "stable"
+
 [target]
 triple = "i686-zenov-none"
 format = "flat-binary"
@@ -15,6 +20,6 @@ extension = ".zv"
 
 [implementation]
 zenov = "system manifest and generated kernel configuration"
-assembler = "boot, protected-mode entry, interrupts and userspace transitions"
-cpp = "freestanding kernel, paging, storage, application loader and native build tools"
+assembler = "boot, protected-mode entry, interrupts and isolated userspace transitions"
+cpp = "freestanding kernel, paging, storage, application loader, persistent settings and native build tools"
 python = false
