@@ -1,6 +1,6 @@
 # ZenovOS 0.1.1
 
-ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 adds E820-backed physical memory management, 4 KiB paging, a validated static ELF32 loader and userspace file syscalls while retaining the deterministic FAT12 boot path and writable ATA/ZenovFS data volume.
+ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 provides E820-backed physical memory management, 4 KiB paging, a validated static ELF32 loader, userspace file syscalls, modular Zenov-owned system configuration and a scalable interactive shell while retaining the deterministic FAT12 boot path and writable ATA/ZenovFS data volume.
 
 ![ZenovOS 0.1.1 system console](docs/screenshots/zenov-os-0.1.1-paging-elf.svg)
 
@@ -91,6 +91,14 @@ ZenovFS1 currently uses 128 fixed entries and 64 KiB file slots. Paths are case-
 
 See [`docs/ZENOVFS.md`](docs/ZENOVFS.md).
 
+## Zenov source architecture and shell scale
+
+`kernel/main.zv` is a small composition root. Product identity, boot diagnostics, shell commands and generated system documents live in separate modules under `kernel/config/` and are assembled through guarded relative `include(...)` directives. Stage0 rejects include cycles, absolute paths, traversal outside the source root and nesting deeper than 16 levels.
+
+The release shell has a 512-byte input buffer with 511 usable characters, 128 history entries and a 1024-event keyboard IRQ queue. Long commands use a horizontal viewport instead of being truncated by the 80-column VGA display. Stage0 separately verifies a 200-declaration configuration and enforces explicit per-item and aggregate generated-text budgets.
+
+See [`docs/SOURCE_ARCHITECTURE.md`](docs/SOURCE_ARCHITECTURE.md).
+
 ## Verified QEMU behavior
 
 CI performs two independent QEMU processes against the same runtime data disk.
@@ -100,10 +108,11 @@ First boot:
 1. validates PMM and enables paging;
 2. mounts ZenovFS;
 3. runs kernel `fsck`;
-4. writes `PERSIST.TXT` from the shell;
-5. runs `HELLO.ZEX` in ring 3;
-6. runs `FILEIO.ELF`, which creates `/data/apps/userio.txt` through syscalls;
-7. cleanly returns both applications to the shell.
+4. enters a command beyond the legacy 80-byte input and 128-event keyboard boundaries;
+5. writes `PERSIST.TXT` from the shell;
+6. runs `HELLO.ZEX` in ring 3;
+7. runs `FILEIO.ELF`, which creates `/data/apps/userio.txt` through syscalls;
+8. cleanly returns both applications to the shell.
 
 Second boot:
 
@@ -119,6 +128,7 @@ PMM_OK
 PAGING_OK
 ZENOVFS_MOUNT_OK
 PROCESS_ABI_0_1_1_OK
+longinputend511ok
 HELLO_ZEX_0_1_1_OK
 FILEIO_ELF_OK
 FILE_SYSCALL_PERSIST_OK
@@ -148,7 +158,7 @@ make test
 bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
 ```
 
-`kernel/main.zv` defines the product name, version, prompt, boot messages, static commands and read-only system documents. The native stage0 compiler pins this branch to version `0.1.1`.
+`kernel/main.zv` composes the modules under `kernel/config/`. The native stage0 compiler expands and validates those modules, generates the kernel configuration header and pins this branch to version `0.1.1`.
 
 ## Current limitations
 
