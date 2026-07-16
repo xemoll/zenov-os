@@ -61,6 +61,26 @@ gdt:
     .quad 0x0000000000000000
     .quad 0x00cf9a000000ffff
     .quad 0x00cf92000000ffff
+
+    # Ring-3 code: base 0x00400000, byte-granular 1 MiB limit, 32-bit.
+    .word 0xffff
+    .word 0x0000
+    .byte 0x40
+    .byte 0xfa
+    .byte 0x4f
+    .byte 0x00
+
+    # Ring-3 data: same isolated 1 MiB linear window.
+    .word 0xffff
+    .word 0x0000
+    .byte 0x40
+    .byte 0xf2
+    .byte 0x4f
+    .byte 0x00
+
+.global gdt_tss
+gdt_tss:
+    .quad 0x0000000000000000
 gdt_end:
 gdt_descriptor:
     .word gdt_end - gdt - 1
