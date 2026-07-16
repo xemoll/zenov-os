@@ -42,7 +42,7 @@ bool valid_stored_path(const char* path) {
     if (length < 2U || length >= 48U || path[length - 1U] == '/') return false;
     for (uint32_t i = 0; i < length; ++i) {
         const char value = path[i];
-        if (value < 32 || value > 126 || (value >= 'A' && value <= 'Z')) return false;
+        if (value < 32 || value > 126) return false;
         if (value == '/' && i + 1U < length && path[i + 1U] == '/') return false;
     }
     return true;
