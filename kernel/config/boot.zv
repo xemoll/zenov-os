@@ -1,0 +1,4 @@
+boot_message("ZenovOS 0.1.1 strengthened architecture");
+boot_message("i686 protected mode with paging and ring-3 applications");
+boot_message("FAT12 boot, ATA PIO storage and ZenovFS1");
+boot_message("Modular Zenov configuration and 512-byte interactive commands");
