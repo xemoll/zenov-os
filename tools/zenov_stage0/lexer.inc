@@ -25,6 +25,8 @@ struct Config {
     std::string prompt;
     std::uint8_t foreground{10};
     std::uint8_t background{0};
+    std::uint32_t shell_line_capacity{256};
+    std::uint32_t shell_history_capacity{64};
     std::vector<std::string> boot_messages;
     std::vector<std::pair<std::string, std::string>> commands;
     std::vector<std::pair<std::string, std::string>> files;
@@ -135,4 +137,3 @@ private:
         }
     }
 };
-
