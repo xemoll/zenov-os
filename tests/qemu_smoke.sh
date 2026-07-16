@@ -11,6 +11,7 @@ STORAGE_MARKER="ZENOVFS_MOUNT_OK"
 PMM_MARKER="PMM_OK"
 PAGING_MARKER="PAGING_OK"
 PROCESS_MARKER="PROCESS_ABI_0_1_1_OK"
+LONG_INPUT_MARKER="LONG_INPUT_END_511_OK"
 PROMPT="zenov> "
 mkdir -p "$OUT"
 rm -f "$OUT"/serial*.log "$OUT"/screenshot.ppm "$OUT"/monitor*.log "$OUT"/qemu*.stderr
@@ -81,6 +82,11 @@ controller_first() {
   send_command "fsck"
   wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
 
+  local long_payload
+  long_payload="LONG_INPUT_$(printf 'A%.0s' {1..160})_END_511_OK"
+  send_command "echo $long_payload"
+  wait_for_serial "$serial" "$LONG_INPUT_MARKER" || { echo quit; return 1; }
+
   send_command "write PERSIST.TXT PERSISTENCE_0_1_1_OK"
   wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
 
@@ -143,7 +149,7 @@ cat "$SERIAL1" "$SERIAL2" > "$OUT/serial.log"
 
 for marker in \
   "$BOOT_MARKER" "$PMM_MARKER" "$PAGING_MARKER" "$STORAGE_MARKER" "$PROCESS_MARKER" "$UI_MARKER" \
-  "COMMAND REFERENCE" "VIRTUAL MEMORY" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" "APP_START_ZEX" \
+  "COMMAND REFERENCE" "VIRTUAL MEMORY" "$LONG_INPUT_MARKER" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" "APP_START_ZEX" \
   "APP_START_ELF" "FILEIO_ELF_OK" "FILE_SYSCALL_PERSIST_OK" "ZENOVFS_FSCK_OK"; do
   grep -q "$marker" "$OUT/serial.log" || { echo "qemu-smoke: missing marker: $marker" >&2; exit 1; }
 done
@@ -165,4 +171,4 @@ fi
   exit 1
 }
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK 0.1.1 paging+pmm zex+elf file-syscalls persistence serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+printf 'qemu-smoke: OK 0.1.1 shell>80 paging+pmm zex+elf file-syscalls persistence serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
