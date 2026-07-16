@@ -28,7 +28,8 @@ namespace console {
 void show_hardening_status() {
     write_at(19, 3, "Hardening", palette.muted, palette.body_bg);
     write_at(19, 16, "R2: user faults contained / boot FS verified", palette.good, palette.body_bg);
-    write_at(0, 68, "0.1.1-r2", palette.header_fg, palette.header_bg);
+    for (uint32_t x = 68; x < width; ++x) vga[x] = styled_cell(' ', palette.header_fg, palette.header_bg);
+    write_at(0, 70, "0.1.1-r2", palette.header_fg, palette.header_bg);
 }
 }
 
