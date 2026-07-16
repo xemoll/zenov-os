@@ -16,17 +16,17 @@ void show_home() {
     write_at(5, 16, "READY", palette.good, palette.body_bg);
     write_at(6, 3, "Architecture", palette.muted, palette.body_bg);
     write_at(6, 16, "i686 / ring 0+3", palette.body_fg, palette.body_bg);
-    write_at(7, 3, "Storage", palette.muted, palette.body_bg);
-    write_at(7, 16, storage::ready() ? "ZenovFS / writable" : "persistent disk offline",
+    write_at(7, 3, "Memory", palette.muted, palette.body_bg);
+    write_at(7, 16, paging::enabled ? "paging / 4 KiB" : "paging offline",
+             paging::enabled ? palette.good : palette.warning, palette.body_bg);
+    write_at(8, 3, "Storage", palette.muted, palette.body_bg);
+    write_at(8, 16, storage::ready() ? "ZenovFS / writable" : "persistent disk offline",
              storage::ready() ? palette.good : palette.warning, palette.body_bg);
-    write_at(8, 3, "Applications", palette.muted, palette.body_bg);
-    write_at(8, 16, "ZEX1 native ABI", palette.body_fg, palette.body_bg);
-    write_at(9, 3, "Memory", palette.muted, palette.body_bg);
-    write_uint_at(9, 16, usable_memory_kib(), palette.body_fg, palette.body_bg);
-    write_at(9, 23, "KiB usable", palette.body_fg, palette.body_bg);
-    write_at(10, 3, "Heap", palette.muted, palette.body_bg);
-    write_uint_at(10, 16, heap::used_bytes(), palette.body_fg, palette.body_bg);
-    write_at(10, 23, "bytes used", palette.body_fg, palette.body_bg);
+    write_at(9, 3, "Applications", palette.muted, palette.body_bg);
+    write_at(9, 16, "ZEX1 + ELF32", palette.body_fg, palette.body_bg);
+    write_at(10, 3, "PMM free", palette.muted, palette.body_bg);
+    write_uint_at(10, 16, pmm::free_bytes() >> 10U, palette.body_fg, palette.body_bg);
+    write_at(10, 24, "KiB", palette.body_fg, palette.body_bg);
 
     draw_panel(41, 4, 38, 8, " QUICK ACCESS ");
     write_at(5, 43, "F1", palette.accent, palette.body_bg); write_at(5, 48, "Command reference", palette.body_fg, palette.body_bg);
@@ -38,11 +38,11 @@ void show_home() {
 
     draw_panel(1, 13, 78, 8, " WORKSPACE ");
     write_at(14, 3, "Storage", palette.muted, palette.body_bg);
-    write_at(14, 16, "ls  pwd  cd  mkdir  touch  write  append  rm", palette.body_fg, palette.body_bg);
-    write_at(15, 3, "Files", palette.muted, palette.body_bg);
-    write_at(15, 16, "cat  cp  mv  stat  df  mount", palette.body_fg, palette.body_bg);
+    write_at(14, 16, "ls  pwd  cd  mkdir  write  append  rm  fsck", palette.body_fg, palette.body_bg);
+    write_at(15, 3, "Memory", palette.muted, palette.body_bg);
+    write_at(15, 16, "mem  pmm  vm  memmap", palette.body_fg, palette.body_bg);
     write_at(16, 3, "Apps", palette.muted, palette.body_bg);
-    write_at(16, 16, "apps  run HELLO", palette.accent, palette.body_bg);
+    write_at(16, 16, "run HELLO  |  run FILEIO.ELF", palette.accent, palette.body_bg);
     write_at(17, 3, "System docs", palette.muted, palette.body_bg);
     write_at(17, 16, "files  cat WELCOME", palette.body_fg, palette.body_bg);
     write_at(18, 3, "Editing", palette.muted, palette.body_bg);
@@ -80,25 +80,25 @@ bool split_two(char* arguments, char*& first, char*& second) {
 void command_help() {
     begin_view("COMMAND REFERENCE");
     console::line("  Navigation   home  help  clear  pwd  cd <path>");
-    console::line("  Storage      ls [path]  mkdir  touch  write  append  rm");
+    console::line("  Storage      ls  mkdir  touch  write  append  rm  fsck  sync");
     console::line("  File tools   cat  cp  mv  stat  mount  df");
-    console::line("  Applications apps  run <name|path>");
-    console::line("  System       info  status  devices  disk  cpu  mem  memmap");
+    console::line("  Applications apps  run <name|path>  [ZEX1 or static ELF32]");
+    console::line("  Memory       mem  pmm  vm  memmap");
+    console::line("  System       info  status  devices  disk  cpu");
     console::line("  Session      uptime  date  time  history  bootlog");
-    console::line("  Read-only    files  cat <system-document>");
-    console::line("  Tools        echo  calc  theme");
+    console::line("  Tools        echo  calc  theme  color");
     console::line("  Power        reboot  halt");
     console::line("");
-    console::line("  write <file> <text> replaces a file; append adds text.");
-    console::line("  Native ZEX applications run in ring 3 through INT 0x80 syscalls.");
+    console::line("  0.1.1 syscalls: exit, console, ticks, file read/write/stat, version, sync.");
 }
 void command_info() {
     begin_view("SYSTEM DETAILS");
     console::write("  Product       "); console::write(zenov_generated::kSystemName); console::put(' '); console::line(zenov_generated::kVersion);
     console::line("  Target        i686-zenov-none");
-    console::line("  Execution     protected mode, ring 0 kernel + ring 3 ZEX");
+    console::line("  Execution     protected mode, paging, ring 0 + ring 3");
     console::line("  Boot          legacy BIOS / FAT12");
     console::line("  Data          ATA PIO / ZenovFS1");
+    console::line("  Applications  validated ZEX1 and static ELF32");
     console::write("  Boot drive    "); console::hex(boot_info()->drive, 2); console::put('\n');
     console::write("  Kernel file   "); console::unsigned_dec(static_cast<uint32_t>(&__kernel_file_end - &__kernel_start)); console::line(" bytes");
     console::write("  Runtime       "); console::unsigned_dec(static_cast<uint32_t>(&__kernel_end - &__kernel_start)); console::line(" bytes");
@@ -107,12 +107,13 @@ void command_info() {
 void command_status() {
     begin_view("SYSTEM STATUS");
     console::success("  READY         Core services are running.");
+    console::write("  Paging        "); console::line(paging::enabled ? "enabled; kernel/user permissions active" : "offline");
+    console::write("  PMM           "); console::line(pmm::initialized ? "E820 frame allocator active" : "unavailable");
     console::line("  Interrupts    IDT active; user syscall gate 0x80 active");
     console::line("  Timer         PIT channel 0 at 100 Hz");
     console::line("  Keyboard      PS/2 controller on IRQ1");
-    console::line("  Console       VGA text mode with COM1 mirror");
     console::write("  Persistent    "); console::line(storage::ready() ? "ZenovFS mounted read-write" : "unavailable");
-    console::line("  Applications  ZEX1 loader with segmented ring-3 isolation");
+    console::line("  Applications  ZEX1 + ELF32 foreground runtime");
     console::write("  Uptime        "); console::unsigned_dec(timer_ticks / 100U); console::line(" seconds");
 }
 void command_devices() {
@@ -135,6 +136,7 @@ void command_disk() {
         console::line("  /data         ZenovFS1 persistent volume, read-write");
         console::write("  ATA sectors   "); console::unsigned_dec(storage::ata0.sectors); console::put('\n');
         console::write("  File limit    "); console::unsigned_dec(storage::file_capacity()); console::line(" bytes per file");
+        console::write("  Generation    "); console::unsigned_dec(storage::zfs_super.generation); console::put('\n');
     } else console::warning("  /data         unavailable; attach ZenovOS data image as ATA0");
 }
 void command_cpu() {
@@ -156,7 +158,30 @@ void command_mem() {
     console::write("  Usable        "); console::unsigned_dec(usable_memory_kib()); console::line(" KiB (approx.)");
     console::write("  Kernel heap   "); console::unsigned_dec(heap::used_bytes()); console::write(" / ");
     console::unsigned_dec(heap::capacity_bytes()); console::line(" bytes");
+    console::write("  PMM free      "); console::unsigned_dec(pmm::free_bytes() >> 10U); console::line(" KiB");
     console::line("  User window   0x00400000-0x004FFFFF");
+}
+void command_pmm() {
+    begin_view("PHYSICAL MEMORY MANAGER");
+    console::write("  Status        "); console::line(pmm::initialized ? "online" : "unavailable");
+    console::write("  Page size     "); console::unsigned_dec(pmm::page_size); console::line(" bytes");
+    console::write("  Managed       "); console::unsigned_dec(pmm::managed_bytes() >> 20U); console::line(" MiB ceiling");
+    console::write("  Reserved low  "); console::unsigned_dec(pmm::reserved_end >> 20U); console::line(" MiB");
+    console::write("  Free frames   "); console::unsigned_dec(pmm::available_frames); console::put('\n');
+    console::write("  Allocated     "); console::unsigned_dec(pmm::allocated_frames); console::line(" frames");
+}
+void command_vm() {
+    begin_view("VIRTUAL MEMORY");
+    uint32_t cr0, cr3;
+    asm volatile("mov %%cr0, %0" : "=r"(cr0));
+    asm volatile("mov %%cr3, %0" : "=r"(cr3));
+    console::write("  Paging        "); console::line(paging::enabled ? "enabled" : "disabled");
+    console::write("  CR0           "); console::hex(cr0); console::put('\n');
+    console::write("  CR3           "); console::hex(cr3); console::put('\n');
+    console::write("  Directory     "); console::hex(paging::directory_address()); console::put('\n');
+    console::write("  Kernel map    "); console::unsigned_dec(paging::kernel_mapped_bytes() >> 20U); console::line(" MiB supervisor");
+    console::write("  User map      "); console::unsigned_dec(paging::user_mapped_bytes() >> 20U); console::line(" MiB user-accessible");
+    console::line("  Segmentation  ring-3 window limited to 1 MiB at 0x00400000");
 }
 void command_memmap() {
     begin_view("MEMORY MAP");
@@ -288,10 +313,16 @@ void execute(char* line) {
     else if (string_equal(command, "disk")) command_disk();
     else if (string_equal(command, "mount")) { begin_view("MOUNTS"); storage::print_mounts(); }
     else if (string_equal(command, "df")) { begin_view("FILESYSTEM USAGE"); storage::print_df(); }
+    else if (string_equal(command, "fsck")) { begin_view("FILESYSTEM CHECK"); storage::print_integrity(); }
+    else if (string_equal(command, "sync")) {
+        if (storage::sync_metadata()) console::success("SYNC_OK"); else console::warning("Sync failed.");
+    }
     else if (string_equal(command, "ver") || string_equal(command, "version")) console::line(zenov_generated::kVersion);
-    else if (string_equal(command, "uname")) console::line("ZenovOS 0.1.0 i686-zenov-none");
+    else if (string_equal(command, "uname")) console::line("ZenovOS 0.1.1 i686-zenov-none");
     else if (string_equal(command, "cpu")) command_cpu();
     else if (string_equal(command, "mem")) command_mem();
+    else if (string_equal(command, "pmm")) command_pmm();
+    else if (string_equal(command, "vm")) command_vm();
     else if (string_equal(command, "memmap")) command_memmap();
     else if (string_equal(command, "uptime")) { console::unsigned_dec(timer_ticks / 100U); console::line(" seconds"); }
     else if (string_equal(command, "ticks")) { console::unsigned_dec(timer_ticks); console::put('\n'); }
@@ -331,7 +362,7 @@ void execute(char* line) {
     else if (string_equal(command, "stat")) { begin_view("FILE STATUS"); storage::stat(args); }
     else if (string_equal(command, "apps")) { begin_view("APPLICATIONS"); storage::list("/data/apps"); }
     else if (string_equal(command, "run")) {
-        if (!process::run(args)) console::warning("Application could not be loaded. Only validated ZEX1 files are supported.");
+        if (!process::run(args)) console::warning("Application could not be loaded. Use validated ZEX1 or static ELF32.");
     }
     else if (string_equal(command, "history")) command_history();
     else if (string_equal(command, "bootlog")) command_bootlog();

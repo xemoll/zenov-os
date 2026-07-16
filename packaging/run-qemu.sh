@@ -2,8 +2,8 @@
 set -eu
 
 base_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-boot_image="$base_dir/ZenovOS-0.1.0-x86.img"
-data_image="$base_dir/ZenovOS-0.1.0-data.img"
+boot_image="$base_dir/ZenovOS-0.1.1-x86.img"
+data_image="$base_dir/ZenovOS-0.1.1-data.img"
 
 command -v qemu-system-i386 >/dev/null 2>&1 || {
   echo "qemu-system-i386 was not found. Install QEMU and try again." >&2

@@ -62,7 +62,7 @@ Config validate(const std::vector<Call>& calls) {
         }
     }
     if (config.system_name != "ZenovOS") throw Error("system_name must remain ZenovOS");
-    if (config.version != "0.1.0") throw Error("deep update must keep system_version at 0.1.0");
+    if (config.version != "0.1.1") throw Error("system_version must be 0.1.1 for this release");
     if (config.prompt.empty() || config.prompt.size() > 24) throw Error("shell_prompt length must be 1..24");
     if (config.boot_messages.empty()) throw Error("at least one boot_message is required");
     if (config.files.empty()) throw Error("at least one vfs_file is required");
@@ -113,3 +113,4 @@ std::string generate(const Config& config) {
     return out.str();
 }
 
+}

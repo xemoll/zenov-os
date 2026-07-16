@@ -1,8 +1,9 @@
 # ZenovFS1 persistent volume
 
-ZenovOS 0.1.0 boots from a read-only FAT12 floppy image and mounts a separate
+ZenovOS 0.1.1 boots from a read-only FAT12 floppy image and mounts a separate
 ATA PIO disk at `/data`. The separation keeps the verified boot path immutable
-while allowing user files and native applications to survive a reboot.
+while allowing user files, configuration and native applications to survive a
+reboot.
 
 ## Device layout
 
@@ -23,21 +24,35 @@ while allowing user files and native applications to survive a reboot.
 | reserved | 17–31 | future metadata and recovery records |
 | data slots | 32 onward | one fixed 64 KiB slot per entry |
 
-Every file record contains:
+Every file record contains a used flag, type, normalized absolute path, file
+length and FNV-1a payload checksum. Names are case-sensitive, so `Notes.txt` and
+`NOTES.TXT` are distinct paths.
 
-- used flag;
-- file or directory type;
-- normalized absolute path up to 47 bytes;
-- file length;
-- FNV-1a payload checksum.
+## Seeded 0.1.1 tree
+
+```text
+/data
+├── apps
+│   ├── hello.zex
+│   └── fileio.elf
+├── config
+│   └── system.ini
+└── docs
+    ├── readme.txt
+    └── release.txt
+```
+
+`system.ini` is a persistent configuration seed rather than a compile-time file.
+The current kernel exposes it through normal VFS operations; automatic setting
+application will be expanded in a later release.
 
 ## Supported operations
-
-The current VFS surface provides:
 
 ```text
 mount
 df
+fsck
+sync
 pwd
 cd <path>
 ls [path]
@@ -57,31 +72,40 @@ cannot currently be renamed. File writes are limited to 64 KiB per entry.
 
 ## Integrity and persistence
 
-- Every complete file read verifies the stored checksum.
-- Metadata updates are written back through ATA PIO and flushed to the device.
-- CI writes `PERSIST.TXT`, exits QEMU, starts a second QEMU process with the same
-  runtime disk and verifies the file and checksum again.
-- The pristine release data image is copied before mutation, so deterministic
-  build verification is not contaminated by the persistence test.
+The host-side `zenovfs-verify` tool validates:
 
-## Why this is not FAT16 yet
+- exact image geometry and superblock fields;
+- entry-table capacity;
+- unique printable absolute paths;
+- valid parent directories;
+- supported entry types;
+- slot bounds;
+- every file checksum;
+- required 0.1.1 seed files.
 
-ZenovFS1 is a deliberately bounded first writable filesystem. It allowed the
-block-device, VFS, persistence and application-loader contracts to be verified
-without moving BIOS FAT routines into the protected-mode kernel.
+The kernel `fsck` command independently repeats metadata, parent, duplicate and
+payload-checksum validation through the ATA driver. `sync` writes the superblock
+and complete entry table and advances the generation counter.
 
-A later general-purpose disk layer can add partition tables and FAT16 as a
-second filesystem driver. ZenovFS1 remains useful as a deterministic recovery
-and test volume.
+CI tests two independent QEMU processes using the same runtime data disk. The
+first boot creates a shell file and runs `FILEIO.ELF`, which creates a second file
+through userspace syscalls. The second boot reads both files and performs another
+kernel `fsck`.
+
+The pristine release data image is copied before mutation, so deterministic
+build verification is not contaminated by the persistence test.
 
 ## Current limitations
 
+ZenovFS1 remains a bounded recovery/development filesystem:
+
 - fixed file slots rather than dynamic extents;
-- no crash journal;
+- no crash journal or atomic multi-entry transaction;
 - no permissions, ownership or timestamps;
-- no sparse files or symbolic links;
+- no sparse files, links or mount namespaces;
 - one mounted writable device;
 - ATA PIO only, without DMA.
 
-These limitations are explicit format constraints, not claimed production
-features.
+A future general-purpose storage layer can add partition tables, dynamic block
+allocation and FAT16 or another filesystem without changing the immutable FAT12
+boot path.

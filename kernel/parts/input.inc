@@ -1,11 +1,11 @@
 uint32_t history_count = 0;
 
 constexpr const char* builtin_commands[] = {
-    "help", "home", "info", "system", "status", "devices", "disk", "mount", "df", "ver", "version", "uname",
-    "cpu", "mem", "memmap", "uptime", "ticks", "date", "time", "echo", "calc", "theme", "color",
-    "pwd", "cd", "ls", "files", "dir", "cat", "open", "view", "mkdir", "touch", "write", "append",
-    "rm", "del", "cp", "copy", "mv", "ren", "stat", "apps", "run", "history", "bootlog", "clear", "cls",
-    "reboot", "halt", "shutdown", "panic"
+    "help", "home", "info", "system", "status", "devices", "disk", "mount", "df", "fsck", "sync",
+    "ver", "version", "uname", "cpu", "mem", "pmm", "vm", "memmap", "uptime", "ticks", "date", "time",
+    "echo", "calc", "theme", "color", "pwd", "cd", "ls", "files", "dir", "cat", "open", "view",
+    "mkdir", "touch", "write", "append", "rm", "del", "cp", "copy", "mv", "ren", "stat", "apps", "run",
+    "history", "bootlog", "clear", "cls", "reboot", "halt", "shutdown", "panic"
 };
 
 uint32_t common_prefix_length(const char* left, const char* right) {

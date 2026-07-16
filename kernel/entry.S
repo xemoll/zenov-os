@@ -5,7 +5,7 @@
 .extern kernel_main
 .extern __bss_start
 .extern __bss_end
-.extern __stack_top
+.extern __kernel_stack_top
 
 .set BOOT_INFO, 0x0500
 .set E820_BUFFER, 0x0600
@@ -94,7 +94,7 @@ protected_entry:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov esp, OFFSET FLAT:__stack_top
+    mov esp, OFFSET FLAT:__kernel_stack_top
     xor ebp, ebp
     cld
 

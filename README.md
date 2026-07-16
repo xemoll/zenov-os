@@ -1,187 +1,145 @@
-# ZenovOS 0.1.0
+# ZenovOS 0.1.1
 
-ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler
-and freestanding C++17. It boots from a deterministic FAT12 image, mounts a
-separate writable ATA data volume and executes validated native applications in
-ring 3.
+ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 adds E820-backed physical memory management, 4 KiB paging, a validated static ELF32 loader and userspace file syscalls while retaining the deterministic FAT12 boot path and writable ATA/ZenovFS data volume.
 
-## System console
+![ZenovOS 0.1.1 system console](docs/screenshots/zenov-os-0.1.1-paging-elf.svg)
 
-The home screen presents current system state, keyboard shortcuts and common
-storage/application actions. The header reports execution mode, readiness and
-uptime. Boot diagnostics remain on COM1 instead of filling the workspace.
+The image embeds the real 720×400 framebuffer capture produced by the QEMU CI run. It is not a mockup.
 
-![ZenovOS 0.1.0 persistent storage and ZEX console](docs/screenshots/zenov-os-0.1.0-storage-zex.svg)
+## Release package
 
-The image embeds the real framebuffer capture produced by the verified QEMU
-run. It is not a mockup.
+The `v0.1.1` GitHub Release contains installation files only:
 
-Console controls:
+- `ZenovOS-0.1.1-x86.zip` — recommended package with both images, checksums, guide and QEMU launchers;
+- `ZenovOS-0.1.1-x86.img` — bootable 1.44 MiB FAT12 system image;
+- `INSTALL.txt` — QEMU, VirtualBox, storage and application instructions;
+- `SHA256SUMS.txt` — hashes for the public downloads.
 
-- `F1` opens the command reference;
-- `F2` opens system details;
-- `F3` lists the current persistent directory;
-- `F4` returns to the home dashboard;
-- `Tab` completes command names;
-- `Esc` clears the current input;
-- Left/Right, Home/End, Backspace and Delete edit the command line;
-- Up/Down recalls the last 16 commands while preserving the unfinished draft.
+The ZIP also contains `ZenovOS-0.1.1-data.img`, a writable 16 MiB ATA/ZenovFS volume. ZenovOS still boots directly from the system image and does not yet install itself to a physical hard disk.
 
-Three restrained VGA themes are available:
+[Open the ZenovOS 0.1.1 release](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1)
 
-```text
-theme midnight
-theme graphite
-theme amber
-```
+## Memory architecture
 
-## Download
+Version 0.1.1 provides:
 
-The GitHub Release contains installation-related files only:
+- E820-backed physical frame discovery for the first 128 MiB;
+- a 4 KiB frame allocator with an allocation/free startup self-test;
+- paging enabled through CR3 with `CR0.PG` and `CR0.WP`;
+- a 4 MiB supervisor-only low kernel mapping;
+- a 4 MiB user-accessible mapping beginning at `0x00400000`;
+- a 1 MiB ring-3 segment limit inside that mapping;
+- a dedicated 16 KiB TSS transition stack, separate from the kernel call stack.
 
-- `ZenovOS-0.1.0-x86.zip` — recommended package containing both required images, the guide and QEMU launchers for Linux/macOS and Windows;
-- `ZenovOS-0.1.0-x86.img` — raw 1.44 MiB bootable FAT12 system image;
-- `INSTALL.txt` — QEMU, VirtualBox, storage, applications and controls reference;
-- `SHA256SUMS.txt` — public download verification.
-
-The ZIP contains a second file, `ZenovOS-0.1.0-data.img`, which is the writable
-16 MiB ATA/ZenovFS volume. Keep both images together. User files under `/data`
-survive a reboot.
-
-[Open the ZenovOS 0.1.0 release](https://github.com/xemoll/zenov-os/releases/tag/v0.1.0)
-
-ZenovOS still boots directly from the FAT12 image. Version 0.1.0 does not yet
-install itself to a physical hard disk.
-
-## Persistent storage
-
-The protected-mode kernel includes a primary-master ATA PIO block driver and
-mounts `ZenovFS1` at `/data`. The generated documents remain available as a
-separate read-only system surface.
-
-```text
-mount
-df
-pwd
-cd <path>
-ls [path]
-mkdir <path>
-touch <file>
-write <file> <text>
-append <file> <text>
-cat <file>
-stat <path>
-cp <source> <destination>
-mv <source> <destination>
-rm <path>
-```
-
-ZenovFS1 currently provides 128 entries and fixed 64 KiB file slots. Every file
-read verifies an FNV-1a checksum. Directories must be empty before removal.
-The format is deliberately bounded and is not presented as a replacement for a
-future general-purpose FAT16/ext-style filesystem.
-
-See [`docs/ZENOVFS.md`](docs/ZENOVFS.md) for the disk format and limitations.
+Diagnostics are available through `pmm`, `vm`, `mem` and `memmap`.
 
 ## Native applications
 
-ZenovOS now has a native executable format named `ZEX1`:
+ZenovOS supports two native formats:
 
-- 32-bit i686 code;
-- isolated 1 MiB ring-3 segment;
-- TSS-backed ring 3 to ring 0 transitions;
-- user-callable `INT 0x80` syscall gate;
-- validated header, bounds and payload checksum;
-- deterministic host packer;
-- independent application build outside the kernel.
+- `ZEX1` — the deterministic flat ZenovOS container;
+- static ELF32/i386 executables with validated `PT_LOAD` segments.
 
-The included application is stored at `/data/apps/hello.zex` and launched with:
+Included applications:
 
 ```text
-apps
 run HELLO
+run FILEIO.ELF
 ```
 
-The initial ABI provides process exit, console output and PIT tick access. It
-runs one foreground application at a time. Paging, multitasking, dynamic
-linking and file descriptors are not part of ZEX1 yet.
+`HELLO.ZEX` verifies the ZEX1 ring-3 path. `FILEIO.ELF` obtains the system version, writes a file, reads it back, checks metadata and content, flushes the filesystem and returns through `INT 0x80`.
 
-See [`docs/ZEX_ABI.md`](docs/ZEX_ABI.md) for the exact container and syscall
-contract.
-
-### About `.exe`
-
-ZenovOS does **not** currently run arbitrary `.exe` files. ZEX is a native
-ZenovOS format, not a renamed Windows or DOS executable.
-
-- Windows `.exe` files use PE/PE32+ and depend on Win32/NT APIs.
-- DOS `.EXE` files use MZ, 16-bit segmented execution and DOS interrupt services.
-
-Both require separate compatibility layers. Unsupported files are rejected
-rather than executed in kernel mode.
-
-## Current kernel surface
-
-- BIOS/FAT12 boot path;
-- E820 memory discovery and A20 setup;
-- 32-bit i686 protected mode;
-- ring-0 and ring-3 GDT descriptors plus TSS;
-- IDT exception handling, panic diagnostics and `INT 0x80` syscall gate;
-- remapped PIC, 100 Hz PIT and IRQ-driven PS/2 keyboard;
-- VGA workspace mirrored to COM1;
-- full single-line editing, Tab completion and function-key navigation;
-- bump-allocated kernel heap;
-- ATA PIO block device;
-- writable persistent ZenovFS1 volume;
-- read-only VFS documents generated from `kernel/main.zv`;
-- native ZEX1 application loader;
-- native C++17 Zenov stage0 compiler and deterministic image builders;
-- no Python source or runtime dependency.
-
-## Commands
+The 0.1.1 syscall ABI provides:
 
 ```text
-home help info system status devices disk mount df ver version uname
-cpu mem memmap uptime ticks date time echo calc theme color
-pwd cd ls dir files cat open view mkdir touch write append
-rm del cp copy mv ren stat apps run history bootlog clear cls
-reboot halt shutdown panic about license
+0  exit
+1  write_console
+2  get_ticks
+3  file_read
+4  file_write
+5  file_stat
+6  get_version
+7  sync
 ```
 
-## Verified build
+User pointers are validated against the ring-3 address window before kernel access. One foreground application runs at a time; there is no scheduler, process spawning or dynamic linker yet.
 
-GitHub Actions performs a two-boot QEMU test on the same runtime data disk:
+See [`docs/ZEX_ABI.md`](docs/ZEX_ABI.md) and [`docs/ELF32_ABI.md`](docs/ELF32_ABI.md).
 
-1. boot and mount ZenovFS1;
-2. write `PERSIST.TXT`;
-3. load and execute `hello.zex` in ring 3;
-4. return through the exit syscall;
-5. stop QEMU;
-6. start a second QEMU process with the same disk;
-7. read the file back and verify its checksum.
+## Persistent storage
 
-Required serial evidence:
+The protected-mode kernel drives a primary-master ATA PIO disk and mounts `ZenovFS1` at `/data`.
 
 ```text
-ZENOVOS_BOOT_OK
+mount  df  fsck  sync
+pwd  cd  ls  mkdir  touch
+write  append  cat  stat
+cp  mv  rm
+```
+
+The release data image includes:
+
+```text
+/data/apps/hello.zex
+/data/apps/fileio.elf
+/data/config/system.ini
+/data/docs/readme.txt
+/data/docs/release.txt
+```
+
+ZenovFS1 currently uses 128 fixed entries and 64 KiB file slots. Paths are case-sensitive. Complete file reads verify FNV-1a checksums. The host verifier and kernel `fsck` independently validate metadata, parent directories, duplicates, bounds and payload checksums.
+
+See [`docs/ZENOVFS.md`](docs/ZENOVFS.md).
+
+## Verified QEMU behavior
+
+CI performs two independent QEMU processes against the same runtime data disk.
+
+First boot:
+
+1. validates PMM and enables paging;
+2. mounts ZenovFS;
+3. runs kernel `fsck`;
+4. writes `PERSIST.TXT` from the shell;
+5. runs `HELLO.ZEX` in ring 3;
+6. runs `FILEIO.ELF`, which creates `/data/apps/userio.txt` through syscalls;
+7. cleanly returns both applications to the shell.
+
+Second boot:
+
+1. reads both persisted files;
+2. verifies the ELF-created payload;
+3. runs `fsck` again;
+4. verifies file size and checksum.
+
+Required serial evidence includes:
+
+```text
+PMM_OK
+PAGING_OK
 ZENOVFS_MOUNT_OK
-ZENOVOS_UI_READY
-WRITE_OK
-HELLO_ZEX_OK
+PROCESS_ABI_0_1_1_OK
+HELLO_ZEX_0_1_1_OK
+FILEIO_ELF_OK
+FILE_SYSCALL_PERSIST_OK
+ZENOVFS_FSCK_OK
 APP_EXIT code=0
-PERSISTENCE_OK
-zenov>
 ```
 
-CI also rejects a false post-exit load error, checks UTF-8 source integrity,
-absence of Python, Zenov parser failure cases, FAT12 structure, undefined ELF
-symbols, ZEX header/checksum validation, a byte-identical system/data/application
-rebuild and two byte-identical installation-package builds.
+The same workflow also verifies strict native compilation, absence of Python, source encoding, FAT12 structure, undefined symbols, host-side ZenovFS integrity, deterministic boot/data/application rebuilds and byte-identical Release ZIP generation.
+
+## `.exe` compatibility
+
+ZenovOS 0.1.1 does not run arbitrary Windows or DOS `.exe` files.
+
+- Windows executables use PE/PE32+ and require Win32/NT APIs, DLL loading, virtual memory and other services.
+- DOS MZ executables require 16-bit execution, PSP/environment handling and DOS interrupt services.
+
+Static ZenovOS-targeted ELF32 applications now run, but a filename extension alone does not make a foreign executable compatible.
 
 ## Build from source
 
-Required tools: GNU Make, GNU `as`/`ld`/`objcopy`, a C++17 compiler,
-`qemu-system-i386`, `zip` and `unzip`.
+Required tools: GNU Make, GNU `as`/`ld`/`objcopy`, a C++17 compiler, `qemu-system-i386`, `zip` and `unzip`.
 
 ```bash
 make clean check
@@ -190,44 +148,12 @@ make test
 bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
 ```
 
-Developer outputs remain CI artifacts and are not added as separate public
-Release downloads:
+`kernel/main.zv` defines the product name, version, prompt, boot messages, static commands and read-only system documents. The native stage0 compiler pins this branch to version `0.1.1`.
 
-```text
-build/BOOT.BIN
-build/KERNEL.BIN
-build/kernel.elf
-build/kernel.map
-build/zenov-os.img
-build/zenov-data.img
-build/HELLO.ZEX
-build/hello-user.elf
-build/build-manifest.json
-build/qemu/serial.log
-build/qemu/screenshot.ppm
-```
+## Current limitations
 
-## Zenov source contract
-
-`kernel/main.zv` defines the product name, version, prompt, boot messages,
-project commands and read-only system documents. The native stage0 compiler
-rejects a system version other than `0.1.0`.
-
-Supported calls:
-
-```text
-system_name(string)
-system_version(string)
-shell_prompt(string)
-theme(foreground, background)
-boot_message(string)
-shell_command(name, response)
-vfs_file(name, content)
-```
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the implementation split.
+ZenovOS remains an early protected-mode operating-system foundation. It does not yet provide multitasking, per-process page directories, a general heap with free/reuse, writable FAT16, a hard-disk installer, graphics, networking, USB, dynamic linking, permissions or DOS/Windows compatibility.
 
 ## License
 
-Original ZenovOS code is BSD-2-Clause. FAT12 loader lineage and the retained
-x16-PRos MIT notice are documented in `THIRD_PARTY.md`.
+Original ZenovOS code is BSD-2-Clause. FAT12 loader lineage and the retained x16-PRos MIT notice are documented in `THIRD_PARTY.md`.

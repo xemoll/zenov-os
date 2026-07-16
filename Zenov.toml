@@ -1,12 +1,12 @@
 [package]
 name = "zenov-os"
-version = "0.1.0"
+version = "0.1.1"
 entry = "kernel/main.zv"
 
 [target]
 triple = "i686-zenov-none"
 format = "flat-binary"
-filesystem = "fat12"
+filesystem = "fat12+zenovfs1"
 boot = "bios"
 
 [language]
@@ -15,6 +15,6 @@ extension = ".zv"
 
 [implementation]
 zenov = "system manifest and generated kernel configuration"
-assembler = "boot, protected-mode entry, interrupts"
-cpp = "freestanding kernel, drivers, shell and native build tools"
+assembler = "boot, protected-mode entry, interrupts and userspace transitions"
+cpp = "freestanding kernel, paging, storage, application loader and native build tools"
 python = false

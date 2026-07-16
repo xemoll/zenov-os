@@ -14,11 +14,11 @@ _start:
     int 0x80
 
 .hang:
-    hlt
+    ud2
     jmp .hang
 
 .section .rodata,"a"
 message:
-    .ascii "HELLO_ZEX_OK\n"
-    .ascii "ZenovOS native application ABI is active.\n"
+    .ascii "HELLO_ZEX_0_1_1_OK\n"
+    .ascii "ZenovOS native ZEX1 application returned through INT 0x80.\n"
 message_end:
