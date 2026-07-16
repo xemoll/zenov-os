@@ -60,32 +60,25 @@ controller_first() {
   sleep 0.3
   echo "screendump $SCREENSHOT"
   sleep 0.2
-
   echo "sendkey f1"
   wait_for_serial "$serial" "COMMAND REFERENCE" || { echo quit; return 1; }
   echo "sendkey f4"
   sleep 0.2
-
   send_command "write PERSIST.TXT PERSISTENCE_0_1_1_R2_OK"
   wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
-
   send_command "run HELLO"
   wait_for_serial "$serial" "HELLO_ZEX_0_1_1_OK" || { echo quit; return 1; }
   wait_for_serial "$serial" "APP_EXIT code=0" || { echo quit; return 1; }
-
   send_command "run FILEIO.ELF"
   wait_for_serial "$serial" "FILEIO_ELF_OK" || { echo quit; return 1; }
   wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
-
   send_command "run FAULT.ELF"
   wait_for_serial "$serial" "FAULT_ELF_TRIGGER" || { echo quit; return 1; }
   wait_for_serial "$serial" "APP_FAULT_RECOVERED vector=6" || { echo quit; return 1; }
   wait_for_serial "$serial" "KERNEL_SURVIVED_USER_FAULT" || { echo quit; return 1; }
-
   send_command "status"
   wait_for_serial "$serial" "SYSTEM STATUS" || { echo quit; return 1; }
   wait_for_serial "$serial" "Core services are running" || { echo quit; return 1; }
-
   send_command "fsck"
   wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
   sleep 0.2
@@ -112,8 +105,8 @@ controller_degraded() {
   wait_for_serial "$serial" "$BOOT_MARKER" || { echo quit; return 1; }
   wait_for_serial "$serial" "PMM_OK" || { echo quit; return 1; }
   wait_for_serial "$serial" "PAGING_OK" || { echo quit; return 1; }
-  wait_for_serial "$serial" "Storage: ZenovFS mount failed" || { echo quit; return 1; }
-  wait_for_serial "$serial" "ZENOVFS_BOOT_FSCK_SKIPPED" || { echo quit; return 1; }
+  wait_for_serial "$serial" "$STORAGE_MARKER" || { echo quit; return 1; }
+  wait_for_serial "$serial" "ZENOVFS_BOOT_FSCK_FAILED" || { echo quit; return 1; }
   wait_for_serial "$serial" "CONFIG_DEFAULT storage-offline" || { echo quit; return 1; }
   wait_for_serial "$serial" "USER_FAULT_ISOLATION_OK" || { echo quit; return 1; }
   wait_for_serial "$serial" "$UI_MARKER" || { echo quit; return 1; }
@@ -154,7 +147,9 @@ run_phase controller_second "$SERIAL2" "$OUT/monitor-phase2.log" "$OUT/qemu-phas
 
 CORRUPT_IMAGE="$(cd "$OUT" && pwd)/zenov-data-corrupt.img"
 cp "$DATA_IMAGE" "$CORRUPT_IMAGE"
-printf '\000' | dd of="$CORRUPT_IMAGE" bs=1 seek=0 count=1 conv=notrunc status=none
+# Entry 2 starts at sector 32 + 2*128 = 288. Corrupt one payload byte while
+# leaving the superblock and entry table structurally valid.
+printf '\000' | dd of="$CORRUPT_IMAGE" bs=1 seek=147456 count=1 conv=notrunc status=none
 run_phase controller_degraded "$SERIAL3" "$OUT/monitor-degraded.log" "$OUT/qemu-degraded.stderr" "$CORRUPT_IMAGE"
 cat "$SERIAL1" "$SERIAL2" "$SERIAL3" > "$OUT/serial.log"
 
@@ -162,8 +157,8 @@ for marker in "$BOOT_MARKER" PMM_OK PAGING_OK "$STORAGE_MARKER" ZENOVFS_BOOT_FSC
               "CONFIG_LOAD_OK theme=graphite" USER_FAULT_ISOLATION_OK "$UI_MARKER" \
               "COMMAND REFERENCE" WRITE_OK HELLO_ZEX_0_1_1_OK FILEIO_ELF_OK \
               FAULT_ELF_TRIGGER "APP_FAULT_RECOVERED vector=6" KERNEL_SURVIVED_USER_FAULT \
-              "SYSTEM STATUS" ZENOVFS_FSCK_OK "Storage: ZenovFS mount failed" \
-              ZENOVFS_BOOT_FSCK_SKIPPED "CONFIG_DEFAULT storage-offline"; do
+              "SYSTEM STATUS" ZENOVFS_FSCK_OK ZENOVFS_BOOT_FSCK_FAILED \
+              "CONFIG_DEFAULT storage-offline"; do
   grep -q "$marker" "$OUT/serial.log"
 done
 [[ "$(grep -c 'PERSISTENCE_0_1_1_R2_OK' "$OUT/serial.log")" -ge 2 ]]
@@ -175,4 +170,4 @@ if grep -q "ZENOVOS KERNEL PANIC" "$OUT/serial.log"; then
   exit 1
 fi
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK revision2 fault-isolation verified-storage degraded-boot persistence serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+printf 'qemu-smoke: OK revision2 fault-isolation payload-quarantine persistence serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
