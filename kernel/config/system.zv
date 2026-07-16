@@ -1,0 +1,5 @@
+system_name("ZenovOS");
+system_version("0.1.1");
+shell_prompt("zenov> ");
+theme(7, 0);
+shell_limits(512, 128);
