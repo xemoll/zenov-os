@@ -1,4 +1,4 @@
-name: ZenovOS 0.1.0 CI
+name: ZenovOS 0.1.1 CI
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
 jobs:
   native-build-and-boot:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -33,17 +33,17 @@ jobs:
           set -o pipefail
           make clean check 2>&1 | tee ci-logs/native-build.log
 
-      - name: Boot, write, run app and verify reboot persistence
+      - name: Boot paging kernel, run ZEX and ELF, verify persistence
         run: make qemu
 
       - name: Verify deterministic installation package
         run: |
           bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
           bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist-rebuild package-rebuild
-          cmp dist/ZenovOS-0.1.0-x86.img dist-rebuild/ZenovOS-0.1.0-x86.img
-          cmp dist/ZenovOS-0.1.0-x86.zip dist-rebuild/ZenovOS-0.1.0-x86.zip
+          cmp dist/ZenovOS-0.1.1-x86.img dist-rebuild/ZenovOS-0.1.1-x86.img
+          cmp dist/ZenovOS-0.1.1-x86.zip dist-rebuild/ZenovOS-0.1.1-x86.zip
           cmp dist/SHA256SUMS.txt dist-rebuild/SHA256SUMS.txt
-          unzip -p dist/ZenovOS-0.1.0-x86.zip ZenovOS-0.1.0-data.img | cmp - build/zenov-data.img
+          unzip -p dist/ZenovOS-0.1.1-x86.zip ZenovOS-0.1.1-data.img | cmp - build/zenov-data.img
 
       - name: Verify deterministic system rebuild
         run: make deterministic
@@ -52,25 +52,32 @@ jobs:
         run: |
           readelf -h build/kernel.elf
           readelf -h build/hello-user.elf
+          readelf -h build/FILEIO.ELF
           test "$(stat -c%s build/BOOT.BIN)" -eq 512
           test "$(stat -c%s build/KERNEL.BIN)" -le 61440
           test "$(stat -c%s build/zenov-data.img)" -eq 16777216
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
+          grep -q PMM_OK build/qemu/serial.log
+          grep -q PAGING_OK build/qemu/serial.log
           grep -q ZENOVFS_MOUNT_OK build/qemu/serial.log
+          grep -q PROCESS_ABI_0_1_1_OK build/qemu/serial.log
           grep -q ZENOVOS_UI_READY build/qemu/serial.log
-          grep -q 'Kernel online' build/qemu/serial.log
-          grep -q 'COMMAND REFERENCE' build/qemu/serial.log
-          grep -q 'WRITE_OK' build/qemu/serial.log
-          grep -q 'HELLO_ZEX_OK' build/qemu/serial.log
-          grep -q 'APP_EXIT code=0' build/qemu/serial.log
-          test "$(grep -c PERSISTENCE_OK build/qemu/serial.log)" -ge 2
+          grep -q 'VIRTUAL MEMORY' build/qemu/serial.log
+          grep -q ZENOVFS_FSCK_OK build/qemu/serial.log
+          grep -q APP_START_ZEX build/qemu/serial.log
+          grep -q HELLO_ZEX_0_1_1_OK build/qemu/serial.log
+          grep -q APP_START_ELF build/qemu/serial.log
+          grep -q FILEIO_ELF_OK build/qemu/serial.log
+          test "$(grep -c 'APP_EXIT code=0' build/qemu/serial.log)" -ge 2
+          test "$(grep -c PERSISTENCE_0_1_1_OK build/qemu/serial.log)" -ge 2
+          test "$(grep -c FILE_SYSCALL_PERSIST_OK build/qemu/serial.log)" -ge 2
           grep -q 'zenov> ' build/qemu/serial.log
 
-      - name: Upload verified 0.1.0 evidence
+      - name: Upload verified 0.1.1 evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zenov-os-0.1.0-storage-zex-ci
+          name: zenov-os-0.1.1-paging-elf-ci
           if-no-files-found: error
           path: |
             build/BOOT.BIN
@@ -81,6 +88,7 @@ jobs:
             build/zenov-data.img
             build/HELLO.ZEX
             build/hello-user.elf
+            build/FILEIO.ELF
             build/build-manifest.json
             build/qemu/serial.log
             build/qemu/serial-phase1.log
