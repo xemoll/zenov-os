@@ -10,15 +10,9 @@ uint32_t available_frames = 0;
 uint32_t allocated_frames = 0;
 bool initialized = false;
 
-void mark_used(uint32_t frame) {
-    frame_bitmap[frame / 32U] |= 1U << (frame % 32U);
-}
-void mark_free(uint32_t frame) {
-    frame_bitmap[frame / 32U] &= ~(1U << (frame % 32U));
-}
-bool is_used(uint32_t frame) {
-    return (frame_bitmap[frame / 32U] & (1U << (frame % 32U))) != 0;
-}
+void mark_used(uint32_t frame) { frame_bitmap[frame / 32U] |= 1U << (frame % 32U); }
+void mark_free(uint32_t frame) { frame_bitmap[frame / 32U] &= ~(1U << (frame % 32U)); }
+bool is_used(uint32_t frame) { return (frame_bitmap[frame / 32U] & (1U << (frame % 32U))) != 0; }
 uint32_t align_up(uint32_t value) { return (value + page_size - 1U) & ~(page_size - 1U); }
 uint32_t align_down(uint32_t value) { return value & ~(page_size - 1U); }
 
@@ -35,28 +29,6 @@ void release_usable_range(uint32_t start, uint32_t end) {
             ++available_frames;
         }
     }
-}
-
-void init() {
-    for (uint32_t i = 0; i < bitmap_words; ++i) frame_bitmap[i] = 0xFFFFFFFFU;
-    available_frames = 0;
-    allocated_frames = 0;
-
-    if (boot_info()->magic == boot_magic) {
-        for (uint32_t i = 0; i < boot_info()->e820_count; ++i) {
-            const auto& entry = e820_entries()[i];
-            if (entry.type != 1 || entry.base_high != 0) continue;
-            uint32_t end = managed_limit;
-            if (entry.length_high == 0) {
-                const uint32_t candidate = entry.base_low + entry.length_low;
-                end = candidate < entry.base_low ? managed_limit : candidate;
-            }
-            release_usable_range(entry.base_low, end);
-        }
-    }
-
-    initialized = available_frames != 0;
-    serial::line(initialized ? "PMM_OK" : "PMM_UNAVAILABLE");
 }
 
 uintptr_t allocate_frame() {
@@ -85,6 +57,40 @@ bool free_frame(uintptr_t address) {
     return true;
 }
 
+void init() {
+    for (uint32_t i = 0; i < bitmap_words; ++i) frame_bitmap[i] = 0xFFFFFFFFU;
+    available_frames = 0;
+    allocated_frames = 0;
+
+    if (boot_info()->magic == boot_magic) {
+        for (uint32_t i = 0; i < boot_info()->e820_count; ++i) {
+            const auto& entry = e820_entries()[i];
+            if (entry.type != 1 || entry.base_high != 0) continue;
+            uint32_t end = managed_limit;
+            if (entry.length_high == 0) {
+                const uint32_t candidate = entry.base_low + entry.length_low;
+                end = candidate < entry.base_low ? managed_limit : candidate;
+            }
+            release_usable_range(entry.base_low, end);
+        }
+    }
+
+    initialized = available_frames != 0;
+    if (!initialized) {
+        serial::line("PMM_UNAVAILABLE");
+        return;
+    }
+    const uint32_t before = available_frames;
+    const uintptr_t test_frame = allocate_frame();
+    if (!test_frame || allocated_frames != 1 || available_frames + 1U != before || !free_frame(test_frame) ||
+        allocated_frames != 0 || available_frames != before) {
+        initialized = false;
+        serial::line("PMM_SELFTEST_FAILED");
+        return;
+    }
+    serial::line("PMM_OK");
+}
+
 uint32_t free_bytes() { return available_frames * page_size; }
 uint32_t allocated_bytes() { return allocated_frames * page_size; }
 uint32_t managed_bytes() { return managed_limit; }
@@ -111,8 +117,8 @@ void init() {
     page_directory[0] = reinterpret_cast<uintptr_t>(kernel_table) | present | writable;
     page_directory[1] = reinterpret_cast<uintptr_t>(user_table) | present | writable | user;
 
-    const uintptr_t directory_address = reinterpret_cast<uintptr_t>(page_directory);
-    asm volatile("mov %0, %%cr3" : : "r"(directory_address) : "memory");
+    const uintptr_t directory = reinterpret_cast<uintptr_t>(page_directory);
+    asm volatile("mov %0, %%cr3" : : "r"(directory) : "memory");
     uint32_t cr0;
     asm volatile("mov %%cr0, %0" : "=r"(cr0));
     cr0 |= 0x80010000U;
@@ -122,7 +128,7 @@ void init() {
     serial::line("PAGING_OK");
 }
 
-uintptr_t fault_address() {
+[[maybe_unused]] uintptr_t fault_address() {
     uintptr_t address;
     asm volatile("mov %%cr2, %0" : "=r"(address));
     return address;
