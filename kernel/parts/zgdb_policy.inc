@@ -43,10 +43,15 @@ void big_subtract(BigInteger& left, const BigInteger& right) {
         left.limb[i] = static_cast<uint32_t>(current - subtrahend); borrow = current < subtrahend ? 1ULL : 0ULL;
     }
 }
-void big_add_mod(BigInteger& output, const BigInteger& left, const BigInteger& right, const BigInteger& modulus) {
+void big_add_plain(BigInteger& output, const BigInteger& left, const BigInteger& right) {
     unsigned long long carry = 0;
     for (uint32_t i = 0; i < 64U; ++i) { const unsigned long long sum = static_cast<unsigned long long>(left.limb[i]) + right.limb[i] + carry; output.limb[i] = static_cast<uint32_t>(sum); carry = sum >> 32U; }
-    if (carry || big_compare(output, modulus) >= 0) big_subtract(output, modulus);
+}
+void big_add_mod(BigInteger& output, const BigInteger& left, const BigInteger& right, const BigInteger& modulus) {
+    BigInteger threshold = modulus;
+    big_subtract(threshold, right);
+    if (big_compare(left, threshold) >= 0) { output = left; big_subtract(output, threshold); }
+    else big_add_plain(output, left, right);
 }
 bool big_bit(const BigInteger& value, uint32_t bit) { return ((value.limb[bit / 32U] >> (bit % 32U)) & 1U) != 0; }
 void big_multiply_mod(BigInteger& output, const BigInteger& left, const BigInteger& right, const BigInteger& modulus) {
@@ -136,13 +141,13 @@ void activate(const Record source[max_records], uint32_t count, uint32_t version
     active_record_count = count; active_policy_version = version;
 }
 
-bool read_database(const char* path, uint32_t minimum_version, Validation& validation, uint32_t& version) {
+bool read_database(const char* path, uint32_t minimum_version, Validation& validation, uint32_t& version, uint32_t& count) {
+    count = version = 0;
     if (!process::application_buffer) return false;
     uint32_t size = 0;
     if (!storage::read_file(path, process::application_buffer, max_database_bytes, size)) { validation = Validation::malformed; return false; }
-    uint32_t count = 0; validation = validate(process::application_buffer, size, minimum_version, candidate_records, count, version);
-    if (validation != Validation::okay) return false;
-    active_record_count = count; return true;
+    validation = validate(process::application_buffer, size, minimum_version, candidate_records, count, version);
+    return validation == Validation::okay;
 }
 
 const Record* matching_record(uint8_t type, const uint8_t digest[32]) {
@@ -167,17 +172,17 @@ const char* validation_name(Validation validation) {
 }
 
 bool update(const char* candidate_path) {
-    Validation validation{}; uint32_t version = 0;
-    if (!candidate_path || !*candidate_path || !read_database(candidate_path, active_policy_version + 1U, validation, version)) {
+    Validation validation{}; uint32_t version = 0, count = 0;
+    if (!candidate_path || !*candidate_path || !read_database(candidate_path, active_policy_version + 1U, validation, version, count)) {
         serial::write(validation == Validation::rollback ? "ZGDB_ROLLBACK_REJECTED reason=" : "ZGDB_TAMPER_REJECTED reason="); serial::line(validation_name(validation)); return false;
     }
     uint32_t size = 0;
     if (!storage::read_file(candidate_path, process::application_buffer, max_database_bytes, size)) return false;
+    uint32_t final_count = 0, final_version = 0;
+    validation = validate(process::application_buffer, size, active_policy_version + 1U, candidate_records, final_count, final_version);
+    if (validation != Validation::okay || final_version != version || final_count != count) return false;
     if (!storage::write_file("/security/zenovguard.zgdb", process::application_buffer, size, false)) return false;
     if (!write_version(version)) return false;
-    uint32_t count = 0, verified_version = 0;
-    validation = validate(process::application_buffer, size, version, candidate_records, count, verified_version);
-    if (validation != Validation::okay || verified_version != version) return false;
     activate(candidate_records, count, version); persistent_policy_version = version; ready = true;
     serial::write("ZGDB_ATOMIC_UPDATE_OK version="); process::serial_u32(version); serial::write("\r\n"); return true;
 }
@@ -186,9 +191,9 @@ bool init() {
     uint8_t version_buffer[16]; uint32_t version_size = 0;
     persistent_policy_version = storage::read_file("/security/zenovguard.version", version_buffer, sizeof(version_buffer), version_size) ? parse_version(version_buffer, version_size) : 0;
     uint32_t minimum = compiled_policy_floor; if (persistent_policy_version > minimum) minimum = persistent_policy_version;
-    Validation validation{}; uint32_t version = 0;
-    if (!read_database("/security/zenovguard.zgdb", minimum, validation, version)) { serial::write("ZGDB_INIT_FAILED reason="); serial::line(validation_name(validation)); ready = false; return false; }
-    const uint32_t count = active_record_count; activate(candidate_records, count, version);
+    Validation validation{}; uint32_t version = 0, count = 0;
+    if (!read_database("/security/zenovguard.zgdb", minimum, validation, version, count)) { serial::write("ZGDB_INIT_FAILED reason="); serial::line(validation_name(validation)); ready = false; return false; }
+    activate(candidate_records, count, version);
     if (persistent_policy_version < version && !write_version(version)) { ready = false; return false; }
     persistent_policy_version = version; ready = true;
     serial::line("ZGDB_SIGNATURE_OK"); serial::write("ZGDB_POLICY_VERSION_OK version="); process::serial_u32(version); serial::write("\r\n"); serial::line("ZGDB_READY"); return true;
