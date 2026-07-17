@@ -109,3 +109,5 @@ protected_entry:
     cli
     hlt
     jmp .hang
+
+.section .note.GNU-stack,"",@progbits
