@@ -34,6 +34,7 @@ struct [[gnu::packed]] Journal { Header header; Record records[disk_capacity]; }
 static_assert(sizeof(Header) == 96U && sizeof(Record) == 128U && sizeof(Journal) == journal_bytes);
 
 Journal journal{};
+Journal self_test_scratch{};
 bool ready = false;
 bool replayed = false;
 uint32_t persistent_appends = 0;
@@ -144,17 +145,20 @@ bool append_to(Journal& target, uint32_t tick, uint8_t action, uint8_t verdict, 
 }
 
 bool self_test() {
-    Journal sample{}; initialize_empty(sample);
+    initialize_empty(self_test_scratch);
     uint8_t first_digest[32]{}; first_digest[0] = 0x11U;
     uint8_t second_digest[32]{}; second_digest[0] = 0x22U;
-    if (!append_to(sample, 1U, static_cast<uint8_t>(security_guard::AuditAction::boot), static_cast<uint8_t>(security_guard::Verdict::trusted), "<audit-selftest-1>", first_digest) ||
-        !append_to(sample, 2U, static_cast<uint8_t>(security_guard::AuditAction::scan), static_cast<uint8_t>(security_guard::Verdict::clean), "<audit-selftest-2>", second_digest) || !verify(sample)) return false;
-    Journal tampered = sample;
-    tampered.records[0].path[1] ^= 1;
-    if (verify(tampered)) return false;
-    tampered = sample;
-    tampered.header.head_hash[0] ^= 1U;
-    return !verify(tampered);
+    if (!append_to(self_test_scratch, 1U, static_cast<uint8_t>(security_guard::AuditAction::boot), static_cast<uint8_t>(security_guard::Verdict::trusted), "<audit-selftest-1>", first_digest) ||
+        !append_to(self_test_scratch, 2U, static_cast<uint8_t>(security_guard::AuditAction::scan), static_cast<uint8_t>(security_guard::Verdict::clean), "<audit-selftest-2>", second_digest) || !verify(self_test_scratch)) return false;
+    const char original_path_byte = self_test_scratch.records[0].path[1];
+    self_test_scratch.records[0].path[1] ^= 1;
+    const bool path_tamper_rejected = !verify(self_test_scratch);
+    self_test_scratch.records[0].path[1] = original_path_byte;
+    const uint8_t original_head_byte = self_test_scratch.header.head_hash[0];
+    self_test_scratch.header.head_hash[0] ^= 1U;
+    const bool head_tamper_rejected = !verify(self_test_scratch);
+    self_test_scratch.header.head_hash[0] = original_head_byte;
+    return path_tamper_rejected && head_tamper_rejected && verify(self_test_scratch);
 }
 
 void serial_state(const char* marker) {
