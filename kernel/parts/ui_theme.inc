@@ -134,13 +134,15 @@ void persist_runtime_theme(uint8_t id) {
 
 void draw_wallpaper() {
     vertical_gradient(0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height), current_theme.canvas_top, current_theme.canvas_bottom);
-    fill_circle_alpha(84, 82, 176, current_theme.glow_primary, 18);
-    fill_circle_alpha(730, 528, 220, current_theme.glow_secondary, 14);
+    fill_circle_alpha(400, -112, 352, current_theme.glow_primary, 11);
 }
 
 void draw_workspace_switcher() {
-    const int32_t group_x = 346, group_y = topbar_y + 6, item_width = 36;
-    fill_round_rect(group_x, group_y, item_width * 3, 24, 12, current_theme.surface_high);
+    const int32_t item_width = 32;
+    const int32_t group_width = item_width * 3;
+    const int32_t group_x = static_cast<int32_t>(width / 2U) - group_width / 2;
+    const int32_t group_y = topbar_y + 6;
+    fill_round_rect(group_x, group_y, group_width, 24, 12, current_theme.surface_high);
     for (uint32_t i = 0; i < 3U; ++i) {
         const int32_t x = group_x + static_cast<int32_t>(i * item_width);
         if (i == 0U) fill_round_rect(x + 2, group_y + 2, item_width - 4, 20, 10, current_theme.accent);
@@ -152,26 +154,55 @@ void draw_workspace_switcher() {
 void draw_topbar() {
     fill_round_rect_alpha(topbar_x, topbar_y, topbar_width, topbar_height, 14, current_theme.surface_low, desktop_opacity);
     draw_text(topbar_x + 16, topbar_y + 14, "ZENOVOS", current_theme.text, 1);
-    fill_circle_alpha(topbar_x + 78, topbar_y + 18, 3, current_theme.success, 255);
-    draw_text(topbar_x + 90, topbar_y + 14, "LOCAL", current_theme.text_muted, 1);
     draw_workspace_switcher();
-    fill_circle_alpha(topbar_x + topbar_width - 24, topbar_y + 18, 3, current_theme.success, 255);
-    draw_text_right(topbar_x + topbar_width - 36, topbar_y + 14, "ONLINE", current_theme.text_muted, 1);
+    draw_text_right(topbar_x + topbar_width - 16, topbar_y + 14, zenov_generated::kVersion, current_theme.text_muted, 1);
 }
 
-void draw_dock_icon(int32_t x, char letter, bool selected, uint32_t accent) {
+enum class ShellIcon : uint8_t { terminal, files, settings, apps };
+
+void draw_shell_icon(ShellIcon icon, int32_t x, int32_t y, uint32_t color) {
+    if (icon == ShellIcon::terminal) {
+        draw_char(x, y + 2, '>', color, 1);
+        fill_rect(x + 10, y + 14, 10, 2, color);
+        return;
+    }
+    if (icon == ShellIcon::files) {
+        fill_round_rect(x + 1, y + 6, 21, 15, 3, color);
+        fill_round_rect(x + 3, y + 2, 10, 8, 2, color);
+        return;
+    }
+    if (icon == ShellIcon::settings) {
+        fill_rect(x + 1, y + 3, 7, 2, color);
+        fill_rect(x + 12, y + 3, 10, 2, color);
+        fill_rect(x + 8, y + 1, 4, 6, color);
+        fill_rect(x + 1, y + 10, 13, 2, color);
+        fill_rect(x + 18, y + 10, 4, 2, color);
+        fill_rect(x + 14, y + 8, 4, 6, color);
+        fill_rect(x + 1, y + 17, 3, 2, color);
+        fill_rect(x + 8, y + 17, 14, 2, color);
+        fill_rect(x + 4, y + 15, 4, 6, color);
+        return;
+    }
+    fill_round_rect(x + 1, y + 1, 8, 8, 2, color);
+    fill_round_rect(x + 13, y + 1, 8, 8, 2, color);
+    fill_round_rect(x + 1, y + 13, 8, 8, 2, color);
+    fill_round_rect(x + 13, y + 13, 8, 8, 2, color);
+}
+
+void draw_dock_icon(int32_t x, ShellIcon icon, bool selected, uint32_t accent) {
     const uint32_t fill = selected ? accent : current_theme.surface_high;
+    const uint32_t icon_color = selected ? rgb(255,255,255) : current_theme.text_muted;
     fill_round_rect(x, dock_y + 6, 40, 40, 11, fill);
-    draw_char(x + 15, dock_y + 18, letter, current_theme.text, 2);
-    if (selected) fill_round_rect(x + 14, dock_y + dock_height - 3, 12, 2, 1, current_theme.accent);
+    draw_shell_icon(icon, x + 9, dock_y + 15, icon_color);
+    if (selected) fill_round_rect(x + 14, dock_y + dock_height - 3, 12, 2, 1, accent);
 }
 
 void draw_dock() {
     fill_round_rect_alpha(dock_x, dock_y, dock_width, dock_height, 17, current_theme.surface_low, desktop_opacity);
-    draw_dock_icon(dock_x + 12, 'T', active_view == View::terminal, current_theme.accent);
-    draw_dock_icon(dock_x + 68, 'F', active_view == View::files, rgb(74,156,231));
-    draw_dock_icon(dock_x + 124, 'S', active_view == View::settings, rgb(102,202,161));
-    draw_dock_icon(dock_x + 180, 'A', active_view == View::launcher, rgb(238,163,82));
+    draw_dock_icon(dock_x + 12, ShellIcon::terminal, active_view == View::terminal, current_theme.accent);
+    draw_dock_icon(dock_x + 68, ShellIcon::files, active_view == View::files, rgb(74,156,231));
+    draw_dock_icon(dock_x + 124, ShellIcon::settings, active_view == View::settings, rgb(102,202,161));
+    draw_dock_icon(dock_x + 180, ShellIcon::apps, active_view == View::launcher, rgb(238,163,82));
 }
 
 void draw_window_chrome(const char* title, const char* subtitle) {
