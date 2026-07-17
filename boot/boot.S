@@ -95,7 +95,11 @@ read_sectors:
     pop bx
     pop ax
     add bx, word ptr [bpbBytesPerSector]
-    jc failure
+    jnc .buffer_ready
+    mov dx, es
+    add dx, 0x1000
+    mov es, dx
+.buffer_ready:
     inc ax
     loop .next_sector
     ret
@@ -203,7 +207,7 @@ failure:
 dataSector: .word 0
 cluster:    .word 0
 imageName:  .ascii "KERNEL  BIN"
-msgLoading: .asciz "\r\nZenovOS 0.1.0 loading"
+msgLoading: .asciz "\r\nZenovOS 0.1.1 loading"
 msgDone:    .asciz ".\r\n"
 msgFailure: .asciz "\r\nBoot failure. Press a key.\r\n"
 

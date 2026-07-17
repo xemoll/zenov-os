@@ -1,7 +1,9 @@
 extern "C" void syscall_entry();
 extern "C" void user_abort_entry();
+extern "C" void isr44();
 namespace paging { uintptr_t fault_address(); }
 namespace process { void record_user_fault(uint32_t vector, uint32_t error, uint32_t eip, uintptr_t address); }
+namespace graphics { void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons); }
 
 struct [[gnu::packed]] BootInfo { uint32_t magic; uint8_t drive; uint8_t e820_count; uint16_t reserved; };
 struct [[gnu::packed]] E820Entry { uint32_t base_low, base_high, length_low, length_high, type, attributes; };
@@ -20,6 +22,7 @@ void idt_set(uint8_t vector, uintptr_t address, uint8_t flags = 0x8E) {
 void idt_init() {
     memset(idt, 0, sizeof(idt));
     for (uint32_t i = 0; i < 34; ++i) idt_set(static_cast<uint8_t>(i), reinterpret_cast<uintptr_t>(isr_stub_table[i]));
+    idt_set(44, reinterpret_cast<uintptr_t>(isr44));
     idt_set(0x80, reinterpret_cast<uintptr_t>(syscall_entry), 0xEE);
     const IdtPointer pointer{static_cast<uint16_t>(sizeof(idt) - 1), reinterpret_cast<uint32_t>(&idt[0])}; asm volatile("lidt %0" : : "m"(pointer));
 }
@@ -27,7 +30,7 @@ void idt_init() {
 void pic_remap() {
     out8(0x20, 0x11); io_wait(); out8(0xA0, 0x11); io_wait(); out8(0x21, 0x20); io_wait(); out8(0xA1, 0x28); io_wait();
     out8(0x21, 0x04); io_wait(); out8(0xA1, 0x02); io_wait(); out8(0x21, 0x01); io_wait(); out8(0xA1, 0x01); io_wait();
-    out8(0x21, 0xFC); out8(0xA1, 0xFF);
+    out8(0x21, 0xF8); out8(0xA1, 0xEF);
 }
 void pic_eoi(uint8_t irq) { if (irq >= 8) out8(0xA0, 0x20); out8(0x20, 0x20); }
 volatile uint32_t timer_ticks = 0;
@@ -79,6 +82,35 @@ void keyboard_scancode(uint8_t code) {
     if (value) key_push(static_cast<uint8_t>(value));
 }
 
+bool ps2_wait_input() { for (uint32_t timeout = 0; timeout < 100000U; ++timeout) if ((in8(0x64) & 0x02U) == 0) return true; return false; }
+bool ps2_wait_output() { for (uint32_t timeout = 0; timeout < 100000U; ++timeout) if (in8(0x64) & 0x01U) return true; return false; }
+bool ps2_command(uint8_t value) { if (!ps2_wait_input()) return false; out8(0x64, value); return true; }
+bool ps2_data(uint8_t value) { if (!ps2_wait_input()) return false; out8(0x60, value); return true; }
+bool mouse_send(uint8_t value) {
+    if (!ps2_command(0xD4) || !ps2_data(value) || !ps2_wait_output()) return false;
+    return in8(0x60) == 0xFA;
+}
+uint8_t mouse_packet[3]{}; uint32_t mouse_packet_index = 0; bool mouse_online = false;
+void mouse_byte(uint8_t value) {
+    if (!mouse_online) return;
+    if (mouse_packet_index == 0 && (value & 0x08U) == 0) return;
+    mouse_packet[mouse_packet_index++] = value;
+    if (mouse_packet_index != 3) return;
+    mouse_packet_index = 0;
+    if (mouse_packet[0] & 0xC0U) return;
+    int32_t delta_x = mouse_packet[1]; if (mouse_packet[0] & 0x10U) delta_x -= 256;
+    int32_t delta_y = mouse_packet[2]; if (mouse_packet[0] & 0x20U) delta_y -= 256;
+    graphics::on_mouse_packet(delta_x, -delta_y, static_cast<uint8_t>(mouse_packet[0] & 0x07U));
+}
+bool mouse_init() {
+    while (in8(0x64) & 0x01U) (void)in8(0x60);
+    if (!ps2_command(0xA8) || !ps2_command(0x20) || !ps2_wait_output()) return false;
+    uint8_t configuration = in8(0x60); configuration = static_cast<uint8_t>((configuration | 0x02U) & ~0x20U);
+    if (!ps2_command(0x60) || !ps2_data(configuration)) return false;
+    if (!mouse_send(0xF6) || !mouse_send(0xF4)) return false;
+    mouse_online = true; serial::line("PS2_MOUSE_OK"); return true;
+}
+
 struct InterruptFrame {
     uint32_t gs, fs, es, ds;
     uint32_t edi, esi, ebp, esp_dummy, ebx, edx, ecx, eax;
@@ -93,6 +125,7 @@ struct InterruptFrame {
 extern "C" uint32_t interrupt_dispatch(InterruptFrame* frame) {
     if (frame->vector == 32) { ++timer_ticks; pic_eoi(0); return 0; }
     if (frame->vector == 33) { keyboard_scancode(in8(0x60)); pic_eoi(1); return 0; }
+    if (frame->vector == 44) { mouse_byte(in8(0x60)); pic_eoi(12); return 0; }
     if ((frame->cs & 3U) == 3U) {
         const uintptr_t address = frame->vector == 14 ? paging::fault_address() : 0;
         process::record_user_fault(frame->vector, frame->error, frame->eip, address);
