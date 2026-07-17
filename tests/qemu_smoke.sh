@@ -64,6 +64,16 @@ wait_for_boot() {
     && wait_for_serial "$serial" "HEAP_STRESS_OK" \
     && wait_for_serial "$serial" "$STORAGE_MARKER" \
     && wait_for_serial "$serial" "$PROCESS_MARKER" \
+    && wait_for_serial "$serial" "GRAPHICS_PCI_OK" \
+    && wait_for_serial "$serial" "FRAMEBUFFER_MAPPED_OK" \
+    && wait_for_serial "$serial" "GRAPHICS_MODE_OK" \
+    && wait_for_serial "$serial" "BACKBUFFER_PRESENT_OK" \
+    && wait_for_serial "$serial" "CLIPPING_OK" \
+    && wait_for_serial "$serial" "ALPHA_BLEND_OK" \
+    && wait_for_serial "$serial" "FONT_RENDER_OK" \
+    && wait_for_serial "$serial" "DESKTOP_SCENE_OK" \
+    && wait_for_serial "$serial" "GRAPHICAL_DESKTOP_READY" \
+    && wait_for_serial "$serial" "PS2_MOUSE_OK" \
     && wait_for_serial "$serial" "$UI_MARKER" \
     && wait_for_serial "$serial" "$PROMPT"
 }
@@ -71,7 +81,15 @@ wait_for_boot() {
 controller_first() {
   local serial="$1" prompt_count=1
   wait_for_boot "$serial" || { echo quit; return 1; }
+
+  echo "mouse_move 0 -190"
+  wait_for_serial "$serial" "MOUSE_PACKET_OK" || { echo quit; return 1; }
+  echo "mouse_button 1"; sleep 0.1
+  echo "mouse_move 80 30"; sleep 0.2
+  echo "mouse_button 0"
+  wait_for_serial "$serial" "WINDOW_DRAG_OK" || { echo quit; return 1; }
   sleep 0.3; echo "screendump $SCREENSHOT"; sleep 0.2
+
   echo "sendkey f1 10"; wait_for_serial "$serial" "COMMAND REFERENCE" || { echo quit; return 1; }; echo "sendkey f4 10"; sleep 0.2
 
   send_command "vm"; wait_for_serial "$serial" "VIRTUAL MEMORY" || { echo quit; return 1; }
@@ -128,10 +146,10 @@ controller_recovery() {
 run_phase() {
   local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5"
   set +e
-  "$controller" "$serial" | timeout 50s "$QEMU" \
+  "$controller" "$serial" | timeout 55s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
     -drive "file=$data_image,format=raw,if=ide,index=0,media=disk" \
-    -boot a -m 32M -display none -serial "file:$serial" -monitor stdio -no-reboot -no-shutdown \
+    -boot a -m 32M -vga std -display none -serial "file:$serial" -monitor stdio -no-reboot -no-shutdown \
     >"$monitor" 2>"$stderr"
   local status=$?; set -e
   if [[ $status -ne 0 ]]; then
@@ -150,7 +168,9 @@ cat "$SERIAL1" "$SERIAL2" "$SERIAL3" > "$OUT/serial.log"
 
 for marker in \
   "$BOOT_MARKER" "$PMM_MARKER" "PMM_STRESS_OK" "$PAGING_MARKER" "HEAP_REUSE_OK" "HEAP_COALESCE_OK" "HEAP_INVALID_FREE_BLOCKED" "HEAP_STRESS_OK" \
-  "$STORAGE_MARKER" "$PROCESS_MARKER" "$UI_MARKER" "$LONG_INPUT_MARKER" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" \
+  "$STORAGE_MARKER" "$PROCESS_MARKER" "GRAPHICS_PCI_OK" "FRAMEBUFFER_MAPPED_OK" "GRAPHICS_MODE_OK" "BACKBUFFER_PRESENT_OK" \
+  "CLIPPING_OK" "ALPHA_BLEND_OK" "FONT_RENDER_OK" "DESKTOP_SCENE_OK" "GRAPHICAL_DESKTOP_READY" "PS2_MOUSE_OK" "MOUSE_PACKET_OK" "WINDOW_DRAG_OK" \
+  "$UI_MARKER" "$LONG_INPUT_MARKER" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" \
   "FILEIO_ELF_OK" "FILE_SYSCALL_PERSIST_OK" "PROCESS_ARGV_OK" "SYSCALL_ERRORS_OK" "SYSCALL_POINTER_GUARD_OK" "CONSOLE_READ_SYSCALL_OK" \
   "PAGE_PROTECTION_OK" "USER_WRITE_TO_TEXT_BLOCKED" "USER_KERNEL_ACCESS_BLOCKED" "PAGE_FAULT_DIAGNOSTICS_OK" "USER_FAULT_RETURNED_TO_SHELL" \
   "ZENOV_SOURCE_APP_RING3_OK" "ZENOV_COMPILER_ABI_MATCH_OK" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" "recovery=committed" "ZENOVFS_FSCK_OK"; do
@@ -161,5 +181,5 @@ done
 if grep -q "Application could not be loaded" "$OUT/serial.log"; then echo "qemu-smoke: shell reported an application load failure" >&2; exit 1; fi
 [[ "$(grep -c 'PERSISTENCE_0_1_1_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: shell persistence marker missing across reboot" >&2; exit 1; }
 [[ "$(grep -c 'FILE_SYSCALL_PERSIST_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: userspace file payload missing across reboot" >&2; exit 1; }
-[[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK 0.1.1 protected-pages stress-tested-memory argv+console guarded-syscalls recoverable-faults transactional-fs kernel-recovery zenov-source-app serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+[[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: graphical framebuffer screenshot missing" >&2; exit 1; }
+printf 'qemu-smoke: OK 0.1.1 graphical-desktop ps2-mouse draggable-window protected-pages stress-tested-memory argv+console guarded-syscalls recoverable-faults transactional-fs kernel-recovery zenov-source-app serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
