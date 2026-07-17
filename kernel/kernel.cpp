@@ -20,6 +20,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #undef run
 #include "parts/process_policy.inc"
 #include "parts/graphics.inc"
+#include "parts/mouse_regression.inc"
 #include "parts/input_v2.inc"
 #define history shell_history
 #define history_count shell_history_count
@@ -49,9 +50,14 @@ extern "C" void kernel_main() {
     const bool graphical = graphics::init();
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
     pic_remap();
-    if (!mouse_init()) serial::line("PS2_MOUSE_UNAVAILABLE");
+    const bool mouse_ready = mouse_init();
+    if (!mouse_ready) serial::line("PS2_MOUSE_UNAVAILABLE");
+    if (mouse_ready && !mouse_irq_route_ready()) panic("PS/2 mouse IRQ route validation failed.");
+    if (mouse_ready) serial::line("PS2_MOUSE_IRQ_ROUTE_OK");
     pit_init(100);
     enable_interrupts();
+    if (graphical && mouse_ready && !mouse_decoder_regression()) panic("PS/2 mouse decoder regression failed.");
+    if (graphical && mouse_ready) serial::line("PS2_MOUSE_DECODER_OK");
 
     serial::line("Kernel online. Desktop, persistent storage and ring-3 services ready.");
     console::show_home();
