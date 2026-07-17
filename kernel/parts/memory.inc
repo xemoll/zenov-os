@@ -4,6 +4,7 @@ constexpr uint32_t managed_limit = 128U * 1024U * 1024U;
 constexpr uint32_t frame_count = managed_limit / page_size;
 constexpr uint32_t bitmap_words = frame_count / 32U;
 constexpr uintptr_t reserved_end = 0x00800000U;
+constexpr uint32_t self_test_frames = 16U;
 uint32_t frame_bitmap[bitmap_words];
 uint32_t available_frames = 0, allocated_frames = 0;
 bool initialized = false;
@@ -44,6 +45,22 @@ bool free_frame(uintptr_t address) {
     if (!is_used(frame)) return false;
     mark_free(frame); ++available_frames; if (allocated_frames) --allocated_frames; return true;
 }
+bool stress_test() {
+    if (available_frames < self_test_frames) return false;
+    const uint32_t free_before = available_frames;
+    const uint32_t allocated_before = allocated_frames;
+    uintptr_t frames[self_test_frames]{};
+    for (uint32_t i = 0; i < self_test_frames; ++i) {
+        frames[i] = allocate_frame();
+        if (!frames[i] || (frames[i] & (page_size - 1U))) return false;
+        for (uint32_t j = 0; j < i; ++j) if (frames[j] == frames[i]) return false;
+    }
+    if (available_frames + self_test_frames != free_before || allocated_frames != allocated_before + self_test_frames) return false;
+    if (free_frame(frames[0] + 1U)) return false;
+    for (uint32_t i = self_test_frames; i > 0; --i) if (!free_frame(frames[i - 1U])) return false;
+    if (free_frame(frames[0])) return false;
+    return available_frames == free_before && allocated_frames == allocated_before;
+}
 void init() {
     for (uint32_t i = 0; i < bitmap_words; ++i) frame_bitmap[i] = 0xFFFFFFFFU;
     available_frames = allocated_frames = 0;
@@ -61,10 +78,8 @@ void init() {
     }
     initialized = available_frames != 0;
     if (!initialized) { serial::line("PMM_UNAVAILABLE"); return; }
-    const uint32_t before = available_frames; const uintptr_t test = allocate_frame();
-    if (!test || allocated_bytes() != page_size || available_frames + 1U != before || !free_frame(test) || allocated_bytes() || available_frames != before) {
-        initialized = false; serial::line("PMM_SELFTEST_FAILED"); return;
-    }
+    if (!stress_test()) { initialized = false; serial::line("PMM_SELFTEST_FAILED"); return; }
+    serial::line("PMM_STRESS_OK");
     serial::line("PMM_OK");
 }
 }
@@ -75,6 +90,7 @@ constexpr uintptr_t limit_address = 0x00300000U;
 constexpr uint32_t magic = 0x48454150U;
 constexpr uint32_t free_flag = 1U;
 constexpr uint32_t granularity = 16U;
+constexpr uint32_t stress_slots = 24U;
 struct alignas(16) Block { uint32_t signature, capacity, requested, flags; Block* previous; Block* next; };
 static_assert((sizeof(Block) & (granularity - 1U)) == 0);
 Block* first = nullptr;
@@ -155,6 +171,35 @@ bool release(void* pointer) {
     }
     return validate();
 }
+bool stress_test() {
+    reset();
+    void* slots[stress_slots]{};
+    uint32_t sizes[stress_slots]{};
+    for (uint32_t i = 0; i < stress_slots; ++i) {
+        sizes[i] = 17U + ((i * 73U) % 997U);
+        const uint32_t alignment = 16U << (i % 4U);
+        slots[i] = allocate(sizes[i], alignment);
+        if (!slots[i] || (reinterpret_cast<uintptr_t>(slots[i]) & (alignment - 1U))) return false;
+        auto* bytes = static_cast<uint8_t*>(slots[i]);
+        bytes[0] = static_cast<uint8_t>(0xA0U + i);
+        bytes[sizes[i] - 1U] = static_cast<uint8_t>(0x50U + i);
+    }
+    if (!validate() || active_allocations != stress_slots) return false;
+    for (uint32_t i = 0; i < stress_slots; i += 2U) {
+        if (!release(slots[i])) return false;
+        slots[i] = nullptr;
+    }
+    for (uint32_t i = 0; i < stress_slots; i += 2U) {
+        sizes[i] = 33U + ((i * 41U) % 601U);
+        const uint32_t alignment = 16U << ((i + 1U) % 4U);
+        slots[i] = allocate(sizes[i], alignment);
+        if (!slots[i] || (reinterpret_cast<uintptr_t>(slots[i]) & (alignment - 1U))) return false;
+    }
+    if (!validate() || active_allocations != stress_slots) return false;
+    for (uint32_t i = stress_slots; i > 0; --i) if (!release(slots[i - 1U])) return false;
+    return validate() && active_allocations == 0 && first && first->next == nullptr && (first->flags & free_flag) &&
+           first->capacity == limit_address - start_address - sizeof(Block);
+}
 void init() {
     reset();
     void* a = allocate(128, 16), *b = allocate(256, 64), *c = allocate(64, 16);
@@ -166,8 +211,9 @@ void init() {
     serial::line(aligned && freed && reused ? "HEAP_REUSE_OK" : "HEAP_REUSE_FAILED");
     serial::line(reused ? "HEAP_COALESCE_OK" : "HEAP_COALESCE_FAILED");
     serial::line(invalid ? "HEAP_INVALID_FREE_BLOCKED" : "HEAP_INVALID_FREE_FAILED");
+    const bool stress = stress_test();
+    serial::line(stress ? "HEAP_STRESS_OK" : "HEAP_STRESS_FAILED");
     reset();
-    serial::line(validate() ? "HEAP_STRESS_OK" : "HEAP_STRESS_FAILED");
 }
 }
 
