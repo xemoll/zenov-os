@@ -13,7 +13,9 @@ _start:
     mov ebx, [esi + 4]
     cmp dword ptr [ebx], 0x68706c61
     jne .fail
-    cmp byte ptr [ebx + 4], 0
+    cmp byte ptr [ebx + 4], 'a'
+    jne .fail
+    cmp byte ptr [ebx + 5], 0
     jne .fail
     mov ebx, [esi + 8]
     cmp dword ptr [ebx], 0x61746562
