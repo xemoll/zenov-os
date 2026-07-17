@@ -11,8 +11,8 @@ ZenovGuard protects the existing ZEX1 and static ELF32 execution path. Its defau
 3. apply the active ZGDB2 signed threat and revocation policy;
 4. validate the executable container and reject malformed or W+X ELF input;
 5. require an exact path-and-SHA-256 match in the immutable bundled trust baseline;
-6. record the decision before any user pages are mapped;
-7. deny execution unless the verdict is `TRUSTED` and the digest is not revoked.
+6. commit the decision to the persistent audit journal before user pages are mapped;
+7. deny execution unless the verdict is `TRUSTED`, the digest is not revoked and the audit commit succeeds.
 
 A valid executable copied to a different path is deliberately `UNTRUSTED`. This prevents a writable persistent volume from silently becoming an executable installation channel.
 
@@ -25,7 +25,7 @@ The baseline policy contains:
 
 The EICAR payload is not stored in the repository or kernel image. Only its digest is stored. The scanner also returns `SUSPICIOUS` for malformed ZEX1/ELF32 containers and ELF load segments requesting write and execute permission together.
 
-This is not a claim that two signatures provide broad malware coverage. The useful security property in 0.1.1 is the combination of signed policy, strict appraisal, structural validation, fail-closed execution, revocation and auditable quarantine.
+This is not a claim that two signatures provide broad malware coverage. The useful security property in 0.1.1 is the combination of signed policy, strict appraisal, structural validation, fail-closed execution, revocation, persistent audit and quarantine.
 
 ## ZGDB2 signed policy
 
@@ -57,27 +57,27 @@ Seven bundled applications are pinned by normalized ZenovFS path and SHA-256 dig
 /apps/zenovapp.zex
 ```
 
-At boot ZenovGuard re-reads every trusted application and verifies its SHA-256 digest. It then validates the active ZGDB2 key ID, payload hash, RSA-PSS signature, policy version and exact trusted-record set. If storage, the trust baseline or signed policy is unavailable, application execution remains locked.
+At boot ZenovGuard re-reads every trusted application and verifies its SHA-256 digest. It then validates the active ZGDB2 key ID, payload hash, RSA-PSS signature, policy version and exact trusted-record set. If storage, the trust baseline, persistent audit or signed policy is unavailable, application execution remains locked.
 
-The trusted application paths, active ZGDB and persistent policy-version state are protected from ordinary shell and userspace mutation.
+The trusted application paths, active ZGDB, policy-version state and persistent audit journal are protected from ordinary shell and userspace mutation.
 
 ## Quarantine
 
 `guard quarantine <path>` accepts only `INFECTED`, `SUSPICIOUS` or `UNTRUSTED` files. The file is atomically renamed into `/data/quarantine/q-<digest-prefix>.qtn` using ZenovFS metadata operations. Quarantined paths cannot execute even if their bytes match a trusted application.
 
-Known infected files are also quarantined automatically when an execution attempt reaches either the signed ZGDB policy gate or the ordinary ZenovGuard appraisal gate.
+Known infected files are also quarantined automatically when an execution attempt reaches either the signed ZGDB policy gate or the ordinary ZenovGuard appraisal gate. Scan and quarantine decisions are persisted separately.
 
-## Audit log
+## Persistent audit
 
-A fixed 32-record in-kernel ring stores:
+ZenovGuard stores a bounded 64-record ZGAL1 journal at `/security/zenovguard.audit`. Each 128-byte record contains a monotonic sequence, PIT tick, action, verdict, canonical path, complete object SHA-256 and a record hash that commits to the previous hash.
 
-- PIT tick;
-- action: boot, scan, execute or quarantine;
-- verdict;
-- normalized path;
-- SHA-256 prefix.
+The journal is exactly 8,288 bytes and is replaced through one ZenovFS copy-on-write transaction per event. It is fully replayed at boot. A malformed header, sequence discontinuity, canonicalization error or hash-chain mismatch prevents normal boot.
 
-The ring is bounded so an attacker cannot exhaust kernel memory with audit events. It is volatile in 0.1.1; persistent tamper-evident logging requires a separately designed append-only store.
+BOOT, SCAN, EXEC and QUARANTINE decisions require a successful persistent commit. If append fails, ZenovGuard restores the previous in-memory slot, marks the journal unavailable and locks subsequent execution rather than continuing without audit evidence.
+
+A volatile 32-record mirror remains for quick inspection of the current session. `guard log` prints the persistent retained window followed by this mirror.
+
+See [`AUDIT_JOURNAL_0.1.1.md`](AUDIT_JOURNAL_0.1.1.md) for the binary format, ring anchor, crash ordering, independent verifier and offline-attacker boundary.
 
 ## Commands
 
@@ -90,6 +90,7 @@ guard scan <path>
 guard scan all
 guard quarantine <path>
 guard log
+guard log verify
 ```
 
 `antivirus` is an alias for `guard`.
@@ -99,6 +100,10 @@ guard log
 The QEMU contract must prove:
 
 ```text
+ZENOV_GUARD_AUDIT_SELFTEST_OK
+ZENOV_GUARD_AUDIT_REPLAY_OK
+ZENOV_GUARD_AUDIT_READY
+ZENOV_GUARD_AUDIT_VERIFY_OK
 ZENOV_GUARD_SELFTEST_OK
 ZENOV_GUARD_TRUST_BASELINE_OK
 ZENOV_GUARD_READY
@@ -119,9 +124,11 @@ ZGDB_REVOCATION_BLOCKED
 ZGDB_POLICY_VERSION_OK version=4
 ```
 
-The test detects and quarantines a harmless regression file, proves quarantine persistence, blocks an untrusted application copy, runs every bundled application under policy version 3, rejects an unknown-key candidate, rejects a tampered PSS candidate, activates signed policy version 4, blocks the revoked application, rejects rollback to version 3 and confirms revocation after reboot.
+The first phase writes a non-empty persistent journal. The second phase must replay that journal after reboot and continue the chain. The recovery image independently verifies its factory journal while exercising interrupted ZenovFS transaction recovery.
 
-Host CI independently verifies the positive fixtures with OpenSSL PSS parameters and requires both negative fixtures to fail. Deterministic rebuild checks include every generated policy fixture.
+The host verifier reads the runtime journal directly from ZenovFS. It then changes journal payload and recomputes the ZenovFS FNV checksum; the filesystem checksum passes, while the SHA-256 audit-chain verifier must reject the image.
+
+Host CI also independently verifies positive ZGDB fixtures with OpenSSL PSS parameters and requires both negative fixtures to fail. Deterministic rebuild checks include every policy fixture and the canonical empty ZGAL1 seed.
 
 ## Explicit limitations
 
@@ -130,8 +137,9 @@ Host CI independently verifies the positive fixtures with OpenSSL PSS parameters
 - The kernel compiled policy floor is `3`; without TPM/NVRAM an offline attacker replacing the whole data image can roll policy and state back to that floor.
 - This build has one active root key, not threshold signing.
 - In-band root metadata rotation is not implemented; changing the root requires a verified OS build.
-- The audit ring is not persistent or cryptographically chained.
-- There is no TPM-backed measured boot or external attestation.
+- ZGAL1 is hash-chained but not authenticated by a secret outside writable storage. A complete offline image rewrite can construct a new internally consistent chain.
+- The bounded journal retains 64 records; rotated-out record contents are not recoverable without external archival.
+- There is no TPM-backed measured boot, sealed audit head or remote witness.
 - ZenovFS1 metadata is checksummed and transactionally updated but is not cryptographically authenticated against an offline disk attacker.
 - ZenovGuard does not parse archives, documents, scripts, PE, Mach-O or other foreign formats.
 - Heuristic and behavioral analysis are not claimed.
