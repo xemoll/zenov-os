@@ -86,7 +86,9 @@ struct Palette {
 };
 
 Palette palette{15, 1, 7, 0, 11, 8, 10, 14};
-volatile uint16_t* const vga = reinterpret_cast<volatile uint16_t*>(0xB8000);
+uint16_t text_shadow[width * height]{};
+volatile uint16_t* vga = reinterpret_cast<volatile uint16_t*>(0xB8000);
+bool shadow_active = false;
 uint32_t row = content_top;
 uint32_t column = 0;
 uint8_t color = 0x07;
@@ -97,7 +99,13 @@ uint16_t styled_cell(char c, uint8_t foreground, uint8_t background) {
 }
 uint16_t cell(char c) { return static_cast<uint16_t>(static_cast<uint8_t>(c)) | (static_cast<uint16_t>(color) << 8); }
 void set_color(uint8_t foreground, uint8_t background) { color = static_cast<uint8_t>((background << 4) | (foreground & 0x0F)); }
+void activate_shadow() {
+    for (uint32_t i = 0; i < width * height; ++i) text_shadow[i] = styled_cell(' ', palette.body_fg, palette.body_bg);
+    vga = text_shadow;
+    shadow_active = true;
+}
 void update_cursor() {
+    if (shadow_active) return;
     const uint16_t position = static_cast<uint16_t>(row * width + column);
     out8(0x3D4, 0x0F); out8(0x3D5, static_cast<uint8_t>(position & 0xFF));
     out8(0x3D4, 0x0E); out8(0x3D5, static_cast<uint8_t>((position >> 8) & 0xFF));
