@@ -45,6 +45,12 @@ std::vector<std::uint8_t> read_all(const std::string& path) {
     if (!input) throw std::runtime_error("cannot read image");
     return data;
 }
+void write_all(const std::string& path, const std::vector<std::uint8_t>& data) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) throw std::runtime_error("cannot create recovery image");
+    output.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+    if (!output) throw std::runtime_error("cannot write recovery image");
+}
 std::uint32_t fnv1a(const std::uint8_t* data, std::size_t size) {
     std::uint32_t hash = 2166136261u;
     for (std::size_t i = 0; i < size; ++i) { hash ^= data[i]; hash *= 16777619u; }
@@ -117,14 +123,18 @@ std::vector<std::uint8_t> read_file(const std::vector<std::uint8_t>& disk, const
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 2) { std::cerr << "usage: zenovfs-fault-test <zenov-data.img>\n"; return 2; }
+        const bool emit_recovery = argc == 4 && std::string(argv[2]) == "--emit-recovery";
+        if (argc != 2 && !emit_recovery) {
+            std::cerr << "usage: zenovfs-fault-test <zenov-data.img> [--emit-recovery <output.img>]\n";
+            return 2;
+        }
         const auto original = read_all(argv[1]);
         if (original.size() < kSectorSize || std::memcmp(original.data(), "ZENOVFS1", 8) != 0) throw std::runtime_error("not a ZenovFS1 image");
         const auto& sb = super(original);
         if (sb.entry_count == 0 || sb.entry_count > kEntryCount) throw std::runtime_error("invalid entry count");
         const std::string path = "/config/system.ini";
         const auto old_content = read_file(original, path);
-        const std::string replacement = "[system]\nversion=0.1.1\ntransaction=cow\n" + std::string(900, 'x') + "\n";
+        const std::string replacement = "[system]\nversion=0.1.1\ntransaction=cow\nrecovery=committed\n" + std::string(900, 'x') + "\n";
         const std::vector<std::uint8_t> new_content(replacement.begin(), replacement.end());
         int old_index = -1, staging_index = -1;
         const auto* original_entries = entries(original);
@@ -164,6 +174,17 @@ int main(int argc, char** argv) {
         std::cout << "ZENOVFS_OLD_OR_NEW_CONTENT_ONLY\n";
         if (!observed_recovery) throw std::runtime_error("no interrupted transaction required recovery");
         std::cout << "ZENOVFS_INTERRUPTED_WRITE_RECOVERED\n";
+
+        if (emit_recovery) {
+            if (writes.size() < 3) throw std::runtime_error("transaction plan is unexpectedly short");
+            const std::size_t prefix = writes.size() - 2U;
+            auto interrupted = original;
+            for (std::size_t i = 0; i < prefix; ++i) apply_write(interrupted, writes[i]);
+            auto recovered = interrupted;
+            if (!recover(recovered) || read_file(recovered, path) != new_content) throw std::runtime_error("emitted recovery image is not a committed transaction");
+            write_all(argv[3], interrupted);
+            std::cout << "ZENOVFS_RECOVERY_IMAGE_OK prefix=" << prefix << " output=" << argv[3] << "\n";
+        }
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zenovfs-fault-test: " << error.what() << "\n";
