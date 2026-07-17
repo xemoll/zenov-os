@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -22,7 +23,7 @@ Digest digest(std::initializer_list<std::uint8_t> bytes) {
     Digest output{}; std::copy(bytes.begin(), bytes.end(), output.begin()); return output;
 }
 Record record(std::uint8_t type, const std::string& name, const Digest& value) {
-    if (name.empty() || name.size() >= sizeof(Record::name)) throw std::runtime_error("invalid record name");
+    if (name.empty() || name.size() >= 48U) throw std::runtime_error("invalid record name");
     Record output{}; output.type = type; output.name_length = static_cast<std::uint16_t>(name.size());
     std::memcpy(output.digest, value.data(), value.size()); std::memcpy(output.name, name.data(), name.size()); return output;
 }
