@@ -32,6 +32,7 @@ void draw_console_span(uint32_t source_row, uint32_t start_column, uint32_t coun
         const uint16_t cell = console::vga[source_row * console::width + start_column + i];
         const char value = static_cast<char>(cell & 0xFFU);
         const uint8_t attribute = static_cast<uint8_t>(cell >> 8U);
+        if (value == '|') break;
         if (value >= 32 && value <= 126) draw_char(x + static_cast<int32_t>(i * 6U), y, value, vga_colors[attribute & 0x0FU], 1);
     }
 }
