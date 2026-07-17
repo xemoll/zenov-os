@@ -9,6 +9,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "generated/zenov_config.hpp"
 
 #include "parts/core.inc"
+#include "parts/memory_compare.inc"
 #include "parts/hardware.inc"
 #include "parts/memory.inc"
 #include "parts/graphics_mapping.inc"
@@ -31,6 +32,7 @@ namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uin
 #undef write_file
 #undef read_file
 #include "parts/security_guard.inc"
+#include "parts/zgdb_policy.inc"
 #include "parts/security_io.inc"
 #include "parts/process_policy.inc"
 #include "parts/graphics.inc"
@@ -58,7 +60,7 @@ extern "C" void kernel_main() {
     serial::init();
     serial::line("ZENOVOS_BOOT_OK");
     for (uint32_t i = 0; i < zenov_generated::kBootMessageCount; ++i) serial::line(zenov_generated::kBootMessages[i]);
-    serial::line("Initializing IDT, memory, storage, security, graphics, input and ring-3 services...");
+    serial::line("Initializing IDT, memory, storage, signed policy, security, graphics, input and ring-3 services...");
 
     console::set_color(zenov_generated::kForeground, zenov_generated::kBackground);
     idt_init();
@@ -71,8 +73,10 @@ extern "C" void kernel_main() {
     storage::init();
     process::init();
     if (!security_guard::init()) panic("ZenovGuard cryptographic self-test failed.");
+    if (!zgdb::init()) panic("Signed ZenovGuard database validation failed.");
     const uint8_t mutation_probe = 0x5AU;
     if (storage::guarded_write_file("/apps/hello.zex", &mutation_probe, 1U, false)) panic("Trusted application mutation guard failed.");
+    if (storage::guarded_write_file("/security/zenovguard.zgdb", &mutation_probe, 1U, false)) panic("Active security database mutation guard failed.");
     serial::line("ZENOV_GUARD_PROTECTED_PATH_TEST_OK");
     const bool graphical = graphics::init();
     if (graphical) { console::activate_shadow(); serial::line("CONSOLE_SHADOW_OK"); }
@@ -87,7 +91,7 @@ extern "C" void kernel_main() {
     if (graphical && mouse_ready && !mouse_decoder_regression()) panic("PS/2 mouse decoder regression failed.");
     if (graphical && mouse_ready) serial::line("PS2_MOUSE_DECODER_OK");
 
-    serial::line("Kernel online. Desktop, security, persistent storage and ring-3 services ready.");
+    serial::line("Kernel online. Desktop, signed policy, security, persistent storage and ring-3 services ready.");
     console::show_home();
     if (graphical) graphics::sync_terminal_from_console();
     serial::line("ZENOVOS_UI_READY");
