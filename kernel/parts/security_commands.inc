@@ -39,7 +39,12 @@ void command_guard(char* args) {
         if (string_equal(args, "verify")) {
             if (security_audit::verify_active()) console::success("ZENOV_GUARD_AUDIT_VERIFY_OK");
             else console::warning("Persistent audit verification failed; execution is locked.");
-        } else security_audit::print();
+        } else {
+            console::line("Persistent journal:");
+            security_audit::print();
+            console::line("Session mirror:");
+            security_guard::print_audit();
+        }
         return;
     }
     if (string_equal(subcommand, "scan")) {
