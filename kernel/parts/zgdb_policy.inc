@@ -1,9 +1,9 @@
 #include "../../security/zgdb_crypto_material.hpp"
 
 namespace zgdb {
-constexpr uint32_t schema_version = 1U;
-constexpr uint32_t engine_version = 0x00000101U;
-constexpr uint32_t compiled_policy_floor = 1U;
+constexpr uint32_t schema_version = 2U;
+constexpr uint32_t engine_version = 0x00000102U;
+constexpr uint32_t compiled_policy_floor = 3U;
 constexpr uint32_t signature_bytes = 256U;
 constexpr uint32_t max_database_bytes = 16U * 1024U;
 constexpr uint32_t max_records = 32U;
@@ -11,7 +11,7 @@ constexpr uint8_t record_trusted = 1U, record_threat = 2U, record_revoked = 3U;
 
 struct [[gnu::packed]] Header {
     char magic[4]; uint16_t schema, header_size; uint32_t policy_version, minimum_engine, record_count, payload_size;
-    uint8_t payload_sha256[32]; uint8_t reserved[8];
+    uint8_t payload_sha256[32]; uint8_t key_id[8];
 };
 struct [[gnu::packed]] Record { uint8_t type, flags; uint16_t name_length; uint8_t digest[32]; char name[48]; };
 static_assert(sizeof(Header) == 64 && sizeof(Record) == 84);
@@ -22,7 +22,7 @@ Record candidate_records[max_records]{};
 uint32_t active_record_count = 0, active_policy_version = 0, persistent_policy_version = 0;
 bool ready = false;
 
-enum class Validation : uint8_t { okay, malformed, digest, signature, rollback, engine, trust };
+enum class Validation : uint8_t { okay, malformed, digest, signature, rollback, sequence, engine, key, trust };
 
 void big_zero(BigInteger& value) { memset(value.limb, 0, sizeof(value.limb)); }
 void big_from_be(BigInteger& value, const uint8_t input[256]) {
@@ -72,19 +72,36 @@ void big_exp_65537(BigInteger& output, const BigInteger& signature, const BigInt
     output = result;
 }
 
-bool rsa_verify(const uint8_t signature[signature_bytes], const uint8_t digest[32]) {
+void mgf1_sha256(const uint8_t seed[32], uint8_t* output, uint32_t size) {
+    uint32_t offset = 0, counter = 0;
+    while (offset < size) {
+        uint8_t counter_be[4] = {static_cast<uint8_t>(counter >> 24U), static_cast<uint8_t>(counter >> 16U), static_cast<uint8_t>(counter >> 8U), static_cast<uint8_t>(counter)};
+        uint8_t block[32]; security_guard::Sha256Context context{};
+        security_guard::sha256_init(context); security_guard::sha256_update(context, seed, 32U); security_guard::sha256_update(context, counter_be, 4U); security_guard::sha256_final(context, block);
+        uint32_t copy = size - offset; if (copy > 32U) copy = 32U;
+        memcpy(output + offset, block, copy); offset += copy; ++counter;
+    }
+}
+
+bool rsa_pss_verify(const uint8_t signature[signature_bytes], const uint8_t digest[32]) {
     BigInteger encoded_signature{}, modulus{}, decoded{};
     big_from_be(encoded_signature, signature); big_from_be(modulus, kZgdbRootModulus);
-    if (big_compare(encoded_signature, modulus) >= 0) return false;
+    if ((kZgdbRootModulus[0] & 0x80U) == 0 || big_compare(encoded_signature, modulus) >= 0) return false;
     big_exp_65537(decoded, encoded_signature, modulus);
     uint8_t encoded[256]; big_to_be(decoded, encoded);
-    static constexpr uint8_t digest_info[19] = {0x30,0x31,0x30,0x0d,0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x02,0x01,0x05,0x00,0x04,0x20};
-    if (encoded[0] != 0 || encoded[1] != 1) return false;
-    uint32_t position = 2, padding = 0;
-    while (position < 256U && encoded[position] == 0xFFU) { ++position; ++padding; }
-    if (padding < 8U || position >= 256U || encoded[position++] != 0 || position + sizeof(digest_info) + 32U != 256U) return false;
-    if (memcmp(encoded + position, digest_info, sizeof(digest_info)) != 0) return false;
-    return security_guard::digest_equal(encoded + position + sizeof(digest_info), digest);
+    constexpr uint32_t hash_bytes = 32U, salt_bytes = 32U, database_bytes = 223U, padding_bytes = 190U;
+    if (encoded[255] != 0xBCU || (encoded[0] & 0x80U) != 0) return false;
+    const uint8_t* encoded_hash = encoded + database_bytes;
+    uint8_t mask[database_bytes], database[database_bytes]; mgf1_sha256(encoded_hash, mask, database_bytes);
+    for (uint32_t i = 0; i < database_bytes; ++i) database[i] = static_cast<uint8_t>(encoded[i] ^ mask[i]);
+    database[0] = static_cast<uint8_t>(database[0] & 0x7FU);
+    uint8_t malformed = 0;
+    for (uint32_t i = 0; i < padding_bytes; ++i) malformed = static_cast<uint8_t>(malformed | database[i]);
+    malformed = static_cast<uint8_t>(malformed | static_cast<uint8_t>(database[padding_bytes] ^ 0x01U));
+    uint8_t message[8U + hash_bytes + salt_bytes]{};
+    memcpy(message + 8U, digest, hash_bytes); memcpy(message + 8U + hash_bytes, database + padding_bytes + 1U, salt_bytes);
+    uint8_t expected_hash[hash_bytes]; security_guard::sha256(message, sizeof(message), expected_hash);
+    return malformed == 0 && security_guard::digest_equal(encoded_hash, expected_hash);
 }
 
 bool record_name_valid(const Record& record) {
@@ -110,10 +127,11 @@ Validation validate(const uint8_t* data, uint32_t size, uint32_t minimum_version
     if (!storage::bytes_equal(header->magic, magic, 4) || header->schema != schema_version || header->header_size != sizeof(Header) ||
         header->minimum_engine > engine_version || !header->record_count || header->record_count > max_records ||
         header->payload_size != header->record_count * sizeof(Record) || sizeof(Header) + header->payload_size + signature_bytes != size) return header->minimum_engine > engine_version ? Validation::engine : Validation::malformed;
+    if (!storage::bytes_equal(header->key_id, kZgdbRootKeyId, sizeof(header->key_id))) return Validation::key;
     uint8_t digest[32]; security_guard::sha256(data + sizeof(Header), header->payload_size, digest);
     if (!security_guard::digest_equal(digest, header->payload_sha256)) return Validation::digest;
     security_guard::sha256(data, size - signature_bytes, digest);
-    if (!rsa_verify(data + size - signature_bytes, digest)) return Validation::signature;
+    if (!rsa_pss_verify(data + size - signature_bytes, digest)) return Validation::signature;
     if (header->policy_version < minimum_version) return Validation::rollback;
     const auto* records = reinterpret_cast<const Record*>(data + sizeof(Header));
     constexpr uint32_t trusted_total = sizeof(security_guard::trusted_executables) / sizeof(security_guard::trusted_executables[0]);
@@ -194,14 +212,23 @@ bool precheck(const char* path, const uint8_t* data, uint32_t size) {
 }
 
 const char* validation_name(Validation validation) {
-    switch (validation) { case Validation::digest: return "payload-digest"; case Validation::signature: return "signature"; case Validation::rollback: return "rollback"; case Validation::engine: return "engine"; case Validation::trust: return "trust-baseline"; default: return "malformed"; }
+    switch (validation) {
+        case Validation::digest: return "payload-digest"; case Validation::signature: return "pss-signature";
+        case Validation::rollback: return "rollback"; case Validation::sequence: return "non-sequential";
+        case Validation::engine: return "engine"; case Validation::key: return "unknown-key";
+        case Validation::trust: return "trust-baseline"; default: return "malformed";
+    }
 }
 
 bool update(const char* candidate_path) {
     Validation validation{}; uint32_t version = 0, count = 0;
     if (!candidate_path || !*candidate_path || !read_database(candidate_path, active_policy_version + 1U, validation, version, count)) {
-        serial::write(validation == Validation::rollback ? "ZGDB_ROLLBACK_REJECTED reason=" : "ZGDB_TAMPER_REJECTED reason="); serial::line(validation_name(validation)); return false;
+        if (validation == Validation::rollback) serial::write("ZGDB_ROLLBACK_REJECTED reason=");
+        else if (validation == Validation::key) serial::write("ZGDB_KEY_REJECTED reason=");
+        else serial::write("ZGDB_TAMPER_REJECTED reason=");
+        serial::line(validation_name(validation)); return false;
     }
+    if (version != active_policy_version + 1U) { serial::line("ZGDB_SEQUENCE_REJECTED reason=non-sequential"); return false; }
     uint32_t size = 0;
     if (!storage::read_file(candidate_path, process::application_buffer, max_database_bytes, size)) return false;
     uint32_t final_count = 0, final_version = 0;
@@ -222,7 +249,8 @@ bool init() {
     activate(candidate_records, count, version);
     if (persistent_policy_version < version && !write_version(version)) { ready = false; return false; }
     persistent_policy_version = version; ready = true;
-    serial::line("ZGDB_SIGNATURE_OK"); serial::write("ZGDB_POLICY_VERSION_OK version="); process::serial_u32(version); serial::write("\r\n"); serial::line("ZGDB_READY"); return true;
+    serial::line("ZGDB_ROOT_KEY_OK id=6f788074c018f5aa"); serial::line("ZGDB_PSS_SIGNATURE_OK");
+    serial::write("ZGDB_POLICY_VERSION_OK version="); process::serial_u32(version); serial::write("\r\n"); serial::line("ZGDB_READY"); return true;
 }
 
 void print_status() {
@@ -230,6 +258,7 @@ void print_status() {
     console::write("  Policy        "); console::unsigned_dec(active_policy_version); console::put('\n');
     console::write("  Floor         "); console::unsigned_dec(compiled_policy_floor); console::put('\n');
     console::write("  Records       "); console::unsigned_dec(active_record_count); console::put('\n');
-    console::line("  Signature     RSA-2048 / PKCS#1 v1.5 / SHA-256");
+    console::line("  Root ID       6f788074c018f5aa");
+    console::line("  Signature     RSA-2048 / PSS / SHA-256 / salt-32");
 }
 } // namespace zgdb
