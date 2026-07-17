@@ -1,0 +1,5 @@
+app("zenov_hello");
+say("ZENOV_SOURCE_APP_RING3_OK\n");
+say("ZENOV_COMPILER_ABI_MATCH_OK\n");
+say("Compiled from Zenov source for the ZenovOS 0.1.1 syscall ABI.\n");
+exit(0);
