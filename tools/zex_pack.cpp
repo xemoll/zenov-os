@@ -20,6 +20,7 @@ struct ZexHeader {
 #pragma pack(pop)
 
 static_assert(sizeof(ZexHeader) == 32);
+constexpr std::uint32_t kZenovOs011StackBytes = 16u * 1024u;
 
 std::uint32_t fnv1a(const std::vector<std::uint8_t>& bytes) {
     std::uint32_t hash = 2166136261u;
@@ -52,13 +53,14 @@ int main(int argc, char** argv) {
         const auto image = read_all(argv[1]);
         const ZexHeader header{{'Z', 'E', 'X', '1'}, 1u, sizeof(ZexHeader),
                                static_cast<std::uint32_t>(image.size()), 0u, 0u,
-                               64u * 1024u, fnv1a(image)};
+                               kZenovOs011StackBytes, fnv1a(image)};
         std::ofstream output(argv[2], std::ios::binary | std::ios::trunc);
         if (!output) throw std::runtime_error("cannot open output");
         output.write(reinterpret_cast<const char*>(&header), sizeof(header));
         output.write(reinterpret_cast<const char*>(image.data()), static_cast<std::streamsize>(image.size()));
         if (!output) throw std::runtime_error("cannot write output");
-        std::cout << "zex-pack: OK image=" << image.size() << " checksum=" << header.checksum << "\n";
+        std::cout << "zex-pack: OK image=" << image.size() << " stack=" << header.stack_size
+                  << " checksum=" << header.checksum << "\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zex-pack: " << error.what() << "\n";
