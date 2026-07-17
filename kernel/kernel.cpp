@@ -54,7 +54,7 @@ extern "C" void kernel_main() {
     if (!mouse_ready) serial::line("PS2_MOUSE_UNAVAILABLE");
     pit_init(100);
     enable_interrupts();
-    if (graphical && mouse_ready && !ps2_mouse_irq_self_test()) panic("PS/2 mouse IRQ self-test failed.");
+    if (graphical && mouse_ready && !ps2_mouse_pipeline_self_test()) panic("PS/2 mouse packet pipeline self-test failed.");
 
     serial::line("Kernel online. Desktop, persistent storage and ring-3 services ready.");
     console::show_home();
