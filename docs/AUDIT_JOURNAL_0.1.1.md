@@ -1,6 +1,6 @@
 # ZenovGuard persistent audit journal for ZenovOS 0.1.1
 
-ZenovGuard records security decisions in `/security/zenovguard.audit`. The journal is designed to survive reboot, detect structural corruption and make retained-record modification, deletion or reordering evident through a SHA-256 chain.
+ZenovGuard records security decisions in `/security/zenovguard.audit`. The journal survives reboot, detects structural corruption and makes retained-record modification, deletion or reordering evident through a SHA-256 chain.
 
 ## ZGAL1 format
 
@@ -69,9 +69,86 @@ A factory image contains a canonical empty journal. ZenovGuard appends the boot-
 
 Each BOOT, SCAN, EXEC and QUARANTINE event updates the in-memory journal and writes the complete journal through ZenovFS1 copy-on-write replacement.
 
-ZenovFS writes the payload to a staging slot, commits replacement metadata and then retires the previous slot. Consequently, an interrupted update resolves to either the previous complete journal or the new complete journal; header and record payload are not updated independently.
+The normal write order is:
 
-If append fails, ZenovGuard restores the previous in-memory header and record slot, marks the persistent journal unavailable and locks further application execution. Audit failure is therefore not treated as a harmless logging error.
+```text
+17 payload sectors
+transaction metadata
+committed replacement metadata
+old-entry retirement
+final committed-flag cleanup
+```
+
+An ordered power loss before the commit point recovers the previous complete journal. An ordered power loss after the commit point recovers the new complete journal. Torn, corrupted, missing or incorrectly reordered writes may instead produce an invalid journal; that state is rejected explicitly rather than being accepted as a third valid history.
+
+If append fails at runtime, ZenovGuard restores the previous in-memory header and record slot, marks the persistent journal unavailable and locks further application execution. Audit failure is therefore not treated as a harmless logging error.
+
+## Exhaustive COW fault model
+
+`tools/zenovfs_audit_fault_test.cpp` applies the actual ZenovFS1 entry and data-slot layout to two journal transitions:
+
+- factory-empty journal to one retained record;
+- full 64-record ring to a rotated ring with a new anchor.
+
+For each transition it evaluates:
+
+```text
+every ordered crash prefix
+head and tail torn-sector writes at 1, 64, 128, 255, 256, 384 and 511 bytes
+deterministic garbage sectors
+every single dropped write
+every single duplicated write
+every adjacent write swap
+all 24 permutations of the four metadata writes against every payload prefix
+```
+
+The only accepted classifications are:
+
+```text
+OLD          previous journal verifies
+NEW          replacement journal verifies
+FAIL-CLOSED  no unique checksum-valid and chain-valid journal is available
+```
+
+Any internally valid journal different from both the exact old and exact new state is a test failure.
+
+The verified matrix contains 1,662 cases:
+
+```text
+empty-to-one       831 cases: old=404 new=404 fail-closed=23
+full-ring-rotation 831 cases: old=404 new=100 fail-closed=327
+```
+
+The larger fail-closed set during rotation is expected: every retained record and the anchor participate in the new chain, so incomplete payload delivery cannot be treated as a valid replacement.
+
+## Cross-verifier contract
+
+The host verifier and fault generator share `tools/zenov_audit_format.hpp`, which provides the canonical structures and SHA-256 implementation. Both tools run the SHA-256 `abc` known-answer test. The fault generator additionally requires a fixed ZGAL1 record-hash vector before producing any image.
+
+This prevents a test generator and its checker from accepting the same incorrect private interpretation of the journal format.
+
+## QEMU crash images
+
+The fault tool emits three full 16 MiB ZenovFS images that are booted by the real kernel:
+
+```text
+zenov-data-audit-old-recovery.img
+  payload written + transaction metadata
+  mount removes staging metadata
+  replay: count=0 next=1
+
+zenov-data-audit-new-recovery.img
+  payload written + committed replacement metadata
+  mount completes replacement
+  replay: count=1 next=2
+
+zenov-data-audit-corrupt.img
+  committed metadata with one missing payload sector
+  boot: ZENOV_GUARD_AUDIT_INVALID
+  UI must not become ready
+```
+
+This complements the host matrix with the actual ATA/ZenovFS mount recovery and kernel journal replay path.
 
 ## Protected path
 
@@ -93,25 +170,27 @@ guard log verify
 
 `tools/zenovfs_audit_verify.cpp` independently parses a ZenovFS image and verifies both the ZenovFS FNV checksum and the ZGAL1 SHA-256 chain.
 
-The QEMU gate verifies the non-empty runtime image and emits a negative image by changing journal payload and recomputing the ZenovFS checksum. This proves that the filesystem checksum accepts the modified payload while the independent audit-chain verifier rejects it.
+The QEMU gate verifies the non-empty runtime image and emits a negative image by changing journal payload and recomputing the ZenovFS checksum. This proves that the filesystem checksum accepts the modified payload while the audit-chain verifier rejects it.
 
 Expected evidence includes:
 
 ```text
-ZENOV_GUARD_AUDIT_SELFTEST_OK
-ZENOV_GUARD_AUDIT_REPLAY_OK count=<n> next=<n+1>
-ZENOV_GUARD_AUDIT_READY
+ZENOV_AUDIT_COW_FAULT_MATRIX_OK
+ZENOV_AUDIT_COW_FAULT_INJECTION_OK total_cases=1662
+ZENOV_AUDIT_COW_OLD_OR_NEW_OR_FAIL_CLOSED_ONLY
+ZENOV_GUARD_AUDIT_REPLAY_OK count=0 next=1
+ZENOV_GUARD_AUDIT_REPLAY_OK count=1 next=2
+ZENOV_GUARD_AUDIT_INVALID
 ZENOV_GUARD_AUDIT_VERIFY_OK
-persistent audit host verification: OK
 ```
-
-The second QEMU boot must replay a non-empty journal from the first phase.
 
 ## Security boundary
 
 ZGAL1 is tamper-evident, not externally authenticated.
 
 It detects accidental corruption and unauthorized runtime mutation that does not also rewrite every affected record, anchor, head and ZenovFS checksum. It also detects modification, deletion, insertion, reordering and sequence discontinuity within the retained window.
+
+The fault matrix is a deterministic software model of ZenovFS sector and metadata writes. It does not prove behavior of physical disks with undocumented caches, firmware bugs, controller-level remapping or dishonest flush completion.
 
 An offline attacker with complete write access to the data image can construct a new internally consistent journal and recompute its filesystem checksum. Detecting that attack requires a secret MAC key protected outside writable storage, TPM/NVRAM-sealed state, remote witnessing or another externally anchored head hash.
 
