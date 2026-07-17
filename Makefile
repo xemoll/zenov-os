@@ -15,6 +15,7 @@ ZENOV_STAGE0_SRC := tools/zenov_stage0.cpp $(wildcard tools/zenov_stage0/*.inc)
 ZENOV_CONFIG_SRC := $(shell find kernel/config -type f -name '*.zv' -print 2>/dev/null | sort)
 USER_ASM := user/hello.S user/fileio.S user/args.S user/console.S user/protect.S user/kernel_access.S
 ZENOV_APP_EXPECTED_SHA256 := 9e1733af56a53ae31055b448f762815ba7a5e1a72be543aef325bd4ea36e0ad5
+ZENOV_COMPILER_REVISION := a58c3419b09d46be7fc7180ba910c14033910fdf
 
 .PHONY: all clean check test qemu deterministic inspect
 
@@ -160,6 +161,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
 	 '  "application_abi": "ZEX1 + ELF32 ring3 / int 0x80 / argv / console input",' \
 	 '  "zenov_app_abi": "0.1.1",' \
+	 '  "zenov_repository_commit": "$(ZENOV_COMPILER_REVISION)",' \
 	 '  "zenov_app_contract_sha256": "$(ZENOV_APP_EXPECTED_SHA256)",' \
 	 "  \"zenov_app_compiler_sha256\": \"$$compiler_hash\"," \
 	 "  \"zenov_source_sha256\": \"$$source_hash\"," \
@@ -185,6 +187,7 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	@grep -q 'system_version("0.1.1")' kernel/config/system.zv
 	@grep -q '"format": "zenov-os-build-v6"' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_app_abi": "0.1.1"' $(BUILD)/build-manifest.json
+	@grep -q '"zenov_repository_commit": "$(ZENOV_COMPILER_REVISION)"' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_app_contract_sha256": "$(ZENOV_APP_EXPECTED_SHA256)"' $(BUILD)/build-manifest.json
 	@echo 'static checks: OK (0.1.1 P0 memory, ABI, filesystem and Zenov app contracts)'
 
