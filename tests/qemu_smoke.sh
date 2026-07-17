@@ -6,6 +6,9 @@ BOOT_IMAGE="${1:-build/zenov-os.img}"
 DATA_IMAGE="${2:-build/zenov-data.img}"
 OUT="${3:-build/qemu}"
 RECOVERY_IMAGE="${4:-}"
+AUDIT_OLD_RECOVERY_IMAGE="${5:-}"
+AUDIT_NEW_RECOVERY_IMAGE="${6:-}"
+AUDIT_CORRUPT_IMAGE="${7:-}"
 BOOT_MARKER="ZENOVOS_BOOT_OK"
 UI_MARKER="ZENOVOS_UI_READY"
 STORAGE_MARKER="ZENOVFS_MOUNT_OK"
@@ -181,6 +184,35 @@ controller_recovery() {
   sleep 0.2; echo quit
 }
 
+controller_audit_old_recovery() {
+  local serial="$1"
+  wait_for_boot "$serial" || { echo quit; return 1; }
+  wait_for_serial "$serial" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" || { echo quit; return 1; }
+  grep -q 'ZENOV_GUARD_AUDIT_REPLAY_OK count=0 next=1' "$serial" || { echo quit; return 1; }
+  send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 2 || { echo quit; return 1; }
+  sleep 0.2; echo quit
+}
+
+controller_audit_new_recovery() {
+  local serial="$1"
+  wait_for_boot "$serial" || { echo quit; return 1; }
+  wait_for_serial "$serial" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" || { echo quit; return 1; }
+  grep -q 'ZENOV_GUARD_AUDIT_REPLAY_OK count=1 next=2' "$serial" || { echo quit; return 1; }
+  send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 2 || { echo quit; return 1; }
+  sleep 0.2; echo quit
+}
+
+controller_audit_corrupt() {
+  local serial="$1"
+  wait_for_serial "$serial" "$BOOT_MARKER" || { echo quit; return 1; }
+  wait_for_serial "$serial" "$STORAGE_MARKER" || { echo quit; return 1; }
+  wait_for_serial "$serial" "ZENOV_GUARD_AUDIT_SELFTEST_OK" || { echo quit; return 1; }
+  wait_for_serial "$serial" "ZENOV_GUARD_AUDIT_INVALID" || { echo quit; return 1; }
+  wait_for_serial "$serial" "Persistent ZenovGuard audit journal validation failed." || { echo quit; return 1; }
+  if grep -q "$UI_MARKER" "$serial"; then echo "qemu-smoke: corrupt audit image reached UI" >&2; echo quit; return 1; fi
+  echo quit
+}
+
 run_phase() {
   local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5"
   set +e
@@ -196,14 +228,22 @@ run_phase() {
   fi
 }
 
-[[ -n "$RECOVERY_IMAGE" && -f "$RECOVERY_IMAGE" ]] || { echo "qemu-smoke: recovery image is required" >&2; exit 1; }
+for required in "$RECOVERY_IMAGE" "$AUDIT_OLD_RECOVERY_IMAGE" "$AUDIT_NEW_RECOVERY_IMAGE" "$AUDIT_CORRUPT_IMAGE"; do
+  [[ -n "$required" && -f "$required" ]] || { echo "qemu-smoke: required recovery/fault image is missing: $required" >&2; exit 1; }
+done
 SERIAL1="$(cd "$OUT" && pwd)/serial-phase1.log"
 SERIAL2="$(cd "$OUT" && pwd)/serial-phase2.log"
 SERIAL3="$(cd "$OUT" && pwd)/serial-recovery.log"
+SERIAL4="$(cd "$OUT" && pwd)/serial-audit-old-recovery.log"
+SERIAL5="$(cd "$OUT" && pwd)/serial-audit-new-recovery.log"
+SERIAL6="$(cd "$OUT" && pwd)/serial-audit-corrupt.log"
 run_phase controller_first "$SERIAL1" "$OUT/monitor-phase1.log" "$OUT/qemu-phase1.stderr" "$DATA_IMAGE"
 run_phase controller_second "$SERIAL2" "$OUT/monitor-phase2.log" "$OUT/qemu-phase2.stderr" "$DATA_IMAGE"
 run_phase controller_recovery "$SERIAL3" "$OUT/monitor-recovery.log" "$OUT/qemu-recovery.stderr" "$RECOVERY_IMAGE"
-cat "$SERIAL1" "$SERIAL2" "$SERIAL3" > "$OUT/serial.log"
+run_phase controller_audit_old_recovery "$SERIAL4" "$OUT/monitor-audit-old-recovery.log" "$OUT/qemu-audit-old-recovery.stderr" "$AUDIT_OLD_RECOVERY_IMAGE"
+run_phase controller_audit_new_recovery "$SERIAL5" "$OUT/monitor-audit-new-recovery.log" "$OUT/qemu-audit-new-recovery.stderr" "$AUDIT_NEW_RECOVERY_IMAGE"
+run_phase controller_audit_corrupt "$SERIAL6" "$OUT/monitor-audit-corrupt.log" "$OUT/qemu-audit-corrupt.stderr" "$AUDIT_CORRUPT_IMAGE"
+cat "$SERIAL1" "$SERIAL2" "$SERIAL3" "$SERIAL4" "$SERIAL5" "$SERIAL6" > "$OUT/serial.log"
 
 for marker in \
   "$BOOT_MARKER" "$PMM_MARKER" "PMM_STRESS_OK" "$PAGING_MARKER" "HEAP_REUSE_OK" "HEAP_COALESCE_OK" "HEAP_INVALID_FREE_BLOCKED" "HEAP_STRESS_OK" \
@@ -217,17 +257,22 @@ for marker in \
   "MOUSE_PACKET_OK" "WINDOW_DRAG_OK" "PS2_MOUSE_DECODER_OK" "$UI_MARKER" "$LONG_INPUT_MARKER" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" \
   "FILEIO_ELF_OK" "FILE_SYSCALL_PERSIST_OK" "PROCESS_ARGV_OK" "SYSCALL_ERRORS_OK" "SYSCALL_POINTER_GUARD_OK" "CONSOLE_READ_SYSCALL_OK" \
   "PAGE_PROTECTION_OK" "USER_WRITE_TO_TEXT_BLOCKED" "USER_KERNEL_ACCESS_BLOCKED" "PAGE_FAULT_DIAGNOSTICS_OK" "USER_FAULT_RETURNED_TO_SHELL" \
-  "ZENOV_SOURCE_APP_RING3_OK" "ZENOV_COMPILER_ABI_MATCH_OK" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" "recovery=committed" "ZENOVFS_FSCK_OK"; do
+  "ZENOV_SOURCE_APP_RING3_OK" "ZENOV_COMPILER_ABI_MATCH_OK" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" "recovery=committed" "ZENOVFS_FSCK_OK" \
+  "ZENOV_GUARD_AUDIT_INVALID" "Persistent ZenovGuard audit journal validation failed."; do
   grep -q "$marker" "$OUT/serial.log" || { echo "qemu-smoke: missing marker: $marker" >&2; exit 1; }
 done
-[[ "$(grep -c 'ZENOV_GUARD_AUDIT_VERIFY_OK' "$OUT/serial.log")" -ge 8 ]] || { echo "qemu-smoke: persistent audit verification count is too low" >&2; exit 1; }
+[[ "$(grep -c 'ZENOV_GUARD_AUDIT_VERIFY_OK' "$OUT/serial.log")" -ge 12 ]] || { echo "qemu-smoke: persistent audit verification count is too low" >&2; exit 1; }
 grep -Eq 'ZENOV_GUARD_AUDIT_REPLAY_OK count=[1-9][0-9]*' "$SERIAL2" || { echo "qemu-smoke: persistent audit did not replay non-empty state" >&2; exit 1; }
+grep -q 'ZENOV_GUARD_AUDIT_REPLAY_OK count=0 next=1' "$SERIAL4" || { echo "qemu-smoke: old audit transaction did not recover old journal" >&2; exit 1; }
+grep -q 'ZENOV_GUARD_AUDIT_REPLAY_OK count=1 next=2' "$SERIAL5" || { echo "qemu-smoke: committed audit transaction did not recover new journal" >&2; exit 1; }
+! grep -q "$UI_MARKER" "$SERIAL6" || { echo "qemu-smoke: invalid audit journal reached UI" >&2; exit 1; }
+[[ "$(grep -c 'ZENOVFS_INTERRUPTED_WRITE_RECOVERED' "$OUT/serial.log")" -ge 3 ]] || { echo "qemu-smoke: expected recovery phases were not observed" >&2; exit 1; }
 [[ "$(grep -c 'ZENOV_GUARD_EXEC_ALLOWED' "$OUT/serial.log")" -ge 7 ]] || { echo "qemu-smoke: trusted application appraisal count is too low" >&2; exit 1; }
 [[ "$(grep -c 'ZGDB_REVOCATION_BLOCKED' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: revocation did not persist across reboot" >&2; exit 1; }
-[[ "$(grep -c 'ZGDB_PSS_SIGNATURE_OK' "$OUT/serial.log")" -ge 3 ]] || { echo "qemu-smoke: PSS verification missing from a boot phase" >&2; exit 1; }
+[[ "$(grep -c 'ZGDB_PSS_SIGNATURE_OK' "$OUT/serial.log")" -ge 5 ]] || { echo "qemu-smoke: PSS verification missing from a successful boot phase" >&2; exit 1; }
 [[ "$(grep -c 'APP_EXIT code=0' "$OUT/serial.log")" -ge 5 ]] || { echo "qemu-smoke: successful applications did not all exit cleanly" >&2; exit 1; }
 [[ "$(grep -c 'Application could not be loaded' "$OUT/serial.log")" -eq 3 ]] || { echo "qemu-smoke: unexpected application load failure count" >&2; exit 1; }
 [[ "$(grep -c 'PERSISTENCE_0_1_1_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: shell persistence marker missing across reboot" >&2; exit 1; }
 [[ "$(grep -c 'FILE_SYSCALL_PERSIST_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: userspace file payload missing across reboot" >&2; exit 1; }
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: graphical framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK 0.1.1 persistent-hash-chained-audit ZGDB2 RSA-PSS unknown-key tamper rollback revocation graphical-desktop protected-pages transactional-fs serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+printf 'qemu-smoke: OK 0.1.1 persistent-audit crash-prefix torn-sector garbage dropped-write reorder old-new recovery fail-closed ZGDB2 RSA-PSS graphical-desktop serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
