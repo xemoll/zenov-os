@@ -13,11 +13,23 @@
 namespace {
 constexpr std::uint32_t kSectorSize = 512, kTotalSectors = 32768, kEntryCount = 128, kEntrySectors = 16, kDataStart = 32, kSlotSectors = 128;
 constexpr std::uint32_t kMaxFileBytes = kSlotSectors * kSectorSize;
+constexpr std::uint16_t kAuditCapacity = 64;
 #pragma pack(push, 1)
 struct Superblock { char magic[8]; std::uint32_t version, total_sectors, entry_count, entry_sectors, data_start, slot_sectors, generation; char label[16]; std::uint8_t reserved[460]; };
 struct Entry { std::uint8_t used, type; std::uint16_t flags; char path[48]; std::uint32_t size, checksum, reserved; };
+struct AuditHeader {
+    char magic[4]; std::uint16_t schema, header_size, record_size, capacity;
+    std::uint32_t count, next_index, next_sequence;
+    std::uint8_t anchor_hash[32], head_hash[32], reserved[8];
+};
+struct AuditRecord {
+    std::uint32_t sequence, tick; std::uint8_t action, verdict; std::uint16_t path_length;
+    char path[48]; std::uint8_t digest[32], record_hash[32], reserved[4];
+};
+struct AuditJournal { AuditHeader header; AuditRecord records[kAuditCapacity]; };
 #pragma pack(pop)
 static_assert(sizeof(Superblock) == kSectorSize && sizeof(Entry) == 64);
+static_assert(sizeof(AuditHeader) == 96 && sizeof(AuditRecord) == 128 && sizeof(AuditJournal) == 8288);
 
 std::uint32_t fnv1a(const std::uint8_t* data, std::size_t size) {
     std::uint32_t hash = 2166136261u;
@@ -54,6 +66,14 @@ void add_file(std::vector<std::uint8_t>& disk, std::array<Entry, kEntryCount>& e
     std::copy(data.begin(), data.end(), disk.begin() + static_cast<std::ptrdiff_t>(offset));
 }
 std::vector<std::uint8_t> text_bytes(const std::string& text) { return std::vector<std::uint8_t>(text.begin(), text.end()); }
+std::vector<std::uint8_t> empty_audit_journal() {
+    AuditJournal journal{};
+    journal.header.magic[0] = 'Z'; journal.header.magic[1] = 'G'; journal.header.magic[2] = 'A'; journal.header.magic[3] = 'L';
+    journal.header.schema = 1; journal.header.header_size = sizeof(AuditHeader); journal.header.record_size = sizeof(AuditRecord);
+    journal.header.capacity = kAuditCapacity; journal.header.next_sequence = 1;
+    const auto* begin = reinterpret_cast<const std::uint8_t*>(&journal);
+    return std::vector<std::uint8_t>(begin, begin + sizeof(journal));
+}
 }
 
 int main(int argc, char** argv) {
@@ -73,16 +93,16 @@ int main(int argc, char** argv) {
         add_file(disk, entries, 2, "/docs/readme.txt", text_bytes(
             "ZenovFS1 persistent volume for ZenovOS 0.1.1\n"
             "Writes use a copy-on-write slot and sector-atomic metadata commit.\n"
-            "ZenovGuard enforces RSA-PSS signed ZGDB policy and trusted application appraisal.\n"));
+            "ZenovGuard enforces RSA-PSS policy and a persistent hash-chained audit journal.\n"));
         add_file(disk, entries, 3, "/apps/hello.zex", hello); add_file(disk, entries, 4, "/apps/fileio.elf", fileio);
         add_file(disk, entries, 5, "/docs/release.txt", text_bytes(
             "ZenovOS 0.1.1 security build: page permissions, recoverable user faults,\n"
-            "transactional storage, ZenovGuard appraisal and rotated RSA-PSS policy root.\n"));
+            "transactional storage, signed policy and persistent audit replay.\n"));
         add_directory(entries, 6, "/config");
         add_file(disk, entries, 7, "/config/system.ini", text_bytes(
             "[system]\nversion=0.1.1\n[console]\ntheme=midnight\nprompt=zenov>\n"
             "[storage]\nmount=/data\nfilesystem=ZenovFS1\ntransaction=cow\n"
-            "[security]\nengine=ZenovGuard\ndatabase=ZGDB2\nroot=6f788074c018f5aa\n"));
+            "[security]\nengine=ZenovGuard\ndatabase=ZGDB2\nroot=6f788074c018f5aa\naudit=ZGAL1\n"));
         add_file(disk, entries, 8, "/apps/args.elf", args); add_file(disk, entries, 9, "/apps/console.elf", console);
         add_file(disk, entries, 10, "/apps/protect.elf", protect); add_file(disk, entries, 11, "/apps/kaccess.elf", kaccess);
         add_file(disk, entries, 12, "/apps/zenovapp.zex", zenovapp);
@@ -93,6 +113,7 @@ int main(int argc, char** argv) {
         add_file(disk, entries, 18, "/security/updates/zenovguard-v4.zgdb", zgdb_v4);
         add_file(disk, entries, 19, "/security/updates/zenovguard-tampered.zgdb", zgdb_tampered);
         add_file(disk, entries, 20, "/security/updates/zenovguard-wrong-key.zgdb", zgdb_wrong_key);
+        add_file(disk, entries, 21, "/security/zenovguard.audit", empty_audit_journal());
         std::memcpy(disk.data(), &super, sizeof(super));
         std::memcpy(disk.data() + kSectorSize, entries.data(), sizeof(entries));
         std::ofstream output(argv[12], std::ios::binary | std::ios::trunc);
@@ -100,7 +121,7 @@ int main(int argc, char** argv) {
         output.write(reinterpret_cast<const char*>(disk.data()), static_cast<std::streamsize>(disk.size()));
         if (!output) throw std::runtime_error("cannot write output image");
         std::cout << "zenovfs-builder: OK version=0.1.1 entries=" << kEntryCount
-                  << " apps=7 zgdb=schema2-v3+v4+2-negative zenov_source_app=" << zenovapp.size() << "\n";
+                  << " apps=7 zgdb=schema2-v3+v4+2-negative audit=ZGAL1-8288B zenov_source_app=" << zenovapp.size() << "\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zenovfs-builder: " << error.what() << "\n";
