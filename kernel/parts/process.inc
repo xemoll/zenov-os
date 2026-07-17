@@ -51,8 +51,12 @@ uint8_t* user_bytes(uint32_t offset, uint32_t length, bool write = false) { retu
 const char* user_string(uint32_t offset, uint32_t maximum = 96U) {
     if (offset >= user_limit) return nullptr;
     const char* text = reinterpret_cast<const char*>(user_base + offset);
-    uint32_t limit = user_limit - offset; if (limit > maximum) limit = maximum;
-    for (uint32_t i = 0; i < limit; ++i) { if (!paging::user_access(offset + i, 1, false)) return nullptr; if (text[i] == 0) return text; }
+    uint32_t limit = user_limit - offset;
+    if (limit > maximum) limit = maximum;
+    for (uint32_t i = 0; i < limit; ++i) {
+        if (!paging::user_access(offset + i, 1, false)) return nullptr;
+        if (text[i] == 0) return text;
+    }
     return nullptr;
 }
 uint32_t checksum(const uint8_t* data, uint32_t size) { uint32_t hash = 2166136261U; for (uint32_t i = 0; i < size; ++i) { hash ^= data[i]; hash *= 16777619U; } return hash; }
@@ -78,16 +82,18 @@ void record_user_fault(uint32_t vector, uint32_t error, uint32_t eip, uintptr_t 
 
 uint32_t read_console(uint8_t* output, uint32_t capacity) {
     if (!output || capacity < 2U) return error_invalid;
-    serial::line("CONSOLE_READ_READY"); uint32_t count = 0;
+    serial::line("CONSOLE_READ_READY");
+    uint32_t count = 0;
     for (;;) {
         const uint16_t key = key_pop_blocking();
         if (key == '\n') { console::put('\n'); break; }
         if (key == '\b') { if (count) { --count; console::put('\b'); } continue; }
-        if (key > 0xFFU || key == 0) continue;
-        if (count + 1U >= capacity) continue;
-        output[count++] = static_cast<uint8_t>(key); console::put(static_cast<char>(key));
+        if (key > 0xFFU || key == 0 || count + 1U >= capacity) continue;
+        output[count++] = static_cast<uint8_t>(key);
+        console::put(static_cast<char>(key));
     }
-    output[count] = 0; return count;
+    output[count] = 0;
+    return count;
 }
 
 extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
@@ -95,30 +101,48 @@ extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
     const uint32_t number = frame->eax;
     if (number == syscall_exit) { last_exit_code = frame->ebx; serial::write("APP_EXIT code="); serial_u32(last_exit_code); serial::write("\r\n"); return 1; }
     if (number == syscall_console_write) {
-        const uint8_t* text = user_bytes(frame->ebx, frame->ecx, false); if (!text) { frame->eax = error_fault; return 0; }
-        for (uint32_t i = 0; i < frame->ecx; ++i) console::put(static_cast<char>(text[i])); frame->eax = frame->ecx; return 0;
+        const uint8_t* text = user_bytes(frame->ebx, frame->ecx, false);
+        if (!text) { frame->eax = error_fault; return 0; }
+        for (uint32_t i = 0; i < frame->ecx; ++i) console::put(static_cast<char>(text[i]));
+        frame->eax = frame->ecx;
+        return 0;
     }
     if (number == syscall_console_read) { uint8_t* output = user_bytes(frame->ebx, frame->ecx, true); frame->eax = output ? read_console(output, frame->ecx) : error_fault; return 0; }
     if (number == syscall_ticks) { frame->eax = timer_ticks; return 0; }
     if (number == syscall_file_read) {
         const char* path = user_string(frame->ebx); uint8_t* output = user_bytes(frame->ecx, frame->edx, true); uint32_t actual = 0;
-        if (!path || !output) frame->eax = error_fault; else if (!storage::read_file(path, output, frame->edx, actual)) frame->eax = error_not_found; else frame->eax = actual; return 0;
+        if (!path || !output) frame->eax = error_fault;
+        else if (!storage::read_file(path, output, frame->edx, actual)) frame->eax = error_not_found;
+        else frame->eax = actual;
+        return 0;
     }
     if (number == syscall_file_write) {
         const char* path = user_string(frame->ebx); const uint8_t* data = user_bytes(frame->ecx, frame->edx, false);
-        if (!path || (!data && frame->edx)) frame->eax = error_fault; else if (!storage::write_file(path, data, frame->edx, frame->esi != 0)) frame->eax = error_io; else frame->eax = frame->edx; return 0;
+        if (!path || (!data && frame->edx)) frame->eax = error_fault;
+        else if (!storage::write_file(path, data, frame->edx, frame->esi != 0)) frame->eax = error_io;
+        else frame->eax = frame->edx;
+        return 0;
     }
     if (number == syscall_file_stat) {
-        const char* path = user_string(frame->ebx); auto* output = reinterpret_cast<UserFileInfo*>(user_bytes(frame->ecx, sizeof(UserFileInfo), true)); storage::FileInfo info{};
-        if (!path || !output) frame->eax = error_fault; else if (!storage::query(path, info)) frame->eax = error_not_found;
-        else { output->type = info.type; output->size = info.size; output->checksum = info.checksum; frame->eax = 0; } return 0;
+        const char* path = user_string(frame->ebx);
+        auto* output = reinterpret_cast<UserFileInfo*>(user_bytes(frame->ecx, sizeof(UserFileInfo), true));
+        storage::FileInfo info{};
+        if (!path || !output) frame->eax = error_fault;
+        else if (!storage::query(path, info)) frame->eax = error_not_found;
+        else { output->type = info.type; output->size = info.size; output->checksum = info.checksum; frame->eax = 0; }
+        return 0;
     }
     if (number == syscall_version) {
-        uint8_t* output = user_bytes(frame->ebx, frame->ecx, true); const uint32_t length = static_cast<uint32_t>(string_length(zenov_generated::kVersion));
-        if (!output) frame->eax = error_fault; else if (frame->ecx <= length) frame->eax = error_no_space; else { memcpy(output, zenov_generated::kVersion, length + 1U); frame->eax = length; } return 0;
+        uint8_t* output = user_bytes(frame->ebx, frame->ecx, true);
+        const uint32_t length = static_cast<uint32_t>(string_length(zenov_generated::kVersion));
+        if (!output) frame->eax = error_fault;
+        else if (frame->ecx <= length) frame->eax = error_no_space;
+        else { memcpy(output, zenov_generated::kVersion, length + 1U); frame->eax = length; }
+        return 0;
     }
     if (number == syscall_sync) { frame->eax = storage::sync_metadata() ? 0U : error_io; return 0; }
-    frame->eax = error_unsupported; return 0;
+    frame->eax = error_unsupported;
+    return 0;
 }
 
 void init() {
@@ -129,34 +153,55 @@ void init() {
     serial::line(initialized ? "PROCESS_ABI_0_1_1_OK" : "Process: userspace initialization failed");
 }
 
-bool map_stack() { if (!paging::map_user(stack_base, stack_bytes, true)) return false; memset(reinterpret_cast<void*>(user_base + stack_base), 0, stack_bytes); return true; }
+bool map_stack() {
+    if (!paging::map_user(stack_base, stack_bytes, true)) return false;
+    memset(reinterpret_cast<void*>(user_base + stack_base), 0, stack_bytes);
+    return true;
+}
 bool ranges_overlap(uint32_t left, uint32_t left_size, uint32_t right, uint32_t right_size) { return left < right + right_size && right < left + left_size; }
+bool page_ranges_overlap(uint32_t left, uint32_t left_size, uint32_t right, uint32_t right_size) {
+    const uint32_t left_begin = left & ~(paging::page_size - 1U);
+    const uint32_t left_end = (left + left_size + paging::page_size - 1U) & ~(paging::page_size - 1U);
+    const uint32_t right_begin = right & ~(paging::page_size - 1U);
+    const uint32_t right_end = (right + right_size + paging::page_size - 1U) & ~(paging::page_size - 1U);
+    return left_begin < right_end && right_begin < left_end;
+}
 bool load_zex(const uint8_t* file, uint32_t file_size, uint32_t& entry) {
-    if (file_size < sizeof(ZexHeader)) return false; const auto* header = reinterpret_cast<const ZexHeader*>(file); const char expected[4] = {'Z','E','X','1'};
+    if (file_size < sizeof(ZexHeader)) return false;
+    const auto* header = reinterpret_cast<const ZexHeader*>(file);
+    const char expected[4] = {'Z','E','X','1'};
     if (!storage::bytes_equal(header->magic, expected, 4) || header->version != 1 || header->header_size != sizeof(ZexHeader) ||
         header->image_size > file_size - sizeof(ZexHeader) || header->image_size + header->bss_size > stack_base || !header->image_size ||
         header->entry_offset >= header->image_size || header->stack_size > stack_bytes || checksum(file + header->header_size, header->image_size) != header->checksum) return false;
-    paging::clear_user(); if (!paging::map_user(0, header->image_size + header->bss_size, true) || !map_stack()) return false;
+    if (header->bss_size && (header->image_size & (paging::page_size - 1U))) return false;
+    paging::clear_user();
+    if (!paging::map_user(0, header->image_size, true) || !map_stack()) return false;
+    if (header->bss_size && !paging::map_user(header->image_size, header->bss_size, true)) return false;
     memcpy(reinterpret_cast<void*>(user_base), file + header->header_size, header->image_size);
     if (header->bss_size) memset(reinterpret_cast<void*>(user_base + header->image_size), 0, header->bss_size);
-    paging::protect_user(0, header->image_size, false); if (header->bss_size) paging::protect_user(header->image_size, header->bss_size, true);
-    entry = header->entry_offset; return true;
+    if (!paging::protect_user(0, header->image_size, false)) return false;
+    entry = header->entry_offset;
+    return true;
 }
 bool load_elf32(const uint8_t* file, uint32_t file_size, uint32_t& entry) {
-    if (file_size < sizeof(Elf32Header)) return false; const auto* header = reinterpret_cast<const Elf32Header*>(file);
+    if (file_size < sizeof(Elf32Header)) return false;
+    const auto* header = reinterpret_cast<const Elf32Header*>(file);
     if (header->ident[0] != 0x7FU || header->ident[1] != 'E' || header->ident[2] != 'L' || header->ident[3] != 'F' || header->ident[4] != 1 || header->ident[5] != 1 ||
         header->type != 2 || header->machine != 3 || header->version != 1 || header->header_size != sizeof(Elf32Header) ||
         header->program_entry_size != sizeof(Elf32ProgramHeader) || header->program_offset > file_size || !header->program_count ||
         header->program_count > (file_size - header->program_offset) / sizeof(Elf32ProgramHeader) || header->entry >= stack_base) return false;
     bool loaded = false, executable_entry = false;
     for (uint32_t i = 0; i < header->program_count; ++i) {
-        const auto* segment = reinterpret_cast<const Elf32ProgramHeader*>(file + header->program_offset + i * sizeof(Elf32ProgramHeader)); if (segment->type != 1) continue;
+        const auto* segment = reinterpret_cast<const Elf32ProgramHeader*>(file + header->program_offset + i * sizeof(Elf32ProgramHeader));
+        if (segment->type != 1) continue;
         if (!segment->memory_size || segment->file_size > segment->memory_size || segment->offset > file_size || segment->file_size > file_size - segment->offset ||
             segment->virtual_address >= stack_base || segment->memory_size > stack_base - segment->virtual_address || (segment->flags & ~7U) ||
             (segment->alignment > 1U && ((segment->alignment & (segment->alignment - 1U)) || (segment->virtual_address & (segment->alignment - 1U)) != (segment->offset & (segment->alignment - 1U))))) return false;
         for (uint32_t j = 0; j < i; ++j) {
             const auto* other = reinterpret_cast<const Elf32ProgramHeader*>(file + header->program_offset + j * sizeof(Elf32ProgramHeader));
-            if (other->type == 1 && ranges_overlap(segment->virtual_address, segment->memory_size, other->virtual_address, other->memory_size)) return false;
+            if (other->type != 1) continue;
+            if (ranges_overlap(segment->virtual_address, segment->memory_size, other->virtual_address, other->memory_size)) return false;
+            if (((segment->flags ^ other->flags) & 2U) && page_ranges_overlap(segment->virtual_address, segment->memory_size, other->virtual_address, other->memory_size)) return false;
         }
         if ((segment->flags & 1U) && header->entry >= segment->virtual_address && header->entry < segment->virtual_address + segment->memory_size) executable_entry = true;
         loaded = true;
@@ -164,7 +209,8 @@ bool load_elf32(const uint8_t* file, uint32_t file_size, uint32_t& entry) {
     if (!loaded || !executable_entry) return false;
     paging::clear_user();
     for (uint32_t i = 0; i < header->program_count; ++i) {
-        const auto* segment = reinterpret_cast<const Elf32ProgramHeader*>(file + header->program_offset + i * sizeof(Elf32ProgramHeader)); if (segment->type != 1) continue;
+        const auto* segment = reinterpret_cast<const Elf32ProgramHeader*>(file + header->program_offset + i * sizeof(Elf32ProgramHeader));
+        if (segment->type != 1) continue;
         if (!paging::map_user(segment->virtual_address, segment->memory_size, true)) return false;
         memcpy(reinterpret_cast<void*>(user_base + segment->virtual_address), file + segment->offset, segment->file_size);
         if (segment->memory_size > segment->file_size) memset(reinterpret_cast<void*>(user_base + segment->virtual_address + segment->file_size), 0, segment->memory_size - segment->file_size);
@@ -174,12 +220,15 @@ bool load_elf32(const uint8_t* file, uint32_t file_size, uint32_t& entry) {
         if (segment->type == 1 && !paging::protect_user(segment->virtual_address, segment->memory_size, (segment->flags & 2U) != 0)) return false;
     }
     if (!map_stack() || paging::writable_at(header->entry)) return false;
-    serial::line("PAGE_PROTECTION_OK"); entry = header->entry; return true;
+    serial::line("PAGE_PROTECTION_OK");
+    entry = header->entry;
+    return true;
 }
 
 bool has_extension(const char* path) { const char* slash = path; const char* dot = nullptr; for (const char* cursor = path; *cursor; ++cursor) { if (*cursor == '/') { slash = cursor; dot = nullptr; } else if (*cursor == '.') dot = cursor; } return dot && dot > slash; }
 bool read_requested(const char* input, char* requested, uint32_t& file_size) {
-    char base[48]; if (!input || !*input) return false;
+    char base[48];
+    if (!input || !*input) return false;
     if (string_starts_with(input, "/data") || input[0] == '/') { if (!storage::path_copy(base, input, sizeof(base))) return false; }
     else if (string_starts_with(input, "apps/") || string_starts_with(input, "APPS/")) { if (!storage::path_copy(base, "/data/", sizeof(base)) || !storage::path_append(base, input, sizeof(base))) return false; }
     else if (!storage::path_copy(base, "/data/apps/", sizeof(base)) || !storage::path_append(base, input, sizeof(base))) return false;
@@ -191,41 +240,67 @@ bool read_requested(const char* input, char* requested, uint32_t& file_size) {
     return storage::read_file(requested, application_buffer, 64U * 1024U, file_size);
 }
 uint32_t parse_arguments(char* input, char* arguments[max_arguments]) {
-    uint32_t count = 0; char* cursor = input;
+    uint32_t count = 0;
+    char* cursor = input;
     while (*cursor && count < max_arguments) {
-        while (is_space(*cursor)) ++cursor; if (!*cursor) break;
-        const char quote = (*cursor == '"' || *cursor == '\'') ? *cursor++ : 0; arguments[count++] = cursor; char* output = cursor;
+        while (is_space(*cursor)) ++cursor;
+        if (!*cursor) break;
+        const char quote = (*cursor == '"' || *cursor == '\'') ? *cursor++ : 0;
+        arguments[count++] = cursor;
+        char* output = cursor;
         while (*cursor && (quote ? *cursor != quote : !is_space(*cursor))) *output++ = *cursor++;
-        if (quote) { if (*cursor == quote) ++cursor; } else if (*cursor) ++cursor;
-        *output = 0; while (is_space(*cursor)) ++cursor;
+        if (quote) { if (*cursor == quote) ++cursor; }
+        else if (*cursor) ++cursor;
+        *output = 0;
+        while (is_space(*cursor)) ++cursor;
     }
     return count;
 }
 bool build_initial_stack(char* arguments[max_arguments], uint32_t count, uint32_t& initial_stack) {
-    uint32_t offsets[max_arguments]; uint32_t top = stack_top;
+    uint32_t offsets[max_arguments];
+    uint32_t top = stack_top;
     for (uint32_t i = count; i > 0; --i) {
-        const uint32_t length = static_cast<uint32_t>(string_length(arguments[i - 1])) + 1U; if (length > max_argument_bytes || length > top - stack_base) return false;
-        top -= length; memcpy(reinterpret_cast<void*>(user_base + top), arguments[i - 1], length); offsets[i - 1] = top;
+        const uint32_t length = static_cast<uint32_t>(string_length(arguments[i - 1])) + 1U;
+        if (length > max_argument_bytes || length > top - stack_base) return false;
+        top -= length;
+        memcpy(reinterpret_cast<void*>(user_base + top), arguments[i - 1], length);
+        offsets[i - 1] = top;
     }
-    top &= ~3U; const uint32_t vector_bytes = (count + 1U) * 4U; if (vector_bytes + 8U > top - stack_base) return false;
-    top -= vector_bytes; const uint32_t vector_offset = top; auto* vector = reinterpret_cast<uint32_t*>(user_base + vector_offset);
-    for (uint32_t i = 0; i < count; ++i) vector[i] = offsets[i]; vector[count] = 0;
-    top -= 8U; auto* header = reinterpret_cast<uint32_t*>(user_base + top); header[0] = count; header[1] = vector_offset; initial_stack = top; return true;
+    top &= ~3U;
+    const uint32_t vector_bytes = (count + 1U) * 4U;
+    if (vector_bytes + 8U > top - stack_base) return false;
+    top -= vector_bytes;
+    const uint32_t vector_offset = top;
+    auto* vector = reinterpret_cast<uint32_t*>(user_base + vector_offset);
+    for (uint32_t i = 0; i < count; ++i) vector[i] = offsets[i];
+    vector[count] = 0;
+    top -= 8U;
+    auto* header = reinterpret_cast<uint32_t*>(user_base + top);
+    header[0] = count; header[1] = vector_offset; initial_stack = top;
+    return true;
 }
 bool run(char* input) {
     if (!initialized || !storage::ready() || !input) return false;
-    char* arguments[max_arguments]{}; const uint32_t argument_count = parse_arguments(input, arguments); if (!argument_count) return false;
-    char requested[48]; uint32_t file_size = 0; if (!read_requested(arguments[0], requested, file_size)) return false;
-    uint32_t entry = 0; const bool zex = file_size >= 4 && application_buffer[0] == 'Z' && application_buffer[1] == 'E' && application_buffer[2] == 'X' && application_buffer[3] == '1';
+    char* arguments[max_arguments]{};
+    const uint32_t argument_count = parse_arguments(input, arguments);
+    if (!argument_count) return false;
+    char requested[48]; uint32_t file_size = 0;
+    if (!read_requested(arguments[0], requested, file_size)) return false;
+    uint32_t entry = 0;
+    const bool zex = file_size >= 4 && application_buffer[0] == 'Z' && application_buffer[1] == 'E' && application_buffer[2] == 'X' && application_buffer[3] == '1';
     const bool elf = file_size >= 4 && application_buffer[0] == 0x7F && application_buffer[1] == 'E' && application_buffer[2] == 'L' && application_buffer[3] == 'F';
     if ((zex && !load_zex(application_buffer, file_size, entry)) || (elf && !load_elf32(application_buffer, file_size, entry)) || (!zex && !elf)) { paging::clear_user(); return false; }
-    uint32_t initial_stack = 0; if (!build_initial_stack(arguments, argument_count, initial_stack)) { paging::clear_user(); return false; }
-    storage::path_copy(current_application, requested, sizeof(current_application)); string_copy(current_format, zex ? "ZEX1" : "ELF32", sizeof(current_format));
+    uint32_t initial_stack = 0;
+    if (!build_initial_stack(arguments, argument_count, initial_stack)) { paging::clear_user(); return false; }
+    storage::path_copy(current_application, requested, sizeof(current_application));
+    string_copy(current_format, zex ? "ZEX1" : "ELF32", sizeof(current_format));
     last_exit_code = last_fault_vector = last_fault_error = last_fault_eip = 0; last_fault_address = 0; application_faulted = false;
     serial::write(zex ? "APP_START_ZEX " : "APP_START_ELF "); serial::line(requested);
-    console::write("Launching "); console::write(requested); console::line(zex ? " [ZEX1]" : " [ELF32]"); user_enter(entry, initial_stack);
+    console::write("Launching "); console::write(requested); console::line(zex ? " [ZEX1]" : " [ELF32]");
+    user_enter(entry, initial_stack);
     if (application_faulted) { console::write("Application faulted: vector "); console::unsigned_dec(last_fault_vector); console::put('\n'); }
     else { console::write("Application exited with code "); console::unsigned_dec(last_exit_code); console::put('\n'); }
-    paging::clear_user(); return true;
+    paging::clear_user();
+    return true;
 }
 } // namespace process
