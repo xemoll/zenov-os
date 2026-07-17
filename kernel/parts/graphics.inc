@@ -267,8 +267,10 @@ bool init() {
 void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
     if (!active) return;
     restore_cursor(mouse_x, mouse_y);
-    mouse_x += delta_x; mouse_y += delta_y;
-    if (mouse_x < 0) mouse_x = 0; if (mouse_y < 0) mouse_y = 0;
+    mouse_x += delta_x;
+    mouse_y += delta_y;
+    if (mouse_x < 0) mouse_x = 0;
+    if (mouse_y < 0) mouse_y = 0;
     if (mouse_x >= static_cast<int32_t>(width)) mouse_x = static_cast<int32_t>(width) - 1;
     if (mouse_y >= static_cast<int32_t>(height)) mouse_y = static_cast<int32_t>(height) - 1;
     const bool left = (buttons & 1U) != 0, previous_left = (mouse_buttons & 1U) != 0;
@@ -277,15 +279,16 @@ void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
     }
     if (!left) dragging = false;
     if (dragging) {
-        window_x = mouse_x - drag_offset_x; window_y = mouse_y - drag_offset_y;
-        if (window_x < 88) window_x = 88; if (window_x > static_cast<int32_t>(width) - 530) window_x = static_cast<int32_t>(width) - 530;
-        if (window_y < 62) window_y = 62; if (window_y > 148) window_y = 148;
+        window_x = mouse_x - drag_offset_x;
+        window_y = mouse_y - drag_offset_y;
+        if (window_x < 88) window_x = 88;
+        if (window_x > static_cast<int32_t>(width) - 530) window_x = static_cast<int32_t>(width) - 530;
+        if (window_y < 62) window_y = 62;
+        if (window_y > 148) window_y = 148;
         render_scene(); present_full();
         if (!drag_reported) { serial::line("WINDOW_DRAG_OK"); drag_reported = true; }
     } else draw_cursor();
     mouse_buttons = buttons;
     if (first_mouse_packet) { serial::line("MOUSE_PACKET_OK"); first_mouse_packet = false; }
 }
-
-bool ready() { return active; }
 }
