@@ -73,6 +73,8 @@ jobs:
           test "$(stat -c%s build/zenov-data.img)" -eq 16777216
           for db in build/zenovguard-v3.zgdb build/zenovguard-v4.zgdb build/zenovguard-tampered.zgdb build/zenovguard-wrong-key.zgdb; do test -s "$db"; done
           test -s build/qemu/screenshot.ppm
+          test -s build/qemu/launcher.ppm
+          test -s build/qemu/settings.ppm
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
           grep -q PMM_STRESS_OK build/qemu/serial.log
           grep -q PMM_OK build/qemu/serial.log
@@ -106,6 +108,8 @@ jobs:
           grep -q CLIPPING_OK build/qemu/serial.log
           grep -q ALPHA_BLEND_OK build/qemu/serial.log
           grep -q FONT_RENDER_OK build/qemu/serial.log
+          grep -q UI_NAVIGATION_MODEL_OK build/qemu/serial.log
+          grep -q UI_KEYBOARD_NAV_OK build/qemu/serial.log
           grep -q DESKTOP_SCENE_OK build/qemu/serial.log
           grep -q GRAPHICAL_DESKTOP_READY build/qemu/serial.log
           grep -q PS2_MOUSE_OK build/qemu/serial.log
@@ -168,6 +172,8 @@ jobs:
             build/qemu/serial-recovery.log
             build/qemu/zenov-data-recovery.img
             build/qemu/screenshot.ppm
+            build/qemu/launcher.ppm
+            build/qemu/settings.ppm
             security/zenovguard-root-public.pem
             dist/
             ci-logs/native-build.log
