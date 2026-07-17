@@ -9,6 +9,9 @@ static constexpr const char* protected_paths[] = {
     "/apps/zenovapp.zex",
     "/security/zenovguard.zgdb",
     "/security/zenovguard.version",
+    "/security/zenpkg.zpc",
+    "/security/zenpkg.version",
+    "/var/lib/zenpkg/state.v1",
 };
 
 bool protected_path(const char* input) {
@@ -16,7 +19,7 @@ bool protected_path(const char* input) {
     char normalized[48];
     if (!storage::normalize_path(input, normalized)) return false;
     for (const char* path : protected_paths) if (string_equal(normalized, path)) return true;
-    return false;
+    return string_starts_with(normalized, "/apps/pkg-");
 }
 
 void report_protected_path(const char* operation, const char* path) {
