@@ -179,7 +179,7 @@ run_phase() {
   "$controller" "$serial" "$qmp_port" | timeout 55s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
     -drive "file=$data_image,format=raw,if=ide,index=0,media=disk" \
-    -boot a -m 32M -vga std -display none -serial "file:$serial" -monitor stdio \
+    -boot a -m 32M -machine pc,vmport=off -vga std -display none -serial "file:$serial" -monitor stdio \
     -qmp "tcp:127.0.0.1:$qmp_port,server=on,wait=off" -no-reboot -no-shutdown \
     >"$monitor" 2>"$stderr"
   local status=$?; set -e
