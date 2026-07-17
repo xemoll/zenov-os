@@ -4,6 +4,8 @@
 .global _start
 .equ SYS_EXIT, 0
 .equ SYS_WRITE, 1
+.equ SYS_FILE_READ, 3
+.equ ERROR_FAULT, 0xFFFFFFFB
 .equ ERROR_UNSUPPORTED, 0xFFFFFFFA
 
 _start:
@@ -22,10 +24,27 @@ _start:
     jne .fail
     cmp byte ptr [ebx + 4], 0
     jne .fail
+
     mov eax, 255
     int 0x80
     cmp eax, ERROR_UNSUPPORTED
     jne .fail
+
+    mov eax, SYS_WRITE
+    mov ebx, 0x8000
+    mov ecx, 1
+    int 0x80
+    cmp eax, ERROR_FAULT
+    jne .fail
+
+    mov eax, SYS_FILE_READ
+    mov ebx, OFFSET FLAT:known_file
+    xor ecx, ecx
+    mov edx, 1
+    int 0x80
+    cmp eax, ERROR_FAULT
+    jne .fail
+
     mov eax, SYS_WRITE
     mov ebx, OFFSET FLAT:success
     mov ecx, success_end - success
@@ -43,8 +62,10 @@ _start:
     int 0x80
 
 .section .rodata,"a"
+known_file:
+    .asciz "/data/docs/readme.txt"
 success:
-    .ascii "PROCESS_ARGV_OK\nSYSCALL_ERRORS_OK\n"
+    .ascii "PROCESS_ARGV_OK\nSYSCALL_ERRORS_OK\nSYSCALL_POINTER_GUARD_OK\n"
 success_end:
 failure:
     .ascii "PROCESS_ARGV_FAIL\n"
