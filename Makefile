@@ -4,6 +4,7 @@ HOST_CXX ?= g++
 AS ?= as
 LD ?= ld
 OBJCOPY ?= objcopy
+KERNEL_MAX_BYTES := 524288
 
 HOST_FLAGS := -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic
 KERNEL_FLAGS := -m32 -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
@@ -79,7 +80,7 @@ $(BUILD)/kernel.elf: $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtim
 $(BUILD)/KERNEL.BIN: $(BUILD)/kernel.elf
 	$(OBJCOPY) -O binary $< $@
 	@test "$$(stat -c%s $@)" -gt 0
-	@test "$$(stat -c%s $@)" -le 61440
+	@test "$$(stat -c%s $@)" -le $(KERNEL_MAX_BYTES)
 
 $(BUILD)/zenov-os.img: $(BUILD)/BOOT.BIN $(BUILD)/KERNEL.BIN $(BUILD)/fat12-builder $(BUILD)/image-verify
 	$(BUILD)/fat12-builder $(BUILD)/BOOT.BIN $(BUILD)/KERNEL.BIN $@
@@ -153,11 +154,14 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 zenov_app_hash="$$(sha256sum $(BUILD)/ZENOVAPP.ZEX | cut -d' ' -f1)"; \
 	 printf '%s\n' \
 	 '{' \
-	 '  "format": "zenov-os-build-v6",' \
+	 '  "format": "zenov-os-build-v7",' \
 	 '  "product": "ZenovOS",' \
 	 '  "version": "0.1.1",' \
 	 '  "target": "i686-zenov-none",' \
+	 '  "boot_loader": "FAT12 BIOS segmented kernel loader",' \
 	 '  "memory": "E820 PMM / page-granular user protection / reusable heap",' \
+	 '  "graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop",' \
+	 '  "input": "PS2 keyboard and 3-byte PS2 mouse packets",' \
 	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
 	 '  "application_abi": "ZEX1 + ELF32 ring3 / int 0x80 / argv / console input",' \
 	 '  "zenov_app_abi": "0.1.1",' \
@@ -185,11 +189,12 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	done
 	@! find . -path './build' -prune -o -name '*.py' -print | grep -q .
 	@grep -q 'system_version("0.1.1")' kernel/config/system.zv
-	@grep -q '"format": "zenov-os-build-v6"' $(BUILD)/build-manifest.json
+	@grep -q '"format": "zenov-os-build-v7"' $(BUILD)/build-manifest.json
+	@grep -q '"graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop"' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_app_abi": "0.1.1"' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_repository_commit": "$(ZENOV_COMPILER_REVISION)"' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_app_contract_sha256": "$(ZENOV_APP_EXPECTED_SHA256)"' $(BUILD)/build-manifest.json
-	@echo 'static checks: OK (0.1.1 P0 memory, ABI, filesystem and Zenov app contracts)'
+	@echo 'static checks: OK (0.1.1 graphics, memory, ABI, filesystem and Zenov app contracts)'
 
 qemu: all $(BUILD)/zenovfs-fault-test
 	@mkdir -p $(BUILD)/qemu
