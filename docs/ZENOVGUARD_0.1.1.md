@@ -77,7 +77,13 @@ BOOT, SCAN, EXEC and QUARANTINE decisions require a successful persistent commit
 
 A volatile 32-record mirror remains for quick inspection of the current session. `guard log` prints the persistent retained window followed by this mirror.
 
-See [`AUDIT_JOURNAL_0.1.1.md`](AUDIT_JOURNAL_0.1.1.md) for the binary format, ring anchor, crash ordering, independent verifier and offline-attacker boundary.
+The audit COW path is verified with 1,662 deterministic sector/metadata fault cases across empty-journal append and full-ring rotation. Ordered crash prefixes must recover the exact old or exact new journal. Torn, corrupted, missing or reordered writes may also produce an invalid state, but that state must be rejected fail-closed; no third valid journal is accepted.
+
+The host verifier and fault generator use a shared canonical ZGAL1 module, both run the SHA-256 `abc` known-answer test, and the generator requires a fixed record-hash vector before producing images.
+
+Three generated ZenovFS images are booted by QEMU: old-state recovery, new-state recovery and a committed replacement with a missing payload sector. The last image must stop before UI readiness on `ZENOV_GUARD_AUDIT_INVALID`.
+
+See [`AUDIT_JOURNAL_0.1.1.md`](AUDIT_JOURNAL_0.1.1.md) for the binary format, ring anchor, complete fault matrix, crash images, independent verifier and offline-attacker boundary.
 
 ## Commands
 
@@ -97,13 +103,18 @@ guard log verify
 
 ## CI evidence
 
-The QEMU contract must prove:
+The CI and QEMU contract must prove:
 
 ```text
+ZENOV_AUDIT_COW_FAULT_MATRIX_OK
+ZENOV_AUDIT_COW_FAULT_INJECTION_OK total_cases=1662
+ZENOV_AUDIT_COW_OLD_OR_NEW_OR_FAIL_CLOSED_ONLY
 ZENOV_GUARD_AUDIT_SELFTEST_OK
-ZENOV_GUARD_AUDIT_REPLAY_OK
+ZENOV_GUARD_AUDIT_REPLAY_OK count=0 next=1
+ZENOV_GUARD_AUDIT_REPLAY_OK count=1 next=2
 ZENOV_GUARD_AUDIT_READY
 ZENOV_GUARD_AUDIT_VERIFY_OK
+ZENOV_GUARD_AUDIT_INVALID
 ZENOV_GUARD_SELFTEST_OK
 ZENOV_GUARD_TRUST_BASELINE_OK
 ZENOV_GUARD_READY
@@ -124,7 +135,7 @@ ZGDB_REVOCATION_BLOCKED
 ZGDB_POLICY_VERSION_OK version=4
 ```
 
-The first phase writes a non-empty persistent journal. The second phase must replay that journal after reboot and continue the chain. The recovery image independently verifies its factory journal while exercising interrupted ZenovFS transaction recovery.
+The normal runtime phase writes a non-empty persistent journal. The second phase must replay that journal after reboot and continue the chain. A generic recovery image verifies interrupted ZenovFS recovery. Three additional phases prove audit pre-commit recovery, post-commit recovery and invalid-journal fail-closed boot.
 
 The host verifier reads the runtime journal directly from ZenovFS. It then changes journal payload and recomputes the ZenovFS FNV checksum; the filesystem checksum passes, while the SHA-256 audit-chain verifier must reject the image.
 
@@ -139,6 +150,7 @@ Host CI also independently verifies positive ZGDB fixtures with OpenSSL PSS para
 - In-band root metadata rotation is not implemented; changing the root requires a verified OS build.
 - ZGAL1 is hash-chained but not authenticated by a secret outside writable storage. A complete offline image rewrite can construct a new internally consistent chain.
 - The bounded journal retains 64 records; rotated-out record contents are not recoverable without external archival.
+- The deterministic fault matrix models ZenovFS writes, not undocumented physical-drive cache or firmware behavior.
 - There is no TPM-backed measured boot, sealed audit head or remote witness.
 - ZenovFS1 metadata is checksummed and transactionally updated but is not cryptographically authenticated against an offline disk attacker.
 - ZenovGuard does not parse archives, documents, scripts, PE, Mach-O or other foreign formats.
