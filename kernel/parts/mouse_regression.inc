@@ -15,12 +15,23 @@ void inject_mouse_packet_to_decoder(uint8_t status, uint8_t delta_x, uint8_t del
 }
 
 bool mouse_decoder_regression() {
-    if (!mouse_online || !graphics::active || mouse_packet_index != 0U) return false;
+    if (!mouse_online || !graphics::active) return false;
+
+    disable_interrupts();
+    mouse_packet_index = 0U;
+    graphics::mouse_x = static_cast<int32_t>(graphics::width / 2U);
+    graphics::mouse_y = static_cast<int32_t>(graphics::height / 2U);
+    graphics::window_x = 150;
+    graphics::window_y = 88;
+    graphics::mouse_buttons = 0U;
+    graphics::dragging = false;
     graphics::first_mouse_packet = true;
     graphics::drag_reported = false;
+    graphics::render_scene();
+    graphics::present_full();
 
     inject_mouse_packet_to_decoder(0x08U, 1U, 1U);
-    if (graphics::first_mouse_packet || mouse_packet_index != 0U) return false;
+    const bool packet_ok = !graphics::first_mouse_packet && mouse_packet_index == 0U;
 
     inject_mouse_packet_to_decoder(0x08U, 0U, 95U);
     inject_mouse_packet_to_decoder(0x08U, 0U, 95U);
@@ -28,5 +39,8 @@ bool mouse_decoder_regression() {
     inject_mouse_packet_to_decoder(0x29U, 80U, 226U);
     inject_mouse_packet_to_decoder(0x08U, 0U, 0U);
 
-    return graphics::drag_reported && mouse_packet_index == 0U;
+    const bool drag_ok = graphics::drag_reported && mouse_packet_index == 0U &&
+        graphics::window_x == 230 && graphics::window_y == 118;
+    enable_interrupts();
+    return packet_ok && drag_ok;
 }
