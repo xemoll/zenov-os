@@ -15,11 +15,20 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/user_window.inc"
 #include "parts/storage.inc"
 #include "parts/storage_tools.inc"
+#include "parts/security_paths.inc"
 namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uint32_t&); }
 #define read_file security_read_file
+#define write_file guarded_write_file
+#define remove guarded_remove
+#define rename_entry guarded_rename_entry
+#define copy_file guarded_copy_file
 #define run run_unchecked
 #include "parts/process.inc"
 #undef run
+#undef copy_file
+#undef rename_entry
+#undef remove
+#undef write_file
 #undef read_file
 #include "parts/security_guard.inc"
 #include "parts/security_io.inc"
@@ -27,6 +36,10 @@ namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uin
 #include "parts/graphics.inc"
 #include "parts/mouse_regression.inc"
 #include "parts/input_v2.inc"
+#define write_file guarded_write_file
+#define remove guarded_remove
+#define rename_entry guarded_rename_entry
+#define copy_file guarded_copy_file
 #define history shell_history
 #define history_count shell_history_count
 #define shell_run shell_run_legacy_80
@@ -34,6 +47,10 @@ namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uin
 #undef shell_run
 #undef history_count
 #undef history
+#undef copy_file
+#undef rename_entry
+#undef remove
+#undef write_file
 #include "parts/security_commands.inc"
 #include "parts/shell_runtime.inc"
 
