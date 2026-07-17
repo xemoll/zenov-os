@@ -38,8 +38,8 @@ void sync_terminal_from_console() {
     if (!active || !backbuffer || !framebuffer) return;
     if (!terminal_sync_started) {
         terminal_sync_started = true;
-        window_x = 145;
-        window_y = 82;
+        window_x = 144;
+        window_y = 76;
         active_view = View::terminal;
         render_scene();
         present_full();
@@ -49,7 +49,7 @@ void sync_terminal_from_console() {
     }
     if (active_view != View::terminal || dragging) return;
     render_terminal();
-    present_region(window_x - 2, window_y - 2, window_width + 18, window_height + 20);
+    present_region(window_x - 12, window_y - 12, window_width + 24, window_height + 24);
 }
 
 uint32_t scene_hash() {
@@ -97,10 +97,16 @@ bool init() {
     serial::line(glyph_for('Z') && glyph_for('0') && glyph_for('?') ? "FONT_RENDER_OK" : "FONT_RENDER_FAILED");
     serial::line(desktop_radius >= 4U && desktop_radius <= 24U ? "UI_ROUNDED_RECT_OK" : "UI_ROUNDED_RECT_FAILED");
     serial::line(current_theme.canvas_top != current_theme.canvas_bottom ? "UI_GRADIENT_OK" : "UI_GRADIENT_FAILED");
-    serial::line(window_x >= 0 && window_y >= 0 && window_x + window_width <= static_cast<int32_t>(width) && window_y + window_height <= static_cast<int32_t>(height) ? "UI_LAYOUT_BOUNDS_OK" : "UI_LAYOUT_BOUNDS_FAILED");
+    const bool bounds_ok = window_x >= 0 && window_y >= 0 && window_x + window_width <= static_cast<int32_t>(width) && window_y + window_height <= static_cast<int32_t>(height);
+    serial::line(bounds_ok ? "UI_LAYOUT_BOUNDS_OK" : "UI_LAYOUT_BOUNDS_FAILED");
+    const bool geometry_ok = window_x * 2 + window_width == static_cast<int32_t>(width) &&
+        topbar_x * 2 + topbar_width == static_cast<int32_t>(width) &&
+        dock_x * 2 + dock_width == static_cast<int32_t>(width) &&
+        window_width % ui_grid == 0 && window_height % ui_grid == 0;
+    serial::line(geometry_ok ? "UI_GEOMETRY_OK" : "UI_GEOMETRY_FAILED");
     serial::write("DESKTOP_SCENE_HASH="); serial_hex(scene_hash()); serial::write("\r\n");
     serial::line("DESKTOP_SCENE_OK");
-    return clipping && runtime_preferences_loaded;
+    return clipping && runtime_preferences_loaded && bounds_ok && geometry_ok;
 }
 
 bool hit(int32_t x, int32_t y, int32_t rect_x, int32_t rect_y, int32_t rect_width, int32_t rect_height) {
@@ -108,13 +114,13 @@ bool hit(int32_t x, int32_t y, int32_t rect_x, int32_t rect_y, int32_t rect_widt
 }
 
 bool handle_click() {
-    if (hit(mouse_x, mouse_y, 238, 541, 48, 48)) active_view = View::terminal;
-    else if (hit(mouse_x, mouse_y, 298, 541, 48, 48)) active_view = View::files;
-    else if (hit(mouse_x, mouse_y, 358, 541, 48, 48)) active_view = View::settings;
-    else if (hit(mouse_x, mouse_y, 418, 541, 48, 48)) active_view = View::launcher;
-    else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 24, window_y + 109, 134, 70)) { apply_runtime_theme(0); persist_runtime_theme(0); }
-    else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 172, window_y + 109, 134, 70)) { apply_runtime_theme(1); persist_runtime_theme(1); }
-    else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 320, window_y + 109, 134, 70)) { apply_runtime_theme(2); persist_runtime_theme(2); }
+    if (hit(mouse_x, mouse_y, dock_x + 8, dock_y + 2, 48, 48)) active_view = View::terminal;
+    else if (hit(mouse_x, mouse_y, dock_x + 64, dock_y + 2, 48, 48)) active_view = View::files;
+    else if (hit(mouse_x, mouse_y, dock_x + 120, dock_y + 2, 48, 48)) active_view = View::settings;
+    else if (hit(mouse_x, mouse_y, dock_x + 176, dock_y + 2, 48, 48)) active_view = View::launcher;
+    else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 16, window_y + 92, 144, 80)) { apply_runtime_theme(0); persist_runtime_theme(0); }
+    else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 176, window_y + 92, 144, 80)) { apply_runtime_theme(1); persist_runtime_theme(1); }
+    else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 336, window_y + 92, 144, 80)) { apply_runtime_theme(2); persist_runtime_theme(2); }
     else return false;
     render_scene(); present_full();
     return true;
@@ -141,10 +147,10 @@ void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
     if (dragging) {
         window_x = mouse_x - drag_offset_x;
         window_y = mouse_y - drag_offset_y;
-        if (window_x < 88) window_x = 88;
-        if (window_x > static_cast<int32_t>(width) - 530) window_x = static_cast<int32_t>(width) - 530;
-        if (window_y < 62) window_y = 62;
-        if (window_y > 148) window_y = 148;
+        if (window_x < 64) window_x = 64;
+        if (window_x > static_cast<int32_t>(width) - window_width - 24) window_x = static_cast<int32_t>(width) - window_width - 24;
+        if (window_y < 60) window_y = 60;
+        if (window_y > 136) window_y = 136;
         render_scene(); present_full();
         scene_changed = true;
         if (!drag_reported) { serial::line("WINDOW_DRAG_OK"); drag_reported = true; }
