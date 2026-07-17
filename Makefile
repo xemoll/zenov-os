@@ -50,6 +50,9 @@ $(BUILD)/zenovfs-verify: tools/zenovfs_verify.cpp | $(BUILD)
 $(BUILD)/zenovfs-fault-test: tools/zenovfs_fault_test.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
+$(BUILD)/zenovfs-audit-verify: tools/zenovfs_audit_verify.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
 $(BUILD)/zenov-app-compiler: tools/zenov_app_compiler.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
@@ -174,7 +177,7 @@ $(BUILD)/zenov-data.img: $(USER_APPS) $(ZGDB_FILES) $(BUILD)/zenovfs-builder $(B
 	@test "$$(od -An -tc -N8 $@ | tr -d ' \n')" = "ZENOVFS1"
 	$(BUILD)/zenovfs-verify $@
 
-$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(ZGDB_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp security/zgdb_crypto_material.hpp security/zenovguard-root-public.pem
+$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(ZGDB_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp tools/zenovfs_audit_verify.cpp security/zgdb_crypto_material.hpp security/zenovguard-root-public.pem
 	@boot_hash="$$(sha256sum $(BUILD)/BOOT.BIN | cut -d' ' -f1)"; \
 	 kernel_hash="$$(sha256sum $(BUILD)/KERNEL.BIN | cut -d' ' -f1)"; \
 	 image_hash="$$(sha256sum $(BUILD)/zenov-os.img | cut -d' ' -f1)"; \
@@ -187,7 +190,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 root_hash="$$(sha256sum security/zenovguard-root-public.pem | cut -d' ' -f1)"; \
 	 printf '%s\n' \
 	 '{' \
-	 '  "format": "zenov-os-build-v9",' \
+	 '  "format": "zenov-os-build-v10",' \
 	 '  "product": "ZenovOS",' \
 	 '  "version": "0.1.1",' \
 	 '  "target": "i686-zenov-none",' \
@@ -196,13 +199,18 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  "graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop",' \
 	 '  "input": "PS2 keyboard and 3-byte PS2 mouse packets",' \
 	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
-	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 RSA-PSS SHA-256 salt-32 / key-id / sequential policy / revocation / quarantine",' \
+	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 RSA-PSS / persistent ZGAL1 hash-chained audit / fail-closed append",' \
 	 '  "zgdb_schema": 2,' \
 	 '  "zgdb_compiled_floor": 3,' \
 	 '  "zgdb_root_key_id": "6f788074c018f5aa",' \
 	 "  \"zgdb_root_public_sha256\": \"$$root_hash\"," \
 	 "  \"zgdb_v3_sha256\": \"$$zgdb_v3_hash\"," \
 	 "  \"zgdb_v4_sha256\": \"$$zgdb_v4_hash\"," \
+	 '  "audit_schema": 1,' \
+	 '  "audit_capacity": 64,' \
+	 '  "audit_record_bytes": 128,' \
+	 '  "audit_journal_bytes": 8288,' \
+	 '  "audit_persistence": "ZenovFS1 COW / SHA-256 previous-record chain / bounded anchor",' \
 	 '  "application_abi": "ZEX1 + ELF32 ring3 / int 0x80 / argv / console input",' \
 	 '  "zenov_app_abi": "0.1.1",' \
 	 '  "zenov_repository_commit": "$(ZENOV_COMPILER_REVISION)",' \
@@ -218,10 +226,11 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  }' \
 	 '}' > $@
 
-check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test all
+check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify all
 	$(BUILD)/zenov-stage0 --self-test
 	$(BUILD)/image-verify $(BUILD)/zenov-os.img
 	$(BUILD)/zenovfs-verify $(BUILD)/zenov-data.img
+	$(BUILD)/zenovfs-audit-verify $(BUILD)/zenov-data.img
 	$(BUILD)/zenovfs-fault-test $(BUILD)/zenov-data.img
 	@for app in $(BUILD)/FILEIO.ELF $(BUILD)/ARGS.ELF $(BUILD)/CONSOLE.ELF $(BUILD)/PROTECT.ELF $(BUILD)/KACCESS.ELF; do \
 	  readelf -h $$app | grep -q 'ELF32'; readelf -h $$app | grep -q 'Intel 80386'; \
@@ -229,20 +238,26 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	done
 	@! find . -path './build' -prune -o -name '*.py' -print | grep -q .
 	@grep -q 'system_version("0.1.1")' kernel/config/system.zv
-	@grep -q '"format": "zenov-os-build-v9"' $(BUILD)/build-manifest.json
+	@grep -q '"format": "zenov-os-build-v10"' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_schema": 2' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_compiled_floor": 3' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_root_key_id": "6f788074c018f5aa"' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_v3_sha256": "$(ZGDB_V3_SHA256)"' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_v4_sha256": "$(ZGDB_V4_SHA256)"' $(BUILD)/build-manifest.json
+	@grep -q '"audit_schema": 1' $(BUILD)/build-manifest.json
+	@grep -q '"audit_capacity": 64' $(BUILD)/build-manifest.json
+	@grep -q '"audit_journal_bytes": 8288' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_app_abi": "0.1.1"' $(BUILD)/build-manifest.json
-	@echo 'static checks: OK (0.1.1 ZGDB2 RSA-PSS root rotation, ZenovGuard, graphics, memory, ABI and transactional storage)'
+	@echo 'static checks: OK (0.1.1 ZGDB2 RSA-PSS, persistent ZGAL1 audit, graphics, memory, ABI and transactional storage)'
 
-qemu: all $(BUILD)/zenovfs-fault-test
+qemu: all $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify
 	@mkdir -p $(BUILD)/qemu
 	@cp $(BUILD)/zenov-data.img $(BUILD)/qemu/zenov-data-runtime.img
 	$(BUILD)/zenovfs-fault-test $(BUILD)/zenov-data.img --emit-recovery $(BUILD)/qemu/zenov-data-recovery.img
 	bash tests/qemu_smoke.sh $(BUILD)/zenov-os.img $(BUILD)/qemu/zenov-data-runtime.img $(BUILD)/qemu $(BUILD)/qemu/zenov-data-recovery.img
+	$(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zenov-data-runtime.img --require-nonempty --emit-tampered $(BUILD)/qemu/zenov-data-audit-tampered.img
+	@if $(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zenov-data-audit-tampered.img --require-nonempty; then echo 'tampered ZGAL1 fixture unexpectedly verified' >&2; exit 1; fi
+	@echo 'persistent audit host verification: OK (runtime chain valid; FNV-repaired tamper rejected)'
 
 test: check qemu deterministic
 
@@ -253,13 +268,13 @@ deterministic: all
 	@cmp $(BUILD)/zenov-data.img /tmp/zenov-os-deterministic/zenov-data.img
 	@for app in $(USER_APPS); do cmp $$app /tmp/zenov-os-deterministic/$$(basename $$app); done
 	@for db in $(ZGDB_FILES); do cmp $$db /tmp/zenov-os-deterministic/$$(basename $$db); done
-	@echo 'deterministic rebuild: OK (system, RSA-PSS signed policy, transactional data volume and seven apps are byte-identical)'
+	@echo 'deterministic rebuild: OK (system, RSA-PSS policy, empty ZGAL1 seed, data volume and seven apps are byte-identical)'
 
 inspect: all
 	readelf -h $(BUILD)/kernel.elf
 	readelf -S $(BUILD)/kernel.elf
 	for app in $(BUILD)/*.ELF; do readelf -h $$app; readelf -l $$app; done
-	nm -n $(BUILD)/kernel.elf | head -200
+	nm -n $(BUILD)/kernel.elf | head -220
 
 clean:
 	rm -rf $(BUILD)
