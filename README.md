@@ -2,7 +2,7 @@
 
 ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 boots into an 800×600 graphical desktop on QEMU Standard VGA while retaining the text shell and COM1 serial console as diagnostic fallbacks.
 
-The current engineering focus is a small, auditable security foundation rather than additional visual design or compatibility with foreign executable formats. ZenovOS supports native ZEX1 and validated static ELF32/i386 applications. ZenovGuard adds final-read SHA-256 appraisal, fail-closed execution, signed ZGDB threat/revocation policy, quarantine and a bounded audit log around that existing execution boundary.
+The current engineering focus is a small, auditable security foundation rather than additional visual design or compatibility with foreign executable formats. ZenovOS supports native ZEX1 and validated static ELF32/i386 applications. ZenovGuard adds final-read SHA-256 appraisal, fail-closed execution, ZGDB2 RSA-PSS threat/revocation policy, quarantine and a bounded audit log around that existing execution boundary.
 
 ![ZenovOS 0.1.1 graphical desktop](./docs/screenshots/zenov-os-0.1.1-graphical-desktop.png)
 
@@ -23,12 +23,12 @@ Executable regression coverage includes:
 - transactional ZenovFS1 replacement with crash-boundary fault injection;
 - deterministic Zenov source to ZEX1 compilation and ring-3 execution;
 - ZenovGuard integrity appraisal, detection, quarantine and audit decisions;
-- RSA-signed ZGDB policy validation, tamper rejection, monotonic update, rollback rejection and revocation;
+- rotated-root ZGDB2 RSA-PSS validation, key-ID enforcement, tamper rejection, sequential update, rollback rejection and revocation;
 - deterministic rebuilds and release-package provenance.
 
 Documentation starts at [`docs/INDEX.md`](docs/INDEX.md). Security contracts are defined in [`docs/ZENOVGUARD_0.1.1.md`](docs/ZENOVGUARD_0.1.1.md) and [`docs/ZGDB_0.1.1.md`](docs/ZGDB_0.1.1.md).
 
-## ZenovGuard and signed ZGDB policy
+## ZenovGuard and ZGDB2 signed policy
 
 ZenovGuard is the local integrity and malware-prevention layer for ZenovOS 0.1.1. It is not a claim of broad commercial antivirus coverage.
 
@@ -40,7 +40,7 @@ ZenovFS checksum-valid final read
         ▼
 kernel SHA-256
         │
-        ├── signed ZGDB threat and revocation records
+        ├── ZGDB2 key ID + RSA-PSS threat/revocation records
         ├── ZEX1 or ELF32 structural validation
         ├── W+X executable-policy rejection
         └── exact normalized path + compiled trusted SHA-256
@@ -51,7 +51,9 @@ ALLOW only when trusted and not revoked
 
 The appraisal is performed on the same bytes consumed by the loader, immediately before user-page mapping. Unknown files, valid applications copied to another path, malformed containers, quarantined files, known signatures and revoked digests are denied by default.
 
-At boot, ZenovGuard re-reads all seven bundled applications and verifies their immutable path-and-SHA-256 baseline. It then validates `/security/zenovguard.zgdb`, including payload SHA-256 and its RSA-2048 PKCS#1 v1.5 SHA-256 signature. If the persistent volume, trust baseline or signed policy is unavailable, application execution stays locked.
+At boot, ZenovGuard re-reads all seven bundled applications and verifies their immutable path-and-SHA-256 baseline. It then validates `/security/zenovguard.zgdb`, including schema 2, root key ID `6f788074c018f5aa`, payload SHA-256 and RSA-2048 PSS/SHA-256 signature with MGF1-SHA-256 and a fixed 32-byte salt. If the persistent volume, trust baseline or signed policy is unavailable, application execution stays locked.
+
+The previous PKCS#1 v1.5 root has been removed from kernel trust. This build accepts policy version 3 or later under the rotated root and compiled floor 3. Policies 1 and 2 cannot be reintroduced merely by replacing the data image.
 
 The database uses deterministic fixed-size records. Every signed `TRUSTED` record must correspond to one compiled trusted path and digest, exactly once. A signed policy can add threat digests or revoke an existing application, but cannot authorize a new executable path on writable storage.
 
@@ -70,7 +72,7 @@ guard log
 
 `antivirus` is an alias for `guard`.
 
-Signed policy updates are verified twice before activation, then stored through ZenovFS copy-on-write replacement. The active database is committed before `/security/zenovguard.version`; boot reconciles a newer signed database with older version state, while an older database than the stored state is rejected. Active policy and version-state paths are protected from shell and userspace mutation.
+Signed policy updates are verified twice before activation, must be exactly version `N+1`, and are stored through ZenovFS copy-on-write replacement. The active database is committed before `/security/zenovguard.version`; boot reconciles a newer signed database with older version state, while an older database than the stored state is rejected. Active policy and version-state paths are protected from shell and userspace mutation.
 
 Quarantine uses an atomic ZenovFS metadata rename into:
 
@@ -78,7 +80,7 @@ Quarantine uses an atomic ZenovFS metadata rename into:
 /data/quarantine/q-<sha256-prefix>.qtn
 ```
 
-The initial policy contains the SHA-256 of the official harmless EICAR anti-malware test file and a separate ZenovGuard-only safe CI vector. Policy version 2 also revokes the canonical `zenovapp.zex` digest. The EICAR payload itself is not embedded in the repository or kernel image.
+Policy version 3 contains the SHA-256 of the official harmless EICAR anti-malware test file and a separate ZenovGuard-only safe CI vector. Policy version 4 also revokes the canonical `zenovapp.zex` digest. The EICAR payload itself is not embedded in the repository or kernel image.
 
 Important security markers include:
 
@@ -90,13 +92,15 @@ ZENOV_GUARD_DETECTED
 ZENOV_GUARD_QUARANTINE_OK
 ZENOV_GUARD_UNTRUSTED_BLOCKED
 ZENOV_GUARD_EXEC_ALLOWED
-ZGDB_SIGNATURE_OK
-ZGDB_POLICY_VERSION_OK version=1
+ZGDB_ROOT_KEY_OK id=6f788074c018f5aa
+ZGDB_PSS_SIGNATURE_OK
+ZGDB_POLICY_VERSION_OK version=3
+ZGDB_KEY_REJECTED reason=unknown-key
 ZGDB_TAMPER_REJECTED
-ZGDB_ATOMIC_UPDATE_OK version=2
+ZGDB_ATOMIC_UPDATE_OK version=4
 ZGDB_ROLLBACK_REJECTED
 ZGDB_REVOCATION_BLOCKED
-ZGDB_POLICY_VERSION_OK version=2
+ZGDB_POLICY_VERSION_OK version=4
 ```
 
 ## Memory and isolation
@@ -131,7 +135,7 @@ run KACCESS.ELF
 run ZENOVAPP.ZEX
 ```
 
-Policy version 1 allows all seven. The signed version-2 CI policy revokes `ZENOVAPP.ZEX` and proves the denial persists across reboot.
+Policy version 3 allows all seven. The signed version-4 CI policy revokes `ZENOVAPP.ZEX` and proves the denial persists across reboot.
 
 Syscalls use `INT 0x80`:
 
@@ -175,14 +179,15 @@ The primary workflow performs:
 1. strict host and freestanding compilation with warnings as errors;
 2. FAT12, ZenovFS1, ZEX1 and ELF structural checks;
 3. SHA-256 known-answer, trust-baseline and execution-policy self-tests;
-4. deterministic ZGDB construction and pinned artifact hashes;
-5. OpenSSL verification of valid v1/v2 signatures and rejection of a tampered candidate;
-6. exhaustive host ZenovFS1 crash-boundary injection;
-7. three QEMU phases covering desktop boot, policy update, revocation, applications, persistence and interrupted recovery;
-8. framebuffer screenshot capture;
-9. deterministic system rebuilding, including all signed policy fixtures;
-10. deterministic release ZIP generation and byte comparison;
-11. evidence upload with images, binaries, signed policy, manifest and serial logs.
+4. deterministic ZGDB2 construction and pinned version-3/version-4 artifact hashes;
+5. OpenSSL RSA-PSS verification of both positive fixtures with salt length 32;
+6. independent rejection of tampered and unknown-key negative fixtures;
+7. exhaustive host ZenovFS1 crash-boundary injection;
+8. three QEMU phases covering rotated-root boot, policy update, revocation, applications, persistence and interrupted recovery;
+9. framebuffer screenshot capture;
+10. deterministic system rebuilding, including all signed policy fixtures;
+11. deterministic release ZIP generation and byte comparison;
+12. evidence upload with images, binaries, signed policy, public root, manifest and serial logs.
 
 ## Build
 
@@ -197,10 +202,12 @@ bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist packa
 
 ## Explicit limitations
 
-ZenovGuard and ZGDB 0.1.1 intentionally do not provide:
+ZenovGuard and ZGDB2 0.1.1 intentionally do not provide:
 
 - a network signature updater;
 - an operational repository-hosted private signing key or signing service;
+- threshold root signing;
+- in-band root-metadata rotation independent of an OS build;
 - TPM/NVRAM-backed monotonic policy state;
 - TPM-backed measured boot or remote attestation;
 - a persistent cryptographically chained audit log;
@@ -208,9 +215,9 @@ ZenovGuard and ZGDB 0.1.1 intentionally do not provide:
 - archive, document, script, PE, Mach-O or other foreign-format scanning;
 - heuristic, behavioral or machine-learning malware classification.
 
-The compiled policy floor is `1`. Normal operation and reboots on the same data image reject rollback below persistent state, but an offline attacker replacing both database and version state can roll back as far as the compiled floor. A stronger cross-image guarantee requires hardware monotonic state or a future kernel with a raised floor.
+The compiled policy floor is `3`. Normal operation and reboots on the same data image reject rollback below persistent state, but an offline attacker replacing both database and version state can roll policy back to version 3. Reintroducing schema-1 policies 1/2 would additionally require replacing the kernel image because their old root is no longer trusted. A stronger cross-image guarantee requires hardware monotonic state or a future kernel with a raised floor.
 
-The private key used to produce the checked-in v1/v2 fixtures is not committed and was not retained in this development environment. The fixtures are cryptographically verifiable, but future public policy issuance requires a separately provisioned offline root and key-custody procedure.
+The private key used to produce the checked-in v3/v4 fixtures is not committed. The fixtures are cryptographically verifiable, but future public policy issuance requires a separately provisioned offline root and key-custody procedure.
 
 ZenovOS remains a single-foreground-process i686/BIOS system. It does not yet provide concurrent user processes, per-process page directories, a user-space compositor, SMP, networking, USB, AHCI/NVMe, dynamic linking or ZenovFS2 variable extents.
 
@@ -218,7 +225,7 @@ These limitations are documented to avoid overstating the protection level. The 
 
 ## Release assets
 
-The existing `v0.1.1` release assets remain the previous installable baseline until rebuilt and republished from the exact final signed-policy `main` commit.
+The existing `v0.1.1` release assets remain the previous installable baseline until rebuilt and republished from the exact final ZGDB2 `main` commit.
 
 [Open the ZenovOS 0.1.1 release](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1)
 
