@@ -2,6 +2,7 @@
 .section .text,"ax"
 .code32
 .extern syscall_dispatch
+.extern user_window_cleanup
 
 .global user_enter
 .global syscall_entry
@@ -62,6 +63,7 @@ user_abort_entry:
     mov fs, ax
     mov gs, ax
     mov ss, ax
+    call user_window_cleanup
     mov esp, [saved_kernel_esp]
     pop edi
     pop esi

@@ -66,6 +66,10 @@ jobs:
           grep -q HEAP_INVALID_FREE_BLOCKED build/qemu/serial.log
           grep -q HEAP_STRESS_OK build/qemu/serial.log
           grep -q PAGING_OK build/qemu/serial.log
+          grep -q USER_WINDOW_SCRUB_OK build/qemu/serial.log
+          grep -q USER_WINDOW_RUNTIME_SCRUB_OK build/qemu/serial.log
+          test "$(grep -c USER_WINDOW_RUNTIME_SCRUB_OK build/qemu/serial.log)" -ge 7
+          grep -q ELF_WX_POLICY_OK build/qemu/serial.log
           grep -q ZENOVFS_MOUNT_OK build/qemu/serial.log
           grep -q PROCESS_ABI_0_1_1_OK build/qemu/serial.log
           grep -q ZENOVOS_UI_READY build/qemu/serial.log
