@@ -15,10 +15,14 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/user_window.inc"
 #include "parts/storage.inc"
 #include "parts/storage_tools.inc"
+namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uint32_t&); }
+#define read_file security_read_file
 #define run run_unchecked
 #include "parts/process.inc"
 #undef run
+#undef read_file
 #include "parts/security_guard.inc"
+#include "parts/security_io.inc"
 #include "parts/process_policy.inc"
 #include "parts/graphics.inc"
 #include "parts/mouse_regression.inc"
