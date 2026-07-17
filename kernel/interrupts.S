@@ -2,6 +2,7 @@
 .section .text,"ax"
 .code32
 .extern interrupt_dispatch
+.extern user_abort_entry
 
 .macro ISR_NOERR number
 .global isr\number
@@ -68,6 +69,8 @@ isr_common:
     push esp
     call interrupt_dispatch
     add esp, 4
+    test eax, eax
+    jnz user_abort_entry
     pop gs
     pop fs
     pop es
@@ -84,3 +87,5 @@ isr_stub_table:
     .long isr16, isr17, isr18, isr19, isr20, isr21, isr22, isr23
     .long isr24, isr25, isr26, isr27, isr28, isr29, isr30, isr31
     .long isr32, isr33
+
+.section .note.GNU-stack,"",@progbits
