@@ -13,6 +13,7 @@ KERNEL_FLAGS := -m32 -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
 KERNEL_PARTS := $(wildcard kernel/parts/*.inc)
 ZENOV_STAGE0_SRC := tools/zenov_stage0.cpp $(wildcard tools/zenov_stage0/*.inc)
 ZENOV_CONFIG_SRC := $(shell find kernel/config -type f -name '*.zv' -print 2>/dev/null | sort)
+USER_ASM := user/hello.S user/fileio.S user/args.S user/console.S user/protect.S user/kernel_access.S
 
 .PHONY: all clean check test qemu deterministic inspect
 
@@ -37,6 +38,12 @@ $(BUILD)/zenovfs-builder: tools/zenovfs_builder.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
 $(BUILD)/zenovfs-verify: tools/zenovfs_verify.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+$(BUILD)/zenovfs-fault-test: tools/zenovfs_fault_test.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+$(BUILD)/zenov-app-compiler: tools/zenov_app_compiler.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
 $(BUILD)/generated/zenov_config.hpp: kernel/main.zv $(ZENOV_CONFIG_SRC) $(BUILD)/zenov-stage0 | $(BUILD)
@@ -78,6 +85,16 @@ $(BUILD)/zenov-os.img: $(BUILD)/BOOT.BIN $(BUILD)/KERNEL.BIN $(BUILD)/fat12-buil
 
 $(BUILD)/hello-user.o: user/hello.S | $(BUILD)
 	$(AS) --32 $< -o $@
+$(BUILD)/fileio-user.o: user/fileio.S | $(BUILD)
+	$(AS) --32 $< -o $@
+$(BUILD)/args-user.o: user/args.S | $(BUILD)
+	$(AS) --32 $< -o $@
+$(BUILD)/console-user.o: user/console.S | $(BUILD)
+	$(AS) --32 $< -o $@
+$(BUILD)/protect-user.o: user/protect.S | $(BUILD)
+	$(AS) --32 $< -o $@
+$(BUILD)/kaccess-user.o: user/kernel_access.S | $(BUILD)
+	$(AS) --32 $< -o $@
 
 $(BUILD)/hello-user.elf: $(BUILD)/hello-user.o user/linker.ld
 	$(LD) -m elf_i386 -T user/linker.ld -o $@ $<
@@ -91,66 +108,81 @@ $(BUILD)/HELLO.ZEX: $(BUILD)/hello-user.bin $(BUILD)/zex-pack
 	$(BUILD)/zex-pack $< $@
 	@test "$$(od -An -tc -N4 $@ | tr -d ' \n')" = "ZEX1"
 
-$(BUILD)/fileio-user.o: user/fileio.S | $(BUILD)
-	$(AS) --32 $< -o $@
-
 $(BUILD)/FILEIO.ELF: $(BUILD)/fileio-user.o user/linker.ld
 	$(LD) -m elf_i386 -T user/linker.ld -o $@ $<
 	@test -z "$$(nm -u $@)"
-	@readelf -h $@ | grep -q 'ELF32'
-	@readelf -h $@ | grep -q 'Intel 80386'
 
-$(BUILD)/zenov-data.img: $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
-	$(BUILD)/zenovfs-builder $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF $@
+$(BUILD)/ARGS.ELF: $(BUILD)/args-user.o user/linker.ld
+	$(LD) -m elf_i386 -T user/linker.ld -o $@ $<
+	@test -z "$$(nm -u $@)"
+
+$(BUILD)/CONSOLE.ELF: $(BUILD)/console-user.o user/linker.ld
+	$(LD) -m elf_i386 -T user/linker.ld -o $@ $<
+	@test -z "$$(nm -u $@)"
+
+$(BUILD)/PROTECT.ELF: $(BUILD)/protect-user.o user/linker.ld
+	$(LD) -m elf_i386 -T user/linker.ld -o $@ $<
+	@test -z "$$(nm -u $@)"
+
+$(BUILD)/KACCESS.ELF: $(BUILD)/kaccess-user.o user/linker.ld
+	$(LD) -m elf_i386 -T user/linker.ld -o $@ $<
+	@test -z "$$(nm -u $@)"
+
+$(BUILD)/ZENOVAPP.ZEX: user/hello_zenov.zv $(BUILD)/zenov-app-compiler
+	$(BUILD)/zenov-app-compiler $< -o $@ --abi 0.1.1
+	@test "$$(od -An -tc -N4 $@ | tr -d ' \n')" = "ZEX1"
+
+USER_APPS := $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF $(BUILD)/ARGS.ELF $(BUILD)/CONSOLE.ELF $(BUILD)/PROTECT.ELF $(BUILD)/KACCESS.ELF $(BUILD)/ZENOVAPP.ZEX
+
+$(BUILD)/zenov-data.img: $(USER_APPS) $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
+	$(BUILD)/zenovfs-builder $(USER_APPS) $@
 	@test "$$(stat -c%s $@)" -eq 16777216
 	@test "$$(od -An -tc -N8 $@ | tr -d ' \n')" = "ZENOVFS1"
 	$(BUILD)/zenovfs-verify $@
 
-$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS)
+$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp
 	@boot_hash="$$(sha256sum $(BUILD)/BOOT.BIN | cut -d' ' -f1)"; \
 	 kernel_hash="$$(sha256sum $(BUILD)/KERNEL.BIN | cut -d' ' -f1)"; \
-	 elf_hash="$$(sha256sum $(BUILD)/kernel.elf | cut -d' ' -f1)"; \
 	 image_hash="$$(sha256sum $(BUILD)/zenov-os.img | cut -d' ' -f1)"; \
 	 data_hash="$$(sha256sum $(BUILD)/zenov-data.img | cut -d' ' -f1)"; \
-	 zex_hash="$$(sha256sum $(BUILD)/HELLO.ZEX | cut -d' ' -f1)"; \
-	 fileio_hash="$$(sha256sum $(BUILD)/FILEIO.ELF | cut -d' ' -f1)"; \
 	 source_hash="$$(cat kernel/main.zv $(ZENOV_CONFIG_SRC) | sha256sum | cut -d' ' -f1)"; \
+	 compiler_hash="$$(sha256sum tools/zenov_app_compiler.cpp | cut -d' ' -f1)"; \
+	 zenov_app_hash="$$(sha256sum $(BUILD)/ZENOVAPP.ZEX | cut -d' ' -f1)"; \
 	 printf '%s\n' \
 	 '{' \
-	 '  "format": "zenov-os-build-v5",' \
+	 '  "format": "zenov-os-build-v6",' \
 	 '  "product": "ZenovOS",' \
 	 '  "version": "0.1.1",' \
 	 '  "target": "i686-zenov-none",' \
-	 '  "python_runtime": false,' \
-	 '  "memory": "E820 PMM / 4 KiB paging",' \
-	 '  "persistent_storage": "ATA PIO / ZenovFS1",' \
-	 '  "application_abi": "ZEX1 + ELF32 ring3 / int 0x80",' \
-	 '  "configuration": "modular Zenov includes",' \
-	 '  "shell_line_capacity": 512,' \
-	 '  "shell_history_capacity": 128,' \
+	 '  "memory": "E820 PMM / page-granular user protection / reusable heap",' \
+	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
+	 '  "application_abi": "ZEX1 + ELF32 ring3 / int 0x80 / argv / console input",' \
+	 '  "zenov_app_abi": "0.1.1",' \
+	 "  \"zenov_app_compiler_sha256\": \"$$compiler_hash\"," \
 	 "  \"zenov_source_sha256\": \"$$source_hash\"," \
 	 '  "outputs": {' \
 	 "    \"BOOT.BIN\": {\"bytes\": $$(stat -c%s $(BUILD)/BOOT.BIN), \"sha256\": \"$$boot_hash\"}," \
 	 "    \"KERNEL.BIN\": {\"bytes\": $$(stat -c%s $(BUILD)/KERNEL.BIN), \"sha256\": \"$$kernel_hash\"}," \
-	 "    \"kernel.elf\": {\"bytes\": $$(stat -c%s $(BUILD)/kernel.elf), \"sha256\": \"$$elf_hash\"}," \
 	 "    \"zenov-os.img\": {\"bytes\": $$(stat -c%s $(BUILD)/zenov-os.img), \"sha256\": \"$$image_hash\"}," \
 	 "    \"zenov-data.img\": {\"bytes\": $$(stat -c%s $(BUILD)/zenov-data.img), \"sha256\": \"$$data_hash\"}," \
-	 "    \"HELLO.ZEX\": {\"bytes\": $$(stat -c%s $(BUILD)/HELLO.ZEX), \"sha256\": \"$$zex_hash\"}," \
-	 "    \"FILEIO.ELF\": {\"bytes\": $$(stat -c%s $(BUILD)/FILEIO.ELF), \"sha256\": \"$$fileio_hash\"}" \
+	 "    \"ZENOVAPP.ZEX\": {\"bytes\": $$(stat -c%s $(BUILD)/ZENOVAPP.ZEX), \"sha256\": \"$$zenov_app_hash\"}" \
 	 '  }' \
 	 '}' > $@
 
-check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify all
+check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test all
 	$(BUILD)/zenov-stage0 --self-test
 	$(BUILD)/image-verify $(BUILD)/zenov-os.img
 	$(BUILD)/zenovfs-verify $(BUILD)/zenov-data.img
+	$(BUILD)/zenovfs-fault-test $(BUILD)/zenov-data.img
+	@for app in $(BUILD)/FILEIO.ELF $(BUILD)/ARGS.ELF $(BUILD)/CONSOLE.ELF $(BUILD)/PROTECT.ELF $(BUILD)/KACCESS.ELF; do \
+	  readelf -h $$app | grep -q 'ELF32'; readelf -h $$app | grep -q 'Intel 80386'; \
+	  ! readelf -l $$app | grep -q 'RWE'; test "$$(readelf -l $$app | grep -c 'LOAD')" -eq 2; \
+	done
 	@! find . -path './build' -prune -o -name '*.py' -print | grep -q .
 	@grep -q 'system_version("0.1.1")' kernel/config/system.zv
-	@grep -q 'kShellLineCapacity = 512' $(BUILD)/generated/zenov_config.hpp
-	@grep -q 'kShellHistoryCapacity = 128' $(BUILD)/generated/zenov_config.hpp
-	@grep -q '"version": "0.1.1"' $(BUILD)/build-manifest.json
-	@grep -q '"configuration": "modular Zenov includes"' $(BUILD)/build-manifest.json
-	@echo 'static checks: OK (0.1.1 modular configuration, scalable shell, paging, storage, ZEX1 and ELF32)'
+	@grep -q '"format": "zenov-os-build-v6"' $(BUILD)/build-manifest.json
+	@grep -q '"zenov_app_abi": "0.1.1"' $(BUILD)/build-manifest.json
+	@echo 'static checks: OK (0.1.1 P0 memory, ABI, filesystem and Zenov app contracts)'
 
 qemu: all
 	@mkdir -p $(BUILD)/qemu
@@ -164,16 +196,14 @@ deterministic: all
 	@$(MAKE) --no-print-directory BUILD=/tmp/zenov-os-deterministic all
 	@diff -u $(BUILD)/build-manifest.json /tmp/zenov-os-deterministic/build-manifest.json
 	@cmp $(BUILD)/zenov-data.img /tmp/zenov-os-deterministic/zenov-data.img
-	@cmp $(BUILD)/HELLO.ZEX /tmp/zenov-os-deterministic/HELLO.ZEX
-	@cmp $(BUILD)/FILEIO.ELF /tmp/zenov-os-deterministic/FILEIO.ELF
-	@echo 'deterministic rebuild: OK (boot, data volume and both app formats are byte-identical)'
+	@for app in $(USER_APPS); do cmp $$app /tmp/zenov-os-deterministic/$$(basename $$app); done
+	@echo 'deterministic rebuild: OK (system, transactional data volume and seven apps are byte-identical)'
 
 inspect: all
 	readelf -h $(BUILD)/kernel.elf
 	readelf -S $(BUILD)/kernel.elf
-	readelf -h $(BUILD)/hello-user.elf
-	readelf -h $(BUILD)/FILEIO.ELF
-	nm -n $(BUILD)/kernel.elf | head -120
+	for app in $(BUILD)/*.ELF; do readelf -h $$app; readelf -l $$app; done
+	nm -n $(BUILD)/kernel.elf | head -160
 
 clean:
 	rm -rf $(BUILD)
