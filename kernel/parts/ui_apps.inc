@@ -64,7 +64,8 @@ void render_terminal_home() {
     draw_text(label_x, window_y + 188, "APPLICATIONS", current_theme.text_muted, 1);
     draw_console_span(9, 16, 24, value_x, window_y + 188);
     draw_text(label_x, window_y + 210, "PMM FREE", current_theme.text_muted, 1);
-    draw_console_span(10, 16, 16, value_x, window_y + 210);
+    draw_uint(value_x, window_y + 210, pmm::free_bytes() >> 10U, current_theme.text);
+    draw_text(value_x + 60, window_y + 210, "KIB", current_theme.text_muted, 1);
     draw_text(label_x, window_y + 232, "SECURITY", current_theme.text_muted, 1);
     draw_text(value_x, window_y + 232, "SIGNED ZGDB / VERIFIED", current_theme.success, 1);
 
