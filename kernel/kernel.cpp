@@ -71,6 +71,9 @@ extern "C" void kernel_main() {
     storage::init();
     process::init();
     if (!security_guard::init()) panic("ZenovGuard cryptographic self-test failed.");
+    const uint8_t mutation_probe = 0x5AU;
+    if (storage::guarded_write_file("/apps/hello.zex", &mutation_probe, 1U, false)) panic("Trusted application mutation guard failed.");
+    serial::line("ZENOV_GUARD_PROTECTED_PATH_TEST_OK");
     const bool graphical = graphics::init();
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
     pic_remap();
