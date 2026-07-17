@@ -75,6 +75,7 @@ extern "C" void kernel_main() {
     if (storage::guarded_write_file("/apps/hello.zex", &mutation_probe, 1U, false)) panic("Trusted application mutation guard failed.");
     serial::line("ZENOV_GUARD_PROTECTED_PATH_TEST_OK");
     const bool graphical = graphics::init();
+    if (graphical) { console::activate_shadow(); serial::line("CONSOLE_SHADOW_OK"); }
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
     pic_remap();
     const bool mouse_ready = mouse_init();

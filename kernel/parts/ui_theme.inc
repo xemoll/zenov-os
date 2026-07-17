@@ -9,17 +9,120 @@ bool text_contains(const char* text, uint32_t size, const char* needle) {
     return false;
 }
 
-void load_runtime_preferences() {
+const char* config_value(const char* text, uint32_t size, const char* key) {
+    const uint32_t key_size = static_cast<uint32_t>(string_length(key));
+    if (!key_size || size <= key_size) return nullptr;
+    for (uint32_t i = 0; i + key_size + 1U <= size; ++i) {
+        if (i && text[i - 1U] != '\n' && text[i - 1U] != '\r') continue;
+        bool match = true;
+        for (uint32_t j = 0; j < key_size; ++j) if (text[i + j] != key[j]) { match = false; break; }
+        if (match && text[i + key_size] == '=') return text + i + key_size + 1U;
+    }
+    return nullptr;
+}
+
+bool parse_decimal_value(const char* value, uint32_t& result) {
+    if (!value || *value < '0' || *value > '9') return false;
+    uint32_t parsed = 0, digits = 0;
+    while (*value >= '0' && *value <= '9' && digits < 10U) {
+        parsed = parsed * 10U + static_cast<uint32_t>(*value - '0');
+        ++value; ++digits;
+    }
+    if (*value && *value != '\n' && *value != '\r') return false;
+    result = parsed;
+    return true;
+}
+
+bool parse_hex_color(const char* value, uint32_t& result) {
+    if (!value) return false;
+    if (value[0] == '0' && (value[1] == 'x' || value[1] == 'X')) value += 2;
+    uint32_t parsed = 0;
+    for (uint32_t i = 0; i < 6U; ++i) {
+        const char c = value[i];
+        uint32_t digit = 0;
+        if (c >= '0' && c <= '9') digit = static_cast<uint32_t>(c - '0');
+        else if (c >= 'a' && c <= 'f') digit = static_cast<uint32_t>(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F') digit = static_cast<uint32_t>(c - 'A' + 10);
+        else return false;
+        parsed = (parsed << 4U) | digit;
+    }
+    if (value[6] && value[6] != '\n' && value[6] != '\r') return false;
+    result = parsed;
+    return true;
+}
+
+bool read_desktop_config(const char*& text, uint32_t& size) {
+    for (uint32_t i = 0; i < zenov_generated::kFileCount; ++i) {
+        if (!string_equal(zenov_generated::kFiles[i].name, "DESKTOP.CFG")) continue;
+        text = zenov_generated::kFiles[i].text;
+        size = static_cast<uint32_t>(string_length(text));
+        return true;
+    }
+    return false;
+}
+
+bool apply_config_text(const char* text, uint32_t size, bool& custom_colors) {
+    if (!text || !size) return false;
+    bool recognized = false;
+    if (text_contains(text, size, "theme=graphite")) { desktop_theme = "graphite"; recognized = true; }
+    else if (text_contains(text, size, "theme=amber")) { desktop_theme = "amber"; recognized = true; }
+    else if (text_contains(text, size, "theme=midnight") || text_contains(text, size, "theme=zen-dark")) { desktop_theme = "midnight"; recognized = true; }
+
+    uint32_t parsed = 0;
+    bool any_color = false;
+    if (parse_hex_color(config_value(text, size, "canvas"), parsed)) { desktop_canvas = parsed; any_color = true; recognized = true; }
+    if (parse_hex_color(config_value(text, size, "surface"), parsed)) { desktop_surface = parsed; any_color = true; recognized = true; }
+    if (parse_hex_color(config_value(text, size, "accent"), parsed)) { desktop_accent = parsed; any_color = true; recognized = true; }
+    if (any_color) custom_colors = true;
+
+    if (parse_decimal_value(config_value(text, size, "radius"), parsed) && parsed >= 4U && parsed <= 24U) {
+        desktop_radius = static_cast<uint8_t>(parsed); recognized = true;
+    }
+    if (parse_decimal_value(config_value(text, size, "opacity"), parsed) && parsed >= 128U && parsed <= 255U) {
+        desktop_opacity = static_cast<uint8_t>(parsed); recognized = true;
+    }
+    if (parse_decimal_value(config_value(text, size, "animations"), parsed) && parsed <= 1U) {
+        desktop_animations = parsed != 0U; recognized = true;
+    }
+    if (text_contains(text, size, "cursor=block")) { terminal_cursor = "block"; recognized = true; }
+    else if (text_contains(text, size, "cursor=underline")) { terminal_cursor = "underline"; recognized = true; }
+    else if (text_contains(text, size, "cursor=beam")) { terminal_cursor = "beam"; recognized = true; }
+    return recognized;
+}
+
+void materialize_theme(bool custom_colors) {
     if (string_equal(desktop_theme, "graphite")) apply_runtime_theme(1);
     else if (string_equal(desktop_theme, "amber")) apply_runtime_theme(2);
     else apply_runtime_theme(0);
-    char data[128]{}; uint32_t size = 0;
+    if (!custom_colors) return;
+    current_theme.canvas_top = desktop_canvas;
+    current_theme.canvas_bottom = mix(desktop_canvas, desktop_surface, 3U, 8U);
+    current_theme.surface = desktop_surface;
+    current_theme.surface_high = mix(desktop_surface, rgb(255,255,255), 26U, 255U);
+    current_theme.surface_low = mix(desktop_surface, rgb(0,0,0), 55U, 255U);
+    current_theme.accent = desktop_accent;
+    current_theme.accent_soft = mix(desktop_accent, desktop_surface, 3U, 5U);
+}
+
+void load_runtime_preferences() {
+    bool custom_colors = false;
+    const char* builtin = nullptr; uint32_t builtin_size = 0;
+    if (read_desktop_config(builtin, builtin_size) && apply_config_text(builtin, builtin_size, custom_colors)) {
+        serial::line("UI_ZENOV_CONFIG_OK");
+    } else {
+        serial::line("UI_ZENOV_CONFIG_FALLBACK");
+    }
+
+    char data[256]{}; uint32_t size = 0;
     if (storage::read_file("/data/config/ui.cfg", reinterpret_cast<uint8_t*>(data), sizeof(data) - 1U, size)) {
         data[size] = 0;
-        if (text_contains(data, size, "theme=graphite")) apply_runtime_theme(1);
-        else if (text_contains(data, size, "theme=amber")) apply_runtime_theme(2);
+        const bool runtime_has_colors = config_value(data, size, "canvas") || config_value(data, size, "surface") || config_value(data, size, "accent");
+        const bool runtime_has_theme = config_value(data, size, "theme") != nullptr;
+        if (runtime_has_theme && !runtime_has_colors) custom_colors = false;
+        apply_config_text(data, size, custom_colors);
         serial::line("UI_THEME_OVERRIDE_OK");
     } else serial::line("UI_THEME_DEFAULT_OK");
+    materialize_theme(custom_colors);
     runtime_preferences_loaded = true;
 }
 

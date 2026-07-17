@@ -1,5 +1,6 @@
 fn main() {
     include("config/system.zv");
+    include("config/desktop.zv");
     include("config/boot.zv");
     include("config/shell.zv");
     include("config/files.zv");
