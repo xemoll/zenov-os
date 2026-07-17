@@ -37,13 +37,13 @@ jobs:
             iconv -f UTF-8 -t UTF-8 "$file" >/dev/null
           done < <(find kernel user tools boot packaging security -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.inc' -o -name '*.S' -o -name '*.zv' -o -name '*.ld' -o -name '*.sh' -o -name '*.txt' -o -name '*.pem' \) -print)
 
-      - name: Run native checks and build
+      - name: Run native checks and audit COW fault matrix
         run: |
           mkdir -p ci-logs
           set -o pipefail
           make clean check 2>&1 | tee ci-logs/native-build.log
 
-      - name: Boot desktop, persistent audit, applications and recovery
+      - name: Boot desktop and six recovery/fail-closed phases
         run: make qemu
 
       - name: Verify deterministic installation package and provenance
@@ -61,7 +61,7 @@ jobs:
       - name: Verify deterministic system rebuild
         run: make deterministic
 
-      - name: Inspect persistent audit, kernel and signed-policy evidence
+      - name: Inspect audit fault-injection and runtime evidence
         run: |
           readelf -h build/kernel.elf
           for app in build/FILEIO.ELF build/ARGS.ELF build/CONSOLE.ELF build/PROTECT.ELF build/KACCESS.ELF; do
@@ -72,8 +72,17 @@ jobs:
           test "$(stat -c%s build/KERNEL.BIN)" -le 524288
           test "$(stat -c%s build/zenov-data.img)" -eq 16777216
           test -x build/zenovfs-audit-verify
-          test -s build/qemu/zenov-data-runtime.img
-          test -s build/qemu/zenov-data-audit-tampered.img
+          test -x build/zenovfs-audit-fault-test
+          for image in \
+            build/qemu/zenov-data-runtime.img \
+            build/qemu/zenov-data-audit-tampered.img \
+            build/qemu/zenov-data-audit-old-recovery.img \
+            build/qemu/zenov-data-audit-new-recovery.img \
+            build/qemu/zenov-data-audit-corrupt.img; do test -s "$image"; done
+          grep -q 'ZENOV_AUDIT_COW_FAULT_MATRIX_OK scenario=empty-to-one cases=831 old=404 new=404 fail_closed=23' ci-logs/native-build.log
+          grep -q 'ZENOV_AUDIT_COW_FAULT_MATRIX_OK scenario=full-ring-rotation cases=831 old=404 new=100 fail_closed=327' ci-logs/native-build.log
+          grep -q 'ZENOV_AUDIT_COW_FAULT_INJECTION_OK total_cases=1662' ci-logs/native-build.log
+          grep -q ZENOV_AUDIT_COW_OLD_OR_NEW_OR_FAIL_CLOSED_ONLY ci-logs/native-build.log
           build/zenovfs-audit-verify build/qemu/zenov-data-runtime.img --require-nonempty
           if build/zenovfs-audit-verify build/qemu/zenov-data-audit-tampered.img --require-nonempty; then
             echo 'tampered persistent audit image unexpectedly verified' >&2
@@ -96,18 +105,23 @@ jobs:
           grep -q ZENOVFS_MOUNT_OK build/qemu/serial.log
           grep -q PROCESS_ABI_0_1_1_OK build/qemu/serial.log
           grep -q ZENOV_GUARD_AUDIT_SELFTEST_OK build/qemu/serial.log
-          test "$(grep -c ZENOV_GUARD_AUDIT_REPLAY_OK build/qemu/serial.log)" -ge 3
+          test "$(grep -c ZENOV_GUARD_AUDIT_REPLAY_OK build/qemu/serial.log)" -ge 5
           grep -Eq 'ZENOV_GUARD_AUDIT_REPLAY_OK count=[1-9][0-9]*' build/qemu/serial-phase2.log
-          test "$(grep -c ZENOV_GUARD_AUDIT_VERIFY_OK build/qemu/serial.log)" -ge 8
+          grep -q 'ZENOV_GUARD_AUDIT_REPLAY_OK count=0 next=1' build/qemu/serial-audit-old-recovery.log
+          grep -q 'ZENOV_GUARD_AUDIT_REPLAY_OK count=1 next=2' build/qemu/serial-audit-new-recovery.log
+          test "$(grep -c ZENOV_GUARD_AUDIT_VERIFY_OK build/qemu/serial.log)" -ge 12
           grep -q ZENOV_GUARD_AUDIT_READY build/qemu/serial.log
-          ! grep -q ZENOV_GUARD_AUDIT_INVALID build/qemu/serial.log
+          grep -q ZENOV_GUARD_AUDIT_INVALID build/qemu/serial-audit-corrupt.log
+          grep -q 'Persistent ZenovGuard audit journal validation failed.' build/qemu/serial-audit-corrupt.log
+          ! grep -q ZENOVOS_UI_READY build/qemu/serial-audit-corrupt.log
           ! grep -q ZENOV_GUARD_AUDIT_APPEND_FAILED build/qemu/serial.log
           ! grep -q ZENOV_GUARD_AUDIT_ENFORCEMENT_LOCK build/qemu/serial.log
+          test "$(grep -c ZENOVFS_INTERRUPTED_WRITE_RECOVERED build/qemu/serial.log)" -ge 3
           grep -q ZENOV_GUARD_SELFTEST_OK build/qemu/serial.log
           grep -q ZENOV_GUARD_TRUST_BASELINE_OK build/qemu/serial.log
           grep -q ZENOV_GUARD_PROTECTED_PATH_TEST_OK build/qemu/serial.log
           grep -q 'ZGDB_ROOT_KEY_OK id=6f788074c018f5aa' build/qemu/serial.log
-          test "$(grep -c ZGDB_PSS_SIGNATURE_OK build/qemu/serial.log)" -ge 3
+          test "$(grep -c ZGDB_PSS_SIGNATURE_OK build/qemu/serial.log)" -ge 5
           grep -q 'ZGDB_POLICY_VERSION_OK version=3' build/qemu/serial.log
           grep -q 'ZGDB_POLICY_VERSION_OK version=4' build/qemu/serial.log
           grep -q 'ZGDB_KEY_REJECTED reason=unknown-key' build/qemu/serial.log
@@ -138,13 +152,12 @@ jobs:
           grep -q USER_FAULT_RETURNED_TO_SHELL build/qemu/serial.log
           grep -q ZENOV_SOURCE_APP_RING3_OK build/qemu/serial.log
           grep -q ZENOV_COMPILER_ABI_MATCH_OK build/qemu/serial.log
-          grep -q ZENOVFS_INTERRUPTED_WRITE_RECOVERED build/qemu/serial.log
           grep -q 'recovery=committed' build/qemu/serial.log
           test "$(grep -c 'APP_EXIT code=0' build/qemu/serial.log)" -ge 5
           test "$(grep -c PERSISTENCE_0_1_1_OK build/qemu/serial.log)" -ge 2
           test "$(grep -c FILE_SYSCALL_PERSIST_OK build/qemu/serial.log)" -ge 2
           grep -q 'zenov> ' build/qemu/serial.log
-          grep -q '"format": "zenov-os-build-v10"' build/build-manifest.json
+          grep -q '"format": "zenov-os-build-v11"' build/build-manifest.json
           grep -q '"zgdb_schema": 2' build/build-manifest.json
           grep -q '"zgdb_compiled_floor": 3' build/build-manifest.json
           grep -q '"zgdb_root_key_id": "6f788074c018f5aa"' build/build-manifest.json
@@ -154,14 +167,15 @@ jobs:
           grep -q '"audit_capacity": 64' build/build-manifest.json
           grep -q '"audit_record_bytes": 128' build/build-manifest.json
           grep -q '"audit_journal_bytes": 8288' build/build-manifest.json
+          grep -q '"audit_fault_model":' build/build-manifest.json
           grep -q '"zenov_app_contract_sha256": "9e1733af56a53ae31055b448f762815ba7a5e1a72be543aef325bd4ea36e0ad5"' build/build-manifest.json
           grep -qx "ZenovOS source commit: $ZENOV_SOURCE_REVISION" dist/SOURCE-REVISION.txt
 
-      - name: Upload verified 0.1.1 persistent-audit evidence
+      - name: Upload verified 0.1.1 audit-fault evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zenov-os-0.1.1-graphics-ci
+          name: zenov-os-0.1.1-audit-cow-ci
           if-no-files-found: error
           path: |
             build/BOOT.BIN
@@ -182,14 +196,12 @@ jobs:
             build/zenovguard-tampered.zgdb
             build/zenovguard-wrong-key.zgdb
             build/zenovfs-audit-verify
+            build/zenovfs-audit-fault-test
             build/build-manifest.json
-            build/qemu/serial.log
-            build/qemu/serial-phase1.log
-            build/qemu/serial-phase2.log
-            build/qemu/serial-recovery.log
-            build/qemu/zenov-data-runtime.img
-            build/qemu/zenov-data-audit-tampered.img
-            build/qemu/zenov-data-recovery.img
+            build/qemu/serial*.log
+            build/qemu/monitor*.log
+            build/qemu/qemu*.stderr
+            build/qemu/zenov-data*.img
             build/qemu/screenshot.ppm
             security/zenovguard-root-public.pem
             dist/
