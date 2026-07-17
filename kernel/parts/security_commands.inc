@@ -8,6 +8,19 @@ void command_guard(char* args) {
     if (!*subcommand || string_equal(subcommand, "status")) {
         begin_view("ZENOVGUARD STATUS");
         security_guard::print_status();
+        zgdb::print_status();
+        return;
+    }
+    if (string_equal(subcommand, "database")) {
+        begin_view("ZENOVGUARD SIGNED DATABASE");
+        zgdb::print_status();
+        return;
+    }
+    if (string_equal(subcommand, "update")) {
+        begin_view("ZENOVGUARD POLICY UPDATE");
+        if (!*args) { console::warning("Usage: guard update <signed-zgdb-path>"); return; }
+        if (zgdb::update(args)) console::success("ZGDB_ATOMIC_UPDATE_OK");
+        else console::warning("Signed policy update rejected; inspect the serial reason.");
         return;
     }
     if (string_equal(subcommand, "selftest")) {
@@ -38,5 +51,5 @@ void command_guard(char* args) {
         else console::warning("Quarantine rejected: only infected, suspicious or untrusted files may be moved.");
         return;
     }
-    console::warning("Usage: guard status | scan <path|all> | quarantine <path> | log | selftest");
+    console::warning("Usage: guard status | database | update <zgdb> | scan <path|all> | quarantine <path> | log | selftest");
 }
