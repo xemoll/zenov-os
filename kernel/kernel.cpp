@@ -11,6 +11,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/core.inc"
 #include "parts/hardware.inc"
 #include "parts/memory.inc"
+#include "parts/graphics_mapping.inc"
 #include "parts/user_window.inc"
 #include "parts/storage.inc"
 #include "parts/storage_tools.inc"
@@ -18,6 +19,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/process.inc"
 #undef run
 #include "parts/process_policy.inc"
+#include "parts/graphics.inc"
 #include "parts/input_v2.inc"
 #define history shell_history
 #define history_count shell_history_count
@@ -32,7 +34,7 @@ extern "C" void kernel_main() {
     serial::init();
     serial::line("ZENOVOS_BOOT_OK");
     for (uint32_t i = 0; i < zenov_generated::kBootMessageCount; ++i) serial::line(zenov_generated::kBootMessages[i]);
-    serial::line("Initializing IDT, physical memory, paging, storage, TSS, PIC, PIT and keyboard IRQ...");
+    serial::line("Initializing IDT, memory, storage, graphics, input and ring-3 services...");
 
     console::set_color(zenov_generated::kForeground, zenov_generated::kBackground);
     idt_init();
@@ -44,11 +46,14 @@ extern "C" void kernel_main() {
     serial::line("ELF_WX_POLICY_OK");
     storage::init();
     process::init();
+    const bool graphical = graphics::init();
+    serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
     pic_remap();
+    if (!mouse_init()) serial::line("PS2_MOUSE_UNAVAILABLE");
     pit_init(100);
     enable_interrupts();
 
-    serial::line("Kernel online. Paging, persistent storage and ring-3 services ready.");
+    serial::line("Kernel online. Desktop, persistent storage and ring-3 services ready.");
     console::show_home();
     serial::line("ZENOVOS_UI_READY");
     shell_run();
