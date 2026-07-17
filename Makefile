@@ -14,6 +14,7 @@ KERNEL_PARTS := $(wildcard kernel/parts/*.inc)
 ZENOV_STAGE0_SRC := tools/zenov_stage0.cpp $(wildcard tools/zenov_stage0/*.inc)
 ZENOV_CONFIG_SRC := $(shell find kernel/config -type f -name '*.zv' -print 2>/dev/null | sort)
 USER_ASM := user/hello.S user/fileio.S user/args.S user/console.S user/protect.S user/kernel_access.S
+ZENOV_APP_EXPECTED_SHA256 := 9e1733af56a53ae31055b448f762815ba7a5e1a72be543aef325bd4ea36e0ad5
 
 .PHONY: all clean check test qemu deterministic inspect
 
@@ -131,6 +132,7 @@ $(BUILD)/KACCESS.ELF: $(BUILD)/kaccess-user.o user/linker.ld
 $(BUILD)/ZENOVAPP.ZEX: user/hello_zenov.zv $(BUILD)/zenov-app-compiler
 	$(BUILD)/zenov-app-compiler $< -o $@ --abi 0.1.1
 	@test "$$(od -An -tc -N4 $@ | tr -d ' \n')" = "ZEX1"
+	@printf '%s  %s\n' '$(ZENOV_APP_EXPECTED_SHA256)' '$@' | sha256sum -c -
 
 USER_APPS := $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF $(BUILD)/ARGS.ELF $(BUILD)/CONSOLE.ELF $(BUILD)/PROTECT.ELF $(BUILD)/KACCESS.ELF $(BUILD)/ZENOVAPP.ZEX
 
@@ -158,6 +160,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
 	 '  "application_abi": "ZEX1 + ELF32 ring3 / int 0x80 / argv / console input",' \
 	 '  "zenov_app_abi": "0.1.1",' \
+	 '  "zenov_app_contract_sha256": "$(ZENOV_APP_EXPECTED_SHA256)",' \
 	 "  \"zenov_app_compiler_sha256\": \"$$compiler_hash\"," \
 	 "  \"zenov_source_sha256\": \"$$source_hash\"," \
 	 '  "outputs": {' \
@@ -182,12 +185,14 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	@grep -q 'system_version("0.1.1")' kernel/config/system.zv
 	@grep -q '"format": "zenov-os-build-v6"' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_app_abi": "0.1.1"' $(BUILD)/build-manifest.json
+	@grep -q '"zenov_app_contract_sha256": "$(ZENOV_APP_EXPECTED_SHA256)"' $(BUILD)/build-manifest.json
 	@echo 'static checks: OK (0.1.1 P0 memory, ABI, filesystem and Zenov app contracts)'
 
-qemu: all
+qemu: all $(BUILD)/zenovfs-fault-test
 	@mkdir -p $(BUILD)/qemu
 	@cp $(BUILD)/zenov-data.img $(BUILD)/qemu/zenov-data-runtime.img
-	bash tests/qemu_smoke.sh $(BUILD)/zenov-os.img $(BUILD)/qemu/zenov-data-runtime.img $(BUILD)/qemu
+	$(BUILD)/zenovfs-fault-test $(BUILD)/zenov-data.img --emit-recovery $(BUILD)/qemu/zenov-data-recovery.img
+	bash tests/qemu_smoke.sh $(BUILD)/zenov-os.img $(BUILD)/qemu/zenov-data-runtime.img $(BUILD)/qemu $(BUILD)/qemu/zenov-data-recovery.img
 
 test: check qemu deterministic
 
