@@ -1,0 +1,118 @@
+name: ZenPkg Signed Native Manager
+
+on:
+  push:
+    paths:
+      - 'kernel/kernel.cpp'
+      - 'kernel/parts/package_*.inc'
+      - 'kernel/parts/package_manager/**'
+      - 'kernel/parts/security_io.inc'
+      - 'kernel/parts/security_paths.inc'
+      - 'kernel/parts/shell_runtime.inc'
+      - 'security/zenpkg*'
+      - 'tools/zenpkg/**'
+      - 'tools/zenpkg_fixture_export.cpp'
+      - 'tools/zenovfs_builder.cpp'
+      - 'tests/zenpkg*'
+      - 'tests/qemu_zenpkg_signed.sh'
+      - 'packages/**'
+      - 'docs/*ZENPKG*'
+      - 'docs/SIGNED_NATIVE_PACKAGE_MANAGER_0.1.1.md'
+      - '.github/workflows/zenpkg-signed.yml'
+  pull_request:
+    paths:
+      - 'kernel/kernel.cpp'
+      - 'kernel/parts/package_*.inc'
+      - 'kernel/parts/package_manager/**'
+      - 'kernel/parts/security_io.inc'
+      - 'kernel/parts/security_paths.inc'
+      - 'kernel/parts/shell_runtime.inc'
+      - 'security/zenpkg*'
+      - 'tools/zenpkg/**'
+      - 'tools/zenpkg_fixture_export.cpp'
+      - 'tools/zenovfs_builder.cpp'
+      - 'tests/zenpkg*'
+      - 'tests/qemu_zenpkg_signed.sh'
+      - 'packages/**'
+      - 'docs/*ZENPKG*'
+      - 'docs/SIGNED_NATIVE_PACKAGE_MANAGER_0.1.1.md'
+      - '.github/workflows/zenpkg-signed.yml'
+
+permissions:
+  contents: read
+
+env:
+  CXX: g++
+  SOURCE_DATE_EPOCH: '0'
+
+jobs:
+  signed-native-manager:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU
+        run: sudo apt-get update && sudo apt-get install -y qemu-system-x86
+      - name: Build native payload and deterministic signed fixtures
+        run: |
+          make build/HELLO.ZEX
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tools/zenpkg_fixture_export.cpp -o build/zenpkg-fixture-export
+          rm -rf build/zenpkg-fixtures
+          build/zenpkg-fixture-export build/HELLO.ZEX build/zenpkg-fixtures
+          sha256sum build/zenpkg-fixtures/*
+      - name: Verify catalog signatures with OpenSSL
+        run: |
+          for version in v1 v2; do
+            head -c -256 "build/zenpkg-fixtures/zenpkg-${version}.zpc" > "build/zenpkg-${version}.signed"
+            tail -c 256 "build/zenpkg-fixtures/zenpkg-${version}.zpc" > "build/zenpkg-${version}.signature"
+            openssl dgst -sha256 -verify security/zenpkg-root-public.pem \
+              -signature "build/zenpkg-${version}.signature" \
+              -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 "build/zenpkg-${version}.signed"
+          done
+          head -c -256 build/zenpkg-fixtures/zenpkg-tampered.zpc > build/zenpkg-tampered.signed
+          tail -c 256 build/zenpkg-fixtures/zenpkg-tampered.zpc > build/zenpkg-tampered.signature
+          if openssl dgst -sha256 -verify security/zenpkg-root-public.pem \
+              -signature build/zenpkg-tampered.signature \
+              -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 build/zenpkg-tampered.signed; then
+            echo 'tampered package catalog unexpectedly verified' >&2
+            exit 1
+          fi
+      - name: Run host transaction and signature model
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tests/zenpkg_signed_host_test.cpp -o build/zenpkg-signed-host-test
+          build/zenpkg-signed-host-test build/zenpkg-fixtures
+      - name: Compile freestanding i386 package core
+        run: |
+          g++ -m32 -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            -ffreestanding -fno-exceptions -fno-rtti -fno-stack-protector \
+            -fno-pic -fno-pie -fno-threadsafe-statics -fno-unwind-tables \
+            -fno-asynchronous-unwind-tables -nostdlib \
+            -c tests/zenpkg_freestanding_compile.cpp -o build/zenpkg-freestanding.o
+          file build/zenpkg-freestanding.o | grep -q 'ELF 32-bit.*Intel 80386'
+      - name: Run sanitizer model
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+        run: |
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/zenpkg_signed_host_test.cpp -o build/zenpkg-signed-host-test-san
+          build/zenpkg-signed-host-test-san build/zenpkg-fixtures
+      - name: Build and statically validate complete ZenovOS
+        run: make check
+      - name: Run three-boot signed package lifecycle
+        run: |
+          cp build/zenov-data.img build/zenov-data-zenpkg-runtime.img
+          bash tests/qemu_zenpkg_signed.sh build/zenov-os.img build/zenov-data-zenpkg-runtime.img build/qemu-zenpkg
+      - name: Verify deterministic rebuild
+        run: make deterministic
+      - name: Upload signed package evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenpkg-signed-evidence
+          path: |
+            build/zenpkg-fixtures/
+            build/qemu-zenpkg/
+          if-no-files-found: warn
