@@ -53,6 +53,7 @@ bool run(char* input) {
     char requested[48];
     uint32_t file_size = 0;
     if (!read_requested(arguments[0], requested, file_size)) return false;
+    if (!security_guard::allow_execution(requested, application_buffer, file_size)) return false;
     if (!elf_permissions_allowed(application_buffer, file_size)) {
         serial::line("ELF_WX_REJECTED");
         return false;
