@@ -194,12 +194,16 @@ bool load_elf32(const uint8_t* file, uint32_t file_size, uint32_t& entry) {
     for (uint32_t i = 0; i < header->program_count; ++i) {
         const auto* segment = reinterpret_cast<const Elf32ProgramHeader*>(file + header->program_offset + i * sizeof(Elf32ProgramHeader));
         if (segment->type != 1) continue;
-        if (!segment->memory_size || segment->file_size > segment->memory_size || segment->offset > file_size || segment->file_size > file_size - segment->offset ||
+        if (!segment->memory_size) {
+            if (segment->file_size) return false;
+            continue;
+        }
+        if (segment->file_size > segment->memory_size || segment->offset > file_size || segment->file_size > file_size - segment->offset ||
             segment->virtual_address >= stack_base || segment->memory_size > stack_base - segment->virtual_address || (segment->flags & ~7U) ||
             (segment->alignment > 1U && ((segment->alignment & (segment->alignment - 1U)) || (segment->virtual_address & (segment->alignment - 1U)) != (segment->offset & (segment->alignment - 1U))))) return false;
         for (uint32_t j = 0; j < i; ++j) {
             const auto* other = reinterpret_cast<const Elf32ProgramHeader*>(file + header->program_offset + j * sizeof(Elf32ProgramHeader));
-            if (other->type != 1) continue;
+            if (other->type != 1 || !other->memory_size) continue;
             if (ranges_overlap(segment->virtual_address, segment->memory_size, other->virtual_address, other->memory_size)) return false;
             if (((segment->flags ^ other->flags) & 2U) && page_ranges_overlap(segment->virtual_address, segment->memory_size, other->virtual_address, other->memory_size)) return false;
         }
@@ -210,14 +214,14 @@ bool load_elf32(const uint8_t* file, uint32_t file_size, uint32_t& entry) {
     paging::clear_user();
     for (uint32_t i = 0; i < header->program_count; ++i) {
         const auto* segment = reinterpret_cast<const Elf32ProgramHeader*>(file + header->program_offset + i * sizeof(Elf32ProgramHeader));
-        if (segment->type != 1) continue;
+        if (segment->type != 1 || !segment->memory_size) continue;
         if (!paging::map_user(segment->virtual_address, segment->memory_size, true)) return false;
         memcpy(reinterpret_cast<void*>(user_base + segment->virtual_address), file + segment->offset, segment->file_size);
         if (segment->memory_size > segment->file_size) memset(reinterpret_cast<void*>(user_base + segment->virtual_address + segment->file_size), 0, segment->memory_size - segment->file_size);
     }
     for (uint32_t i = 0; i < header->program_count; ++i) {
         const auto* segment = reinterpret_cast<const Elf32ProgramHeader*>(file + header->program_offset + i * sizeof(Elf32ProgramHeader));
-        if (segment->type == 1 && !paging::protect_user(segment->virtual_address, segment->memory_size, (segment->flags & 2U) != 0)) return false;
+        if (segment->type == 1 && segment->memory_size && !paging::protect_user(segment->virtual_address, segment->memory_size, (segment->flags & 2U) != 0)) return false;
     }
     if (!map_stack() || paging::writable_at(header->entry)) return false;
     serial::line("PAGE_PROTECTION_OK");
