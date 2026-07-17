@@ -103,13 +103,13 @@ uint32_t used_bytes() {
     uint32_t used = 0; for (Block* block = first; valid_block(block); block = block->next) if (!(block->flags & free_flag)) used += block->requested;
     return used;
 }
-uint32_t free_bytes() {
+[[maybe_unused]] uint32_t free_bytes() {
     uint32_t free = 0; for (Block* block = first; valid_block(block); block = block->next) if (block->flags & free_flag) free += block->capacity;
     return free;
 }
 uint32_t capacity_bytes() { return static_cast<uint32_t>(limit_address - start_address); }
-uint32_t peak_bytes() { return peak_used; }
-uint32_t allocation_count() { return active_allocations; }
+[[maybe_unused]] uint32_t peak_bytes() { return peak_used; }
+[[maybe_unused]] uint32_t allocation_count() { return active_allocations; }
 bool validate() {
     uintptr_t expected = start_address; Block* previous = nullptr;
     for (Block* block = first; block; block = block->next) {
@@ -186,7 +186,8 @@ bool map_user(uint32_t offset, uint32_t length, bool write) {
     if (!length || offset >= table_span || length > table_span - offset) return false;
     const uint32_t first_page = page_floor(offset) / page_size, end_page = page_ceiling(offset + length) / page_size;
     for (uint32_t page = first_page; page < end_page; ++page) user_table[page] = (table_span + page * page_size) | present | user | (write ? writable : 0U);
-    if (enabled) reload(); return true;
+    if (enabled) reload();
+    return true;
 }
 bool protect_user(uint32_t offset, uint32_t length, bool write) {
     if (!length || offset >= table_span || length > table_span - offset) return false;
@@ -195,7 +196,8 @@ bool protect_user(uint32_t offset, uint32_t length, bool write) {
         if (!(user_table[page] & present)) return false;
         if (write) user_table[page] |= writable; else user_table[page] &= ~writable;
     }
-    if (enabled) reload(); return true;
+    if (enabled) reload();
+    return true;
 }
 bool user_access(uint32_t offset, uint32_t length, bool write) {
     if (!length) return offset <= table_span;
