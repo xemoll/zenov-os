@@ -15,8 +15,10 @@ PROCESS_MARKER="PROCESS_ABI_0_1_1_OK"
 LONG_INPUT_MARKER="longinputend511ok"
 PROMPT="zenov> "
 mkdir -p "$OUT"
-rm -f "$OUT"/serial*.log "$OUT"/screenshot.ppm "$OUT"/monitor*.log "$OUT"/qemu*.stderr
+rm -f "$OUT"/serial*.log "$OUT"/*.ppm "$OUT"/monitor*.log "$OUT"/qemu*.stderr
 SCREENSHOT="$(cd "$OUT" && pwd)/screenshot.ppm"
+LAUNCHER_SCREENSHOT="$(cd "$OUT" && pwd)/launcher.ppm"
+SETTINGS_SCREENSHOT="$(cd "$OUT" && pwd)/settings.ppm"
 
 wait_for_serial() {
   local file="$1" text="$2"
@@ -77,6 +79,7 @@ wait_for_boot() {
     && wait_for_serial "$serial" "CLIPPING_OK" \
     && wait_for_serial "$serial" "ALPHA_BLEND_OK" \
     && wait_for_serial "$serial" "FONT_RENDER_OK" \
+    && wait_for_serial "$serial" "UI_NAVIGATION_MODEL_OK" \
     && wait_for_serial "$serial" "DESKTOP_SCENE_OK" \
     && wait_for_serial "$serial" "GRAPHICAL_DESKTOP_READY" \
     && wait_for_serial "$serial" "PS2_MOUSE_OK" \
@@ -93,6 +96,12 @@ controller_first() {
   wait_for_boot "$serial" || { echo quit; return 1; }
   wait_for_serial "$serial" "ZGDB_POLICY_VERSION_OK version=3" || { echo quit; return 1; }
   sleep 0.3; echo "screendump $SCREENSHOT"; sleep 0.2
+
+  echo "sendkey f8 10"
+  wait_for_serial "$serial" "UI_KEYBOARD_NAV_OK" || { echo quit; return 1; }
+  sleep 0.2; echo "screendump $LAUNCHER_SCREENSHOT"; sleep 0.2
+  echo "sendkey f7 10"; sleep 0.2; echo "screendump $SETTINGS_SCREENSHOT"; sleep 0.2
+  echo "sendkey f5 10"; sleep 0.2
 
   send_command "guard status"; wait_for_serial "$serial" "ZENOV_GUARD_STATUS_OK" || { echo quit; return 1; }
   send_command "guard selftest"; wait_for_count "$serial" "ZENOV_GUARD_SELFTEST_OK" 2 || { echo quit; return 1; }
@@ -202,7 +211,7 @@ for marker in \
   "ZGDB_KEY_REJECTED reason=unknown-key" "ZGDB_TAMPER_REJECTED" "ZGDB_ATOMIC_UPDATE_OK version=4" "ZGDB_ROLLBACK_REJECTED" "ZGDB_REVOCATION_BLOCKED" \
   "ZENOV_GUARD_DETECTED" "ZENOV_GUARD_QUARANTINE_OK" "ZENOV_GUARD_UNTRUSTED_BLOCKED" "ZENOV_GUARD_FULL_SCAN_OK" "ZENOV_GUARD_EXEC_ALLOWED" \
   "GRAPHICS_PCI_OK" "FRAMEBUFFER_MAPPED_OK" "GRAPHICS_MODE_OK" "BACKBUFFER_PRESENT_OK" \
-  "CLIPPING_OK" "ALPHA_BLEND_OK" "FONT_RENDER_OK" "DESKTOP_SCENE_OK" "GRAPHICAL_DESKTOP_READY" "PS2_MOUSE_OK" "PS2_MOUSE_IRQ_ROUTE_OK" \
+  "CLIPPING_OK" "ALPHA_BLEND_OK" "FONT_RENDER_OK" "UI_NAVIGATION_MODEL_OK" "UI_KEYBOARD_NAV_OK" "DESKTOP_SCENE_OK" "GRAPHICAL_DESKTOP_READY" "PS2_MOUSE_OK" "PS2_MOUSE_IRQ_ROUTE_OK" \
   "MOUSE_PACKET_OK" "WINDOW_DRAG_OK" "PS2_MOUSE_DECODER_OK" "$UI_MARKER" "$LONG_INPUT_MARKER" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" \
   "FILEIO_ELF_OK" "FILE_SYSCALL_PERSIST_OK" "PROCESS_ARGV_OK" "SYSCALL_ERRORS_OK" "SYSCALL_POINTER_GUARD_OK" "CONSOLE_READ_SYSCALL_OK" \
   "PAGE_PROTECTION_OK" "USER_WRITE_TO_TEXT_BLOCKED" "USER_KERNEL_ACCESS_BLOCKED" "PAGE_FAULT_DIAGNOSTICS_OK" "USER_FAULT_RETURNED_TO_SHELL" \
@@ -216,5 +225,7 @@ done
 [[ "$(grep -c 'Application could not be loaded' "$OUT/serial.log")" -eq 3 ]] || { echo "qemu-smoke: unexpected application load failure count" >&2; exit 1; }
 [[ "$(grep -c 'PERSISTENCE_0_1_1_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: shell persistence marker missing across reboot" >&2; exit 1; }
 [[ "$(grep -c 'FILE_SYSCALL_PERSIST_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: userspace file payload missing across reboot" >&2; exit 1; }
-[[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: graphical framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK 0.1.1 ZGDB2 RSA-PSS root-id unknown-key tamper sequential-update rollback revocation ZenovGuard graphical-desktop protected-pages transactional-fs serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+[[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: terminal framebuffer screenshot missing" >&2; exit 1; }
+[[ -s "$LAUNCHER_SCREENSHOT" ]] || { echo "qemu-smoke: launcher framebuffer screenshot missing" >&2; exit 1; }
+[[ -s "$SETTINGS_SCREENSHOT" ]] || { echo "qemu-smoke: settings framebuffer screenshot missing" >&2; exit 1; }
+printf 'qemu-smoke: OK 0.1.1 ZGDB2 RSA-PSS root-id unknown-key tamper sequential-update rollback revocation ZenovGuard graphical-desktop keyboard-navigation protected-pages transactional-fs serial=%s screenshots=%s,%s,%s\n' "$OUT/serial.log" "$SCREENSHOT" "$LAUNCHER_SCREENSHOT" "$SETTINGS_SCREENSHOT"
