@@ -41,6 +41,7 @@ void render_input(const char* buffer, uint32_t length, uint32_t cursor,
     }
     const uint32_t cursor_column = visible == 0 ? origin_column : origin_column + cursor - view_start;
     console::move_to(origin_row, cursor_column < console::width ? cursor_column : console::width - 1);
+    graphics::sync_terminal_from_console();
 }
 
 void history_add(const char* line) {

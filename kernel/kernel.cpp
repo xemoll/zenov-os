@@ -88,6 +88,7 @@ extern "C" void kernel_main() {
 
     serial::line("Kernel online. Desktop, security, persistent storage and ring-3 services ready.");
     console::show_home();
+    if (graphical) graphics::sync_terminal_from_console();
     serial::line("ZENOVOS_UI_READY");
     shell_run();
 }
