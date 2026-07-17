@@ -7,6 +7,8 @@ static constexpr const char* protected_paths[] = {
     "/apps/protect.elf",
     "/apps/kaccess.elf",
     "/apps/zenovapp.zex",
+    "/security/zenovguard.zgdb",
+    "/security/zenovguard.version",
 };
 
 bool protected_path(const char* input) {
