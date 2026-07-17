@@ -20,7 +20,7 @@ SCREENSHOT="$(cd "$OUT" && pwd)/screenshot.ppm"
 
 wait_for_serial() {
   local file="$1" text="$2"
-  for _ in $(seq 1 450); do
+  for _ in $(seq 1 500); do
     [[ -f "$file" ]] && grep -q "$text" "$file" && return 0
     sleep 0.1
   done
@@ -28,7 +28,7 @@ wait_for_serial() {
 }
 wait_for_count() {
   local file="$1" text="$2" expected="$3"
-  for _ in $(seq 1 450); do
+  for _ in $(seq 1 500); do
     [[ -f "$file" ]] && [[ "$(grep -c "$text" "$file" || true)" -ge "$expected" ]] && return 0
     sleep 0.1
   done
@@ -64,12 +64,16 @@ wait_for_boot() {
     && wait_for_serial "$serial" "HEAP_STRESS_OK" \
     && wait_for_serial "$serial" "$STORAGE_MARKER" \
     && wait_for_serial "$serial" "$PROCESS_MARKER" \
+    && wait_for_serial "$serial" "ZENOV_GUARD_AUDIT_SELFTEST_OK" \
+    && wait_for_serial "$serial" "ZENOV_GUARD_AUDIT_REPLAY_OK" \
+    && wait_for_serial "$serial" "ZENOV_GUARD_AUDIT_READY" \
     && wait_for_serial "$serial" "ZENOV_GUARD_SELFTEST_OK" \
     && wait_for_serial "$serial" "ZENOV_GUARD_TRUST_BASELINE_OK" \
     && wait_for_serial "$serial" "ZENOV_GUARD_READY" \
     && wait_for_serial "$serial" "ZGDB_ROOT_KEY_OK id=6f788074c018f5aa" \
     && wait_for_serial "$serial" "ZGDB_PSS_SIGNATURE_OK" \
     && wait_for_serial "$serial" "ZGDB_READY" \
+    && wait_for_serial "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" \
     && wait_for_serial "$serial" "GRAPHICS_PCI_OK" \
     && wait_for_serial "$serial" "FRAMEBUFFER_MAPPED_OK" \
     && wait_for_serial "$serial" "GRAPHICS_MODE_OK" \
@@ -95,6 +99,7 @@ controller_first() {
   sleep 0.3; echo "screendump $SCREENSHOT"; sleep 0.2
 
   send_command "guard status"; wait_for_serial "$serial" "ZENOV_GUARD_STATUS_OK" || { echo quit; return 1; }
+  send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 2 || { echo quit; return 1; }
   send_command "guard selftest"; wait_for_count "$serial" "ZENOV_GUARD_SELFTEST_OK" 2 || { echo quit; return 1; }
   send_command "write /data/guard-test.bin ZENOV_GUARD_SAFE_TEST_VECTOR_V1"; wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
   send_command "guard scan /data/guard-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_DETECTED" || { echo quit; return 1; }
@@ -140,6 +145,7 @@ controller_first() {
   wait_for_count "$serial" "$PROMPT" $((prompt_count + 1)) || { echo quit; return 1; }
   send_command "guard update /security/updates/zenovguard-v3.zgdb"
   wait_for_serial "$serial" "ZGDB_ROLLBACK_REJECTED" || { echo quit; return 1; }
+  send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 3 || { echo quit; return 1; }
   sleep 0.2; echo quit
 }
 
@@ -147,6 +153,8 @@ controller_second() {
   local serial="$1" prompt_count
   wait_for_boot "$serial" || { echo quit; return 1; }
   wait_for_serial "$serial" "ZGDB_POLICY_VERSION_OK version=4" || { echo quit; return 1; }
+  grep -Eq 'ZENOV_GUARD_AUDIT_REPLAY_OK count=[1-9][0-9]*' "$serial" || { echo quit; return 1; }
+  send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 2 || { echo quit; return 1; }
   prompt_count="$(grep -c "$PROMPT" "$serial" || true)"
   send_command "run ZENOVAPP.ZEX"
   wait_for_serial "$serial" "ZGDB_REVOCATION_BLOCKED" || { echo quit; return 1; }
@@ -156,6 +164,7 @@ controller_second() {
   send_command "cat /data/apps/userio.txt"; wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
   send_command "fsck"; wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
   send_command "stat /data/apps/userio.txt"; wait_for_serial "$serial" "Checksum" || { echo quit; return 1; }
+  send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 3 || { echo quit; return 1; }
   sleep 0.2; echo quit
 }
 
@@ -168,13 +177,14 @@ controller_recovery() {
   wait_for_serial "$serial" "recovery=committed" || { echo quit; return 1; }
   send_command "fsck"
   wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
+  send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 2 || { echo quit; return 1; }
   sleep 0.2; echo quit
 }
 
 run_phase() {
   local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5"
   set +e
-  "$controller" "$serial" | timeout 85s "$QEMU" \
+  "$controller" "$serial" | timeout 95s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
     -drive "file=$data_image,format=raw,if=ide,index=0,media=disk" \
     -boot a -m 32M -machine pc,vmport=off -vga std -display none \
@@ -197,7 +207,8 @@ cat "$SERIAL1" "$SERIAL2" "$SERIAL3" > "$OUT/serial.log"
 
 for marker in \
   "$BOOT_MARKER" "$PMM_MARKER" "PMM_STRESS_OK" "$PAGING_MARKER" "HEAP_REUSE_OK" "HEAP_COALESCE_OK" "HEAP_INVALID_FREE_BLOCKED" "HEAP_STRESS_OK" \
-  "$STORAGE_MARKER" "$PROCESS_MARKER" "ZENOV_GUARD_SELFTEST_OK" "ZENOV_GUARD_TRUST_BASELINE_OK" "ZENOV_GUARD_READY" "ZENOV_GUARD_STATUS_OK" \
+  "$STORAGE_MARKER" "$PROCESS_MARKER" "ZENOV_GUARD_AUDIT_SELFTEST_OK" "ZENOV_GUARD_AUDIT_REPLAY_OK" "ZENOV_GUARD_AUDIT_READY" "ZENOV_GUARD_AUDIT_VERIFY_OK" \
+  "ZENOV_GUARD_SELFTEST_OK" "ZENOV_GUARD_TRUST_BASELINE_OK" "ZENOV_GUARD_READY" "ZENOV_GUARD_STATUS_OK" \
   "ZGDB_ROOT_KEY_OK id=6f788074c018f5aa" "ZGDB_PSS_SIGNATURE_OK" "ZGDB_POLICY_VERSION_OK version=3" "ZGDB_POLICY_VERSION_OK version=4" "ZGDB_READY" \
   "ZGDB_KEY_REJECTED reason=unknown-key" "ZGDB_TAMPER_REJECTED" "ZGDB_ATOMIC_UPDATE_OK version=4" "ZGDB_ROLLBACK_REJECTED" "ZGDB_REVOCATION_BLOCKED" \
   "ZENOV_GUARD_DETECTED" "ZENOV_GUARD_QUARANTINE_OK" "ZENOV_GUARD_UNTRUSTED_BLOCKED" "ZENOV_GUARD_FULL_SCAN_OK" "ZENOV_GUARD_EXEC_ALLOWED" \
@@ -209,6 +220,8 @@ for marker in \
   "ZENOV_SOURCE_APP_RING3_OK" "ZENOV_COMPILER_ABI_MATCH_OK" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" "recovery=committed" "ZENOVFS_FSCK_OK"; do
   grep -q "$marker" "$OUT/serial.log" || { echo "qemu-smoke: missing marker: $marker" >&2; exit 1; }
 done
+[[ "$(grep -c 'ZENOV_GUARD_AUDIT_VERIFY_OK' "$OUT/serial.log")" -ge 8 ]] || { echo "qemu-smoke: persistent audit verification count is too low" >&2; exit 1; }
+grep -Eq 'ZENOV_GUARD_AUDIT_REPLAY_OK count=[1-9][0-9]*' "$SERIAL2" || { echo "qemu-smoke: persistent audit did not replay non-empty state" >&2; exit 1; }
 [[ "$(grep -c 'ZENOV_GUARD_EXEC_ALLOWED' "$OUT/serial.log")" -ge 7 ]] || { echo "qemu-smoke: trusted application appraisal count is too low" >&2; exit 1; }
 [[ "$(grep -c 'ZGDB_REVOCATION_BLOCKED' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: revocation did not persist across reboot" >&2; exit 1; }
 [[ "$(grep -c 'ZGDB_PSS_SIGNATURE_OK' "$OUT/serial.log")" -ge 3 ]] || { echo "qemu-smoke: PSS verification missing from a boot phase" >&2; exit 1; }
@@ -217,4 +230,4 @@ done
 [[ "$(grep -c 'PERSISTENCE_0_1_1_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: shell persistence marker missing across reboot" >&2; exit 1; }
 [[ "$(grep -c 'FILE_SYSCALL_PERSIST_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: userspace file payload missing across reboot" >&2; exit 1; }
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: graphical framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK 0.1.1 ZGDB2 RSA-PSS root-id unknown-key tamper sequential-update rollback revocation ZenovGuard graphical-desktop protected-pages transactional-fs serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+printf 'qemu-smoke: OK 0.1.1 persistent-hash-chained-audit ZGDB2 RSA-PSS unknown-key tamper rollback revocation graphical-desktop protected-pages transactional-fs serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
