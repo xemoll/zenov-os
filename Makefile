@@ -21,6 +21,10 @@ ZENOV_COMPILER_REVISION := a58c3419b09d46be7fc7180ba910c14033910fdf
 ZGDB_V3_SHA256 := 170633b6caf2348e3790cbada7ec5114b03fd73243d8fe572c9e46c237563030
 ZGDB_V4_SHA256 := 8445c9d9a48e6572a3d5eb1a7f45f484a7ae8e8fdfe1cce0cc0461a25aabcca6
 ZGDB_FILES := $(BUILD)/zenovguard-v3.zgdb $(BUILD)/zenovguard-v4.zgdb $(BUILD)/zenovguard-tampered.zgdb $(BUILD)/zenovguard-wrong-key.zgdb
+AUDIT_FAULT_STAMP := $(BUILD)/audit-cow-fault.stamp
+AUDIT_OLD_RECOVERY_IMAGE := $(BUILD)/qemu/zenov-data-audit-old-recovery.img
+AUDIT_NEW_RECOVERY_IMAGE := $(BUILD)/qemu/zenov-data-audit-new-recovery.img
+AUDIT_CORRUPT_IMAGE := $(BUILD)/qemu/zenov-data-audit-corrupt.img
 
 .PHONY: all clean check test qemu deterministic inspect
 
@@ -51,6 +55,9 @@ $(BUILD)/zenovfs-fault-test: tools/zenovfs_fault_test.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
 $(BUILD)/zenovfs-audit-verify: tools/zenovfs_audit_verify.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+$(BUILD)/zenovfs-audit-fault-test: tools/zenovfs_audit_fault_test.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
 $(BUILD)/zenov-app-compiler: tools/zenov_app_compiler.cpp | $(BUILD)
@@ -177,7 +184,18 @@ $(BUILD)/zenov-data.img: $(USER_APPS) $(ZGDB_FILES) $(BUILD)/zenovfs-builder $(B
 	@test "$$(od -An -tc -N8 $@ | tr -d ' \n')" = "ZENOVFS1"
 	$(BUILD)/zenovfs-verify $@
 
-$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(ZGDB_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp tools/zenovfs_audit_verify.cpp security/zgdb_crypto_material.hpp security/zenovguard-root-public.pem
+$(AUDIT_FAULT_STAMP): $(BUILD)/zenov-data.img $(BUILD)/zenovfs-audit-fault-test
+	@mkdir -p $(BUILD)/qemu
+	$(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenov-data.img \
+	  --emit-old-recovery $(AUDIT_OLD_RECOVERY_IMAGE) \
+	  --emit-new-recovery $(AUDIT_NEW_RECOVERY_IMAGE) \
+	  --emit-corrupt $(AUDIT_CORRUPT_IMAGE)
+	@test -s $(AUDIT_OLD_RECOVERY_IMAGE)
+	@test -s $(AUDIT_NEW_RECOVERY_IMAGE)
+	@test -s $(AUDIT_CORRUPT_IMAGE)
+	@touch $@
+
+$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(ZGDB_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp tools/zenovfs_audit_verify.cpp tools/zenovfs_audit_fault_test.cpp security/zgdb_crypto_material.hpp security/zenovguard-root-public.pem
 	@boot_hash="$$(sha256sum $(BUILD)/BOOT.BIN | cut -d' ' -f1)"; \
 	 kernel_hash="$$(sha256sum $(BUILD)/KERNEL.BIN | cut -d' ' -f1)"; \
 	 image_hash="$$(sha256sum $(BUILD)/zenov-os.img | cut -d' ' -f1)"; \
@@ -190,7 +208,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 root_hash="$$(sha256sum security/zenovguard-root-public.pem | cut -d' ' -f1)"; \
 	 printf '%s\n' \
 	 '{' \
-	 '  "format": "zenov-os-build-v10",' \
+	 '  "format": "zenov-os-build-v11",' \
 	 '  "product": "ZenovOS",' \
 	 '  "version": "0.1.1",' \
 	 '  "target": "i686-zenov-none",' \
@@ -199,7 +217,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  "graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop",' \
 	 '  "input": "PS2 keyboard and 3-byte PS2 mouse packets",' \
 	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
-	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 RSA-PSS / persistent ZGAL1 hash-chained audit / fail-closed append",' \
+	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 RSA-PSS / ZGAL1 hash chain / exhaustive audit COW fault injection / fail-closed boot",' \
 	 '  "zgdb_schema": 2,' \
 	 '  "zgdb_compiled_floor": 3,' \
 	 '  "zgdb_root_key_id": "6f788074c018f5aa",' \
@@ -211,6 +229,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  "audit_record_bytes": 128,' \
 	 '  "audit_journal_bytes": 8288,' \
 	 '  "audit_persistence": "ZenovFS1 COW / SHA-256 previous-record chain / bounded anchor",' \
+	 '  "audit_fault_model": "ordered crash prefixes / torn head-tail sectors / garbage / dropped and duplicated writes / reordered metadata / old-new-or-fail-closed",' \
 	 '  "application_abi": "ZEX1 + ELF32 ring3 / int 0x80 / argv / console input",' \
 	 '  "zenov_app_abi": "0.1.1",' \
 	 '  "zenov_repository_commit": "$(ZENOV_COMPILER_REVISION)",' \
@@ -226,7 +245,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  }' \
 	 '}' > $@
 
-check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify all
+check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test all $(AUDIT_FAULT_STAMP)
 	$(BUILD)/zenov-stage0 --self-test
 	$(BUILD)/image-verify $(BUILD)/zenov-os.img
 	$(BUILD)/zenovfs-verify $(BUILD)/zenov-data.img
@@ -238,7 +257,7 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	done
 	@! find . -path './build' -prune -o -name '*.py' -print | grep -q .
 	@grep -q 'system_version("0.1.1")' kernel/config/system.zv
-	@grep -q '"format": "zenov-os-build-v10"' $(BUILD)/build-manifest.json
+	@grep -q '"format": "zenov-os-build-v11"' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_schema": 2' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_compiled_floor": 3' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_root_key_id": "6f788074c018f5aa"' $(BUILD)/build-manifest.json
@@ -247,17 +266,19 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	@grep -q '"audit_schema": 1' $(BUILD)/build-manifest.json
 	@grep -q '"audit_capacity": 64' $(BUILD)/build-manifest.json
 	@grep -q '"audit_journal_bytes": 8288' $(BUILD)/build-manifest.json
+	@grep -q '"audit_fault_model":' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_app_abi": "0.1.1"' $(BUILD)/build-manifest.json
-	@echo 'static checks: OK (0.1.1 ZGDB2 RSA-PSS, persistent ZGAL1 audit, graphics, memory, ABI and transactional storage)'
+	@echo 'static checks: OK (0.1.1 ZGDB2 RSA-PSS, ZGAL1 audit COW crash matrix, graphics, memory, ABI and transactional storage)'
 
-qemu: all $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify
+qemu: all $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(AUDIT_FAULT_STAMP)
 	@mkdir -p $(BUILD)/qemu
 	@cp $(BUILD)/zenov-data.img $(BUILD)/qemu/zenov-data-runtime.img
 	$(BUILD)/zenovfs-fault-test $(BUILD)/zenov-data.img --emit-recovery $(BUILD)/qemu/zenov-data-recovery.img
-	bash tests/qemu_smoke.sh $(BUILD)/zenov-os.img $(BUILD)/qemu/zenov-data-runtime.img $(BUILD)/qemu $(BUILD)/qemu/zenov-data-recovery.img
+	bash tests/qemu_smoke.sh $(BUILD)/zenov-os.img $(BUILD)/qemu/zenov-data-runtime.img $(BUILD)/qemu \
+	  $(BUILD)/qemu/zenov-data-recovery.img $(AUDIT_OLD_RECOVERY_IMAGE) $(AUDIT_NEW_RECOVERY_IMAGE) $(AUDIT_CORRUPT_IMAGE)
 	$(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zenov-data-runtime.img --require-nonempty --emit-tampered $(BUILD)/qemu/zenov-data-audit-tampered.img
 	@if $(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zenov-data-audit-tampered.img --require-nonempty; then echo 'tampered ZGAL1 fixture unexpectedly verified' >&2; exit 1; fi
-	@echo 'persistent audit host verification: OK (runtime chain valid; FNV-repaired tamper rejected)'
+	@echo 'persistent audit verification: OK (runtime chain valid; FNV-repaired tamper rejected; COW crash images boot-tested)'
 
 test: check qemu deterministic
 
