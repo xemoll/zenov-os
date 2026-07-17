@@ -118,6 +118,9 @@ bool handle_click() {
     else if (hit(mouse_x, mouse_y, dock_x + 64, dock_y + 2, 48, 48)) active_view = View::files;
     else if (hit(mouse_x, mouse_y, dock_x + 120, dock_y + 2, 48, 48)) active_view = View::settings;
     else if (hit(mouse_x, mouse_y, dock_x + 176, dock_y + 2, 48, 48)) active_view = View::launcher;
+    else if (active_view == View::launcher && hit(mouse_x, mouse_y, window_x + 16, window_y + 120, 144, 128)) active_view = View::terminal;
+    else if (active_view == View::launcher && hit(mouse_x, mouse_y, window_x + 184, window_y + 120, 144, 128)) active_view = View::files;
+    else if (active_view == View::launcher && hit(mouse_x, mouse_y, window_x + 352, window_y + 120, 144, 128)) active_view = View::settings;
     else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 16, window_y + 92, 144, 80)) { apply_runtime_theme(0); persist_runtime_theme(0); }
     else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 176, window_y + 92, 144, 80)) { apply_runtime_theme(1); persist_runtime_theme(1); }
     else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 336, window_y + 92, 144, 80)) { apply_runtime_theme(2); persist_runtime_theme(2); }
