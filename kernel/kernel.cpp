@@ -9,6 +9,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "generated/zenov_config.hpp"
 
 #include "parts/core.inc"
+#include "parts/memory_compare.inc"
 #include "parts/hardware.inc"
 #include "parts/memory.inc"
 #include "parts/graphics_mapping.inc"
