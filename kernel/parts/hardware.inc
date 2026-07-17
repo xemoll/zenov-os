@@ -3,7 +3,7 @@ extern "C" void user_abort_entry();
 extern "C" void isr44();
 namespace paging { uintptr_t fault_address(); }
 namespace process { void record_user_fault(uint32_t vector, uint32_t error, uint32_t eip, uintptr_t address); }
-namespace graphics { void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons); bool ready(); }
+namespace graphics { void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons); }
 
 struct [[gnu::packed]] BootInfo { uint32_t magic; uint8_t drive; uint8_t e820_count; uint16_t reserved; };
 struct [[gnu::packed]] E820Entry { uint32_t base_low, base_high, length_low, length_high, type, attributes; };
