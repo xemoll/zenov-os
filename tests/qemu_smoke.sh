@@ -34,6 +34,37 @@ wait_for_count() {
   done
   return 1
 }
+qmp_call() {
+  local payload="$1" response
+  printf '%s\r\n' "$payload" >&9
+  for _ in $(seq 1 20); do
+    IFS= read -r -t 2 -u 9 response || return 1
+    [[ "$response" == *'"return"'* ]] && return 0
+    if [[ "$response" == *'"error"'* ]]; then
+      echo "qemu-smoke: QMP error: $response" >&2
+      return 1
+    fi
+  done
+  return 1
+}
+qmp_connect() {
+  local port="$1" greeting
+  for _ in $(seq 1 100); do
+    if { exec 9<>"/dev/tcp/127.0.0.1/$port"; } 2>/dev/null; then break; fi
+    sleep 0.05
+  done
+  IFS= read -r -t 2 -u 9 greeting || return 1
+  [[ "$greeting" == *'"QMP"'* ]] || return 1
+  qmp_call '{"execute":"qmp_capabilities"}'
+}
+qmp_mouse_move() {
+  local dx="$1" dy="$2"
+  qmp_call "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"rel\",\"data\":{\"axis\":\"x\",\"value\":$dx}},{\"type\":\"rel\",\"data\":{\"axis\":\"y\",\"value\":$dy}}]}}"
+}
+qmp_mouse_button() {
+  local down="$1"
+  qmp_call "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"btn\",\"data\":{\"down\":$down,\"button\":\"left\"}}]}}"
+}
 send_text() {
   local text="$1" char lower
   for ((i=0; i<${#text}; ++i)); do
@@ -79,53 +110,45 @@ wait_for_boot() {
 }
 
 controller_first() {
-  local serial="$1" prompt_count=1
+  local serial="$1" qmp_port="$2" prompt_count=1
   wait_for_boot "$serial" || { echo quit; return 1; }
-
-  echo "info mice"
-  echo "mouse_set 0"
-  echo "mouse_set 1"
-  echo "mouse_set 2"
-  sleep 0.2
-  echo "mouse_move 1 1"
+  qmp_connect "$qmp_port" || { echo quit; return 1; }
+  qmp_mouse_move 1 1 || { echo quit; return 1; }
   wait_for_serial "$serial" "MOUSE_PACKET_OK" || { echo quit; return 1; }
-  echo "mouse_move 0 -191"
+  qmp_mouse_move 0 -191 || { echo quit; return 1; }
   sleep 0.15
-  echo "mouse_button 1"; sleep 0.1
-  echo "mouse_move 80 30"; sleep 0.2
-  echo "mouse_button 0"
+  qmp_mouse_button true || { echo quit; return 1; }
+  sleep 0.1
+  qmp_mouse_move 80 30 || { echo quit; return 1; }
+  sleep 0.2
+  qmp_mouse_button false || { echo quit; return 1; }
   wait_for_serial "$serial" "WINDOW_DRAG_OK" || { echo quit; return 1; }
   sleep 0.3; echo "screendump $SCREENSHOT"; sleep 0.2
 
   echo "sendkey f1 10"; wait_for_serial "$serial" "COMMAND REFERENCE" || { echo quit; return 1; }; echo "sendkey f4 10"; sleep 0.2
-
   send_command "vm"; wait_for_serial "$serial" "VIRTUAL MEMORY" || { echo quit; return 1; }
   send_command "fsck"; wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
   local long_payload; long_payload="$(printf 'a%.0s' {1..160})${LONG_INPUT_MARKER}"
   send_command "echo $long_payload"; wait_for_serial "$serial" "$LONG_INPUT_MARKER" || { echo quit; return 1; }
   send_command "write PERSIST.TXT PERSISTENCE_0_1_1_OK"; wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
-
   send_command "run HELLO"; wait_for_serial "$serial" "HELLO_ZEX_0_1_1_OK" || { echo quit; return 1; }
   send_command "run FILEIO.ELF"; wait_for_serial "$serial" "FILEIO_ELF_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
   send_command "run ARGS.ELF alpha beta"; wait_for_serial "$serial" "PROCESS_ARGV_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "SYSCALL_ERRORS_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "SYSCALL_POINTER_GUARD_OK" || { echo quit; return 1; }
-
   send_command "run CONSOLE.ELF"; wait_for_serial "$serial" "CONSOLE_READ_READY" || { echo quit; return 1; }
   send_text "zenov"; echo "sendkey ret 10"; wait_for_serial "$serial" "CONSOLE_READ_SYSCALL_OK" || { echo quit; return 1; }
-
   prompt_count="$(grep -c "$PROMPT" "$serial" || true)"
   send_command "run PROTECT.ELF"
   wait_for_serial "$serial" "USER_WRITE_TO_TEXT_BLOCKED" || { echo quit; return 1; }
   wait_for_serial "$serial" "PAGE_FAULT_DIAGNOSTICS_OK" || { echo quit; return 1; }
   wait_for_count "$serial" "$PROMPT" $((prompt_count + 1)) || { echo quit; return 1; }
-
   prompt_count="$(grep -c "$PROMPT" "$serial" || true)"
   send_command "run KACCESS.ELF"
   wait_for_serial "$serial" "USER_KERNEL_ACCESS_BLOCKED" || { echo quit; return 1; }
   wait_for_count "$serial" "$PROMPT" $((prompt_count + 1)) || { echo quit; return 1; }
-
   send_command "run ZENOVAPP.ZEX"
   wait_for_serial "$serial" "ZENOV_SOURCE_APP_RING3_OK" || { echo quit; return 1; }
   wait_for_serial "$serial" "ZENOV_COMPILER_ABI_MATCH_OK" || { echo quit; return 1; }
+  exec 9>&- 9<&-
   sleep 0.2; echo quit
 }
 
@@ -151,12 +174,13 @@ controller_recovery() {
 }
 
 run_phase() {
-  local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5"
+  local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5" qmp_port="$6"
   set +e
-  "$controller" "$serial" | timeout 55s "$QEMU" \
+  "$controller" "$serial" "$qmp_port" | timeout 55s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
     -drive "file=$data_image,format=raw,if=ide,index=0,media=disk" \
-    -boot a -m 32M -vga std -display none -serial "file:$serial" -monitor stdio -no-reboot -no-shutdown \
+    -boot a -m 32M -vga std -display none -serial "file:$serial" -monitor stdio \
+    -qmp "tcp:127.0.0.1:$qmp_port,server=on,wait=off" -no-reboot -no-shutdown \
     >"$monitor" 2>"$stderr"
   local status=$?; set -e
   if [[ $status -ne 0 ]]; then
@@ -168,9 +192,9 @@ run_phase() {
 SERIAL1="$(cd "$OUT" && pwd)/serial-phase1.log"
 SERIAL2="$(cd "$OUT" && pwd)/serial-phase2.log"
 SERIAL3="$(cd "$OUT" && pwd)/serial-recovery.log"
-run_phase controller_first "$SERIAL1" "$OUT/monitor-phase1.log" "$OUT/qemu-phase1.stderr" "$DATA_IMAGE"
-run_phase controller_second "$SERIAL2" "$OUT/monitor-phase2.log" "$OUT/qemu-phase2.stderr" "$DATA_IMAGE"
-run_phase controller_recovery "$SERIAL3" "$OUT/monitor-recovery.log" "$OUT/qemu-recovery.stderr" "$RECOVERY_IMAGE"
+run_phase controller_first "$SERIAL1" "$OUT/monitor-phase1.log" "$OUT/qemu-phase1.stderr" "$DATA_IMAGE" 4444
+run_phase controller_second "$SERIAL2" "$OUT/monitor-phase2.log" "$OUT/qemu-phase2.stderr" "$DATA_IMAGE" 4445
+run_phase controller_recovery "$SERIAL3" "$OUT/monitor-recovery.log" "$OUT/qemu-recovery.stderr" "$RECOVERY_IMAGE" 4446
 cat "$SERIAL1" "$SERIAL2" "$SERIAL3" > "$OUT/serial.log"
 
 for marker in \
@@ -183,7 +207,6 @@ for marker in \
   "ZENOV_SOURCE_APP_RING3_OK" "ZENOV_COMPILER_ABI_MATCH_OK" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" "recovery=committed" "ZENOVFS_FSCK_OK"; do
   grep -q "$marker" "$OUT/serial.log" || { echo "qemu-smoke: missing marker: $marker" >&2; exit 1; }
 done
-
 [[ "$(grep -c 'APP_EXIT code=0' "$OUT/serial.log")" -ge 5 ]] || { echo "qemu-smoke: successful applications did not all exit cleanly" >&2; exit 1; }
 if grep -q "Application could not be loaded" "$OUT/serial.log"; then echo "qemu-smoke: shell reported an application load failure" >&2; exit 1; fi
 [[ "$(grep -c 'PERSISTENCE_0_1_1_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: shell persistence marker missing across reboot" >&2; exit 1; }
