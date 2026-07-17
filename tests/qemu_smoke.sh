@@ -34,37 +34,6 @@ wait_for_count() {
   done
   return 1
 }
-qmp_call() {
-  local payload="$1" response
-  printf '%s\r\n' "$payload" >&9
-  for _ in $(seq 1 20); do
-    IFS= read -r -t 2 -u 9 response || return 1
-    [[ "$response" == *'"return"'* ]] && return 0
-    if [[ "$response" == *'"error"'* ]]; then
-      echo "qemu-smoke: QMP error: $response" >&2
-      return 1
-    fi
-  done
-  return 1
-}
-qmp_connect() {
-  local port="$1" greeting
-  for _ in $(seq 1 100); do
-    if { exec 9<>"/dev/tcp/127.0.0.1/$port"; } 2>/dev/null; then break; fi
-    sleep 0.05
-  done
-  IFS= read -r -t 2 -u 9 greeting || return 1
-  [[ "$greeting" == *'"QMP"'* ]] || return 1
-  qmp_call '{"execute":"qmp_capabilities"}'
-}
-qmp_mouse_move() {
-  local dx="$1" dy="$2"
-  qmp_call "{\"execute\":\"input-send-event\",\"arguments\":{\"device\":\"video0\",\"events\":[{\"type\":\"rel\",\"data\":{\"axis\":\"x\",\"value\":$dx}},{\"type\":\"rel\",\"data\":{\"axis\":\"y\",\"value\":$dy}}]}}"
-}
-qmp_mouse_button() {
-  local down="$1"
-  qmp_call "{\"execute\":\"input-send-event\",\"arguments\":{\"device\":\"video0\",\"events\":[{\"type\":\"btn\",\"data\":{\"down\":$down,\"button\":\"left\"}}]}}"
-}
 send_text() {
   local text="$1" char lower
   for ((i=0; i<${#text}; ++i)); do
@@ -105,24 +74,17 @@ wait_for_boot() {
     && wait_for_serial "$serial" "DESKTOP_SCENE_OK" \
     && wait_for_serial "$serial" "GRAPHICAL_DESKTOP_READY" \
     && wait_for_serial "$serial" "PS2_MOUSE_OK" \
+    && wait_for_serial "$serial" "PS2_MOUSE_IRQ_ROUTE_OK" \
+    && wait_for_serial "$serial" "MOUSE_PACKET_OK" \
+    && wait_for_serial "$serial" "WINDOW_DRAG_OK" \
+    && wait_for_serial "$serial" "PS2_MOUSE_DECODER_OK" \
     && wait_for_serial "$serial" "$UI_MARKER" \
     && wait_for_serial "$serial" "$PROMPT"
 }
 
 controller_first() {
-  local serial="$1" qmp_port="$2" prompt_count=1
+  local serial="$1" prompt_count=1
   wait_for_boot "$serial" || { echo quit; return 1; }
-  qmp_connect "$qmp_port" || { echo quit; return 1; }
-  qmp_mouse_move 1 1 || { echo quit; return 1; }
-  wait_for_serial "$serial" "MOUSE_PACKET_OK" || { echo quit; return 1; }
-  qmp_mouse_move 0 -191 || { echo quit; return 1; }
-  sleep 0.15
-  qmp_mouse_button true || { echo quit; return 1; }
-  sleep 0.1
-  qmp_mouse_move 80 30 || { echo quit; return 1; }
-  sleep 0.2
-  qmp_mouse_button false || { echo quit; return 1; }
-  wait_for_serial "$serial" "WINDOW_DRAG_OK" || { echo quit; return 1; }
   sleep 0.3; echo "screendump $SCREENSHOT"; sleep 0.2
 
   echo "sendkey f1 10"; wait_for_serial "$serial" "COMMAND REFERENCE" || { echo quit; return 1; }; echo "sendkey f4 10"; sleep 0.2
@@ -148,7 +110,6 @@ controller_first() {
   send_command "run ZENOVAPP.ZEX"
   wait_for_serial "$serial" "ZENOV_SOURCE_APP_RING3_OK" || { echo quit; return 1; }
   wait_for_serial "$serial" "ZENOV_COMPILER_ABI_MATCH_OK" || { echo quit; return 1; }
-  exec 9>&- 9<&-
   sleep 0.2; echo quit
 }
 
@@ -174,14 +135,13 @@ controller_recovery() {
 }
 
 run_phase() {
-  local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5" qmp_port="$6"
+  local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5"
   set +e
-  "$controller" "$serial" "$qmp_port" | timeout 55s "$QEMU" \
+  "$controller" "$serial" | timeout 55s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
     -drive "file=$data_image,format=raw,if=ide,index=0,media=disk" \
-    -boot a -m 32M -machine pc,vmport=off -vga none -device VGA,id=video0 \
-    -display vnc=127.0.0.1:99 -serial "file:$serial" -monitor stdio \
-    -qmp "tcp:127.0.0.1:$qmp_port,server=on,wait=off" -no-reboot -no-shutdown \
+    -boot a -m 32M -machine pc,vmport=off -vga std -display none \
+    -serial "file:$serial" -monitor stdio -no-reboot -no-shutdown \
     >"$monitor" 2>"$stderr"
   local status=$?; set -e
   if [[ $status -ne 0 ]]; then
@@ -193,16 +153,16 @@ run_phase() {
 SERIAL1="$(cd "$OUT" && pwd)/serial-phase1.log"
 SERIAL2="$(cd "$OUT" && pwd)/serial-phase2.log"
 SERIAL3="$(cd "$OUT" && pwd)/serial-recovery.log"
-run_phase controller_first "$SERIAL1" "$OUT/monitor-phase1.log" "$OUT/qemu-phase1.stderr" "$DATA_IMAGE" 4444
-run_phase controller_second "$SERIAL2" "$OUT/monitor-phase2.log" "$OUT/qemu-phase2.stderr" "$DATA_IMAGE" 4445
-run_phase controller_recovery "$SERIAL3" "$OUT/monitor-recovery.log" "$OUT/qemu-recovery.stderr" "$RECOVERY_IMAGE" 4446
+run_phase controller_first "$SERIAL1" "$OUT/monitor-phase1.log" "$OUT/qemu-phase1.stderr" "$DATA_IMAGE"
+run_phase controller_second "$SERIAL2" "$OUT/monitor-phase2.log" "$OUT/qemu-phase2.stderr" "$DATA_IMAGE"
+run_phase controller_recovery "$SERIAL3" "$OUT/monitor-recovery.log" "$OUT/qemu-recovery.stderr" "$RECOVERY_IMAGE"
 cat "$SERIAL1" "$SERIAL2" "$SERIAL3" > "$OUT/serial.log"
 
 for marker in \
   "$BOOT_MARKER" "$PMM_MARKER" "PMM_STRESS_OK" "$PAGING_MARKER" "HEAP_REUSE_OK" "HEAP_COALESCE_OK" "HEAP_INVALID_FREE_BLOCKED" "HEAP_STRESS_OK" \
   "$STORAGE_MARKER" "$PROCESS_MARKER" "GRAPHICS_PCI_OK" "FRAMEBUFFER_MAPPED_OK" "GRAPHICS_MODE_OK" "BACKBUFFER_PRESENT_OK" \
-  "CLIPPING_OK" "ALPHA_BLEND_OK" "FONT_RENDER_OK" "DESKTOP_SCENE_OK" "GRAPHICAL_DESKTOP_READY" "PS2_MOUSE_OK" "MOUSE_PACKET_OK" "WINDOW_DRAG_OK" \
-  "$UI_MARKER" "$LONG_INPUT_MARKER" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" \
+  "CLIPPING_OK" "ALPHA_BLEND_OK" "FONT_RENDER_OK" "DESKTOP_SCENE_OK" "GRAPHICAL_DESKTOP_READY" "PS2_MOUSE_OK" "PS2_MOUSE_IRQ_ROUTE_OK" \
+  "MOUSE_PACKET_OK" "WINDOW_DRAG_OK" "PS2_MOUSE_DECODER_OK" "$UI_MARKER" "$LONG_INPUT_MARKER" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" \
   "FILEIO_ELF_OK" "FILE_SYSCALL_PERSIST_OK" "PROCESS_ARGV_OK" "SYSCALL_ERRORS_OK" "SYSCALL_POINTER_GUARD_OK" "CONSOLE_READ_SYSCALL_OK" \
   "PAGE_PROTECTION_OK" "USER_WRITE_TO_TEXT_BLOCKED" "USER_KERNEL_ACCESS_BLOCKED" "PAGE_FAULT_DIAGNOSTICS_OK" "USER_FAULT_RETURNED_TO_SHELL" \
   "ZENOV_SOURCE_APP_RING3_OK" "ZENOV_COMPILER_ABI_MATCH_OK" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" "recovery=committed" "ZENOVFS_FSCK_OK"; do
@@ -213,4 +173,4 @@ if grep -q "Application could not be loaded" "$OUT/serial.log"; then echo "qemu-
 [[ "$(grep -c 'PERSISTENCE_0_1_1_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: shell persistence marker missing across reboot" >&2; exit 1; }
 [[ "$(grep -c 'FILE_SYSCALL_PERSIST_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: userspace file payload missing across reboot" >&2; exit 1; }
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: graphical framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK 0.1.1 graphical-desktop ps2-mouse draggable-window protected-pages stress-tested-memory argv+console guarded-syscalls recoverable-faults transactional-fs kernel-recovery zenov-source-app serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+printf 'qemu-smoke: OK 0.1.1 graphical-desktop PS2-route+decoder draggable-window protected-pages stress-tested-memory argv+console guarded-syscalls recoverable-faults transactional-fs kernel-recovery zenov-source-app serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
