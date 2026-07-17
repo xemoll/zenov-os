@@ -5,6 +5,7 @@ QEMU="${QEMU:-qemu-system-i386}"
 BOOT_IMAGE="${1:-build/zenov-os.img}"
 DATA_IMAGE="${2:-build/zenov-data.img}"
 OUT="${3:-build/qemu}"
+RECOVERY_IMAGE="${4:-}"
 BOOT_MARKER="ZENOVOS_BOOT_OK"
 UI_MARKER="ZENOVOS_UI_READY"
 STORAGE_MARKER="ZENOVFS_MOUNT_OK"
@@ -55,6 +56,7 @@ wait_for_boot() {
   local serial="$1"
   wait_for_serial "$serial" "$BOOT_MARKER" \
     && wait_for_serial "$serial" "$PMM_MARKER" \
+    && wait_for_serial "$serial" "PMM_STRESS_OK" \
     && wait_for_serial "$serial" "$PAGING_MARKER" \
     && wait_for_serial "$serial" "HEAP_REUSE_OK" \
     && wait_for_serial "$serial" "HEAP_COALESCE_OK" \
@@ -80,7 +82,7 @@ controller_first() {
 
   send_command "run HELLO"; wait_for_serial "$serial" "HELLO_ZEX_0_1_1_OK" || { echo quit; return 1; }
   send_command "run FILEIO.ELF"; wait_for_serial "$serial" "FILEIO_ELF_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
-  send_command "run ARGS.ELF alpha beta"; wait_for_serial "$serial" "PROCESS_ARGV_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "SYSCALL_ERRORS_OK" || { echo quit; return 1; }
+  send_command "run ARGS.ELF alpha beta"; wait_for_serial "$serial" "PROCESS_ARGV_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "SYSCALL_ERRORS_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "SYSCALL_POINTER_GUARD_OK" || { echo quit; return 1; }
 
   send_command "run CONSOLE.ELF"; wait_for_serial "$serial" "CONSOLE_READ_READY" || { echo quit; return 1; }
   send_text "zenov"; echo "sendkey ret 10"; wait_for_serial "$serial" "CONSOLE_READ_SYSCALL_OK" || { echo quit; return 1; }
@@ -112,12 +114,23 @@ controller_second() {
   sleep 0.2; echo quit
 }
 
+controller_recovery() {
+  local serial="$1"
+  wait_for_boot "$serial" || { echo quit; return 1; }
+  wait_for_serial "$serial" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" || { echo quit; return 1; }
+  send_command "cat /data/config/system.ini"
+  wait_for_serial "$serial" "recovery=committed" || { echo quit; return 1; }
+  send_command "fsck"
+  wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
+  sleep 0.2; echo quit
+}
+
 run_phase() {
-  local controller="$1" serial="$2" monitor="$3" stderr="$4"
+  local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5"
   set +e
   "$controller" "$serial" | timeout 50s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
-    -drive "file=$DATA_IMAGE,format=raw,if=ide,index=0,media=disk" \
+    -drive "file=$data_image,format=raw,if=ide,index=0,media=disk" \
     -boot a -m 32M -display none -serial "file:$serial" -monitor stdio -no-reboot -no-shutdown \
     >"$monitor" 2>"$stderr"
   local status=$?; set -e
@@ -126,18 +139,21 @@ run_phase() {
   fi
 }
 
+[[ -n "$RECOVERY_IMAGE" && -f "$RECOVERY_IMAGE" ]] || { echo "qemu-smoke: recovery image is required" >&2; exit 1; }
 SERIAL1="$(cd "$OUT" && pwd)/serial-phase1.log"
 SERIAL2="$(cd "$OUT" && pwd)/serial-phase2.log"
-run_phase controller_first "$SERIAL1" "$OUT/monitor-phase1.log" "$OUT/qemu-phase1.stderr"
-run_phase controller_second "$SERIAL2" "$OUT/monitor-phase2.log" "$OUT/qemu-phase2.stderr"
-cat "$SERIAL1" "$SERIAL2" > "$OUT/serial.log"
+SERIAL3="$(cd "$OUT" && pwd)/serial-recovery.log"
+run_phase controller_first "$SERIAL1" "$OUT/monitor-phase1.log" "$OUT/qemu-phase1.stderr" "$DATA_IMAGE"
+run_phase controller_second "$SERIAL2" "$OUT/monitor-phase2.log" "$OUT/qemu-phase2.stderr" "$DATA_IMAGE"
+run_phase controller_recovery "$SERIAL3" "$OUT/monitor-recovery.log" "$OUT/qemu-recovery.stderr" "$RECOVERY_IMAGE"
+cat "$SERIAL1" "$SERIAL2" "$SERIAL3" > "$OUT/serial.log"
 
 for marker in \
-  "$BOOT_MARKER" "$PMM_MARKER" "$PAGING_MARKER" "HEAP_REUSE_OK" "HEAP_COALESCE_OK" "HEAP_INVALID_FREE_BLOCKED" "HEAP_STRESS_OK" \
+  "$BOOT_MARKER" "$PMM_MARKER" "PMM_STRESS_OK" "$PAGING_MARKER" "HEAP_REUSE_OK" "HEAP_COALESCE_OK" "HEAP_INVALID_FREE_BLOCKED" "HEAP_STRESS_OK" \
   "$STORAGE_MARKER" "$PROCESS_MARKER" "$UI_MARKER" "$LONG_INPUT_MARKER" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" \
-  "FILEIO_ELF_OK" "FILE_SYSCALL_PERSIST_OK" "PROCESS_ARGV_OK" "SYSCALL_ERRORS_OK" "CONSOLE_READ_SYSCALL_OK" \
+  "FILEIO_ELF_OK" "FILE_SYSCALL_PERSIST_OK" "PROCESS_ARGV_OK" "SYSCALL_ERRORS_OK" "SYSCALL_POINTER_GUARD_OK" "CONSOLE_READ_SYSCALL_OK" \
   "PAGE_PROTECTION_OK" "USER_WRITE_TO_TEXT_BLOCKED" "USER_KERNEL_ACCESS_BLOCKED" "PAGE_FAULT_DIAGNOSTICS_OK" "USER_FAULT_RETURNED_TO_SHELL" \
-  "ZENOV_SOURCE_APP_RING3_OK" "ZENOV_COMPILER_ABI_MATCH_OK" "ZENOVFS_FSCK_OK"; do
+  "ZENOV_SOURCE_APP_RING3_OK" "ZENOV_COMPILER_ABI_MATCH_OK" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" "recovery=committed" "ZENOVFS_FSCK_OK"; do
   grep -q "$marker" "$OUT/serial.log" || { echo "qemu-smoke: missing marker: $marker" >&2; exit 1; }
 done
 
@@ -146,4 +162,4 @@ if grep -q "Application could not be loaded" "$OUT/serial.log"; then echo "qemu-
 [[ "$(grep -c 'PERSISTENCE_0_1_1_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: shell persistence marker missing across reboot" >&2; exit 1; }
 [[ "$(grep -c 'FILE_SYSCALL_PERSIST_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: userspace file payload missing across reboot" >&2; exit 1; }
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK 0.1.1 protected-pages reusable-heap argv+console recoverable-faults transactional-fs zenov-source-app serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+printf 'qemu-smoke: OK 0.1.1 protected-pages stress-tested-memory argv+console guarded-syscalls recoverable-faults transactional-fs kernel-recovery zenov-source-app serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
