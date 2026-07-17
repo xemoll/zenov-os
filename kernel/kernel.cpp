@@ -32,7 +32,10 @@ namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uin
 #undef remove
 #undef write_file
 #undef read_file
+namespace process { constexpr uint32_t application_buffer_bytes = 64U * 1024U; }
+namespace security_audit { bool append(uint32_t, uint8_t, uint8_t, const char*, const uint8_t[32]); }
 #include "parts/security_guard.inc"
+#include "parts/security_audit.inc"
 #include "parts/zgdb_policy.inc"
 #include "parts/security_io.inc"
 #include "parts/process_policy.inc"
@@ -61,7 +64,7 @@ extern "C" void kernel_main() {
     serial::init();
     serial::line("ZENOVOS_BOOT_OK");
     for (uint32_t i = 0; i < zenov_generated::kBootMessageCount; ++i) serial::line(zenov_generated::kBootMessages[i]);
-    serial::line("Initializing IDT, memory, storage, signed policy, security, graphics, input and ring-3 services...");
+    serial::line("Initializing IDT, memory, storage, audit journal, signed policy, security, graphics, input and ring-3 services...");
 
     console::set_color(zenov_generated::kForeground, zenov_generated::kBackground);
     idt_init();
@@ -73,11 +76,14 @@ extern "C" void kernel_main() {
     serial::line("ELF_WX_POLICY_OK");
     storage::init();
     process::init();
-    if (!security_guard::init()) panic("ZenovGuard cryptographic self-test failed.");
+    if (!security_audit::init()) panic("Persistent ZenovGuard audit journal validation failed.");
+    if (!security_guard::init()) panic("ZenovGuard cryptographic or audit self-test failed.");
     if (!zgdb::init()) panic("Signed ZenovGuard database validation failed.");
     const uint8_t mutation_probe = 0x5AU;
     if (storage::guarded_write_file("/apps/hello.zex", &mutation_probe, 1U, false)) panic("Trusted application mutation guard failed.");
     if (storage::guarded_write_file("/security/zenovguard.zgdb", &mutation_probe, 1U, false)) panic("Active security database mutation guard failed.");
+    if (storage::guarded_write_file("/security/zenovguard.audit", &mutation_probe, 1U, false)) panic("Persistent security audit mutation guard failed.");
+    if (!security_audit::verify_active()) panic("Persistent security audit final-read verification failed.");
     serial::line("ZENOV_GUARD_PROTECTED_PATH_TEST_OK");
     const bool graphical = graphics::init();
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
@@ -91,7 +97,7 @@ extern "C" void kernel_main() {
     if (graphical && mouse_ready && !mouse_decoder_regression()) panic("PS/2 mouse decoder regression failed.");
     if (graphical && mouse_ready) serial::line("PS2_MOUSE_DECODER_OK");
 
-    serial::line("Kernel online. Desktop, signed policy, security, persistent storage and ring-3 services ready.");
+    serial::line("Kernel online. Desktop, signed policy, persistent audit, security, storage and ring-3 services ready.");
     console::show_home();
     serial::line("ZENOVOS_UI_READY");
     shell_run();
