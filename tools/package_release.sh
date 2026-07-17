@@ -8,7 +8,7 @@ PACKAGE="${4:-package}"
 MANIFEST="${5:-build/build-manifest.json}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="0.1.1"
-SOURCE_REVISION="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+SOURCE_REVISION="${ZENOV_SOURCE_REVISION:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)}"
 
 for tool in zip unzip sha256sum git; do
   command -v "$tool" >/dev/null 2>&1 || {
@@ -17,7 +17,16 @@ for tool in zip unzip sha256sum git; do
   }
 done
 
-[[ -n "$SOURCE_REVISION" ]] || { echo "package-release: source revision is unavailable" >&2; exit 1; }
+[[ "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "package-release: source revision must be an exact lowercase 40-hex commit SHA" >&2
+  exit 1
+}
+if [[ -n "${ZENOV_SOURCE_REVISION:-}" ]]; then
+  git -C "$ROOT" cat-file -e "$SOURCE_REVISION^{commit}" 2>/dev/null || {
+    echo "package-release: supplied source revision is not available in this checkout: $SOURCE_REVISION" >&2
+    exit 1
+  }
+fi
 [[ -f "$BOOT_IMAGE" ]] || { echo "package-release: boot image not found: $BOOT_IMAGE" >&2; exit 1; }
 [[ -f "$DATA_IMAGE" ]] || { echo "package-release: data image not found: $DATA_IMAGE" >&2; exit 1; }
 [[ -f "$MANIFEST" ]] || { echo "package-release: build manifest not found: $MANIFEST" >&2; exit 1; }
@@ -89,5 +98,7 @@ unzip -p "$DIST/ZenovOS-$VERSION-x86.zip" BUILD-MANIFEST.json | cmp - "$MANIFEST
 unzip -p "$DIST/ZenovOS-$VERSION-x86.zip" SOURCE-REVISION.txt | cmp - "$DIST/SOURCE-REVISION.txt"
 unzip -p "$DIST/ZenovOS-$VERSION-x86.zip" "ZenovOS-$VERSION-data.img" | cmp - "$DATA_IMAGE"
 unzip -p "$DIST/ZenovOS-$VERSION-x86.zip" "ZenovOS-$VERSION-x86.img" | cmp - "$BOOT_IMAGE"
+grep -qx "ZenovOS source commit: $SOURCE_REVISION" "$DIST/SOURCE-REVISION.txt"
 
-echo "package-release: OK version=$VERSION source=$SOURCE_REVISION boot=$DIST/ZenovOS-$VERSION-x86.img data-in-zip=$DATA_IMAGE manifest=$MANIFEST zip=$DIST/ZenovOS-$VERSION-x86.zip"
+printf 'package-release: OK version=%s source=%s boot=%s data-in-zip=%s manifest=%s zip=%s\n' \
+  "$VERSION" "$SOURCE_REVISION" "$DIST/ZenovOS-$VERSION-x86.img" "$DATA_IMAGE" "$MANIFEST" "$DIST/ZenovOS-$VERSION-x86.zip"
