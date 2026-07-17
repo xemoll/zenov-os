@@ -82,8 +82,15 @@ controller_first() {
   local serial="$1" prompt_count=1
   wait_for_boot "$serial" || { echo quit; return 1; }
 
-  echo "mouse_move 0 -190"
+  echo "info mice"
+  echo "mouse_set 0"
+  echo "mouse_set 1"
+  echo "mouse_set 2"
+  sleep 0.2
+  echo "mouse_move 1 1"
   wait_for_serial "$serial" "MOUSE_PACKET_OK" || { echo quit; return 1; }
+  echo "mouse_move 0 -191"
+  sleep 0.15
   echo "mouse_button 1"; sleep 0.1
   echo "mouse_move 80 30"; sleep 0.2
   echo "mouse_button 0"
@@ -153,7 +160,7 @@ run_phase() {
     >"$monitor" 2>"$stderr"
   local status=$?; set -e
   if [[ $status -ne 0 ]]; then
-    echo "qemu-smoke: phase failed with status $status" >&2; cat "$stderr" >&2 || true; cat "$serial" >&2 || true; return 1
+    echo "qemu-smoke: phase failed with status $status" >&2; cat "$monitor" >&2 || true; cat "$stderr" >&2 || true; cat "$serial" >&2 || true; return 1
   fi
 }
 
