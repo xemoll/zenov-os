@@ -4,6 +4,7 @@ HOST_CXX ?= g++
 AS ?= as
 LD ?= ld
 OBJCOPY ?= objcopy
+OPENSSL ?= openssl
 KERNEL_MAX_BYTES := 524288
 
 HOST_FLAGS := -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic
@@ -17,6 +18,9 @@ ZENOV_CONFIG_SRC := $(shell find kernel/config -type f -name '*.zv' -print 2>/de
 USER_ASM := user/hello.S user/fileio.S user/args.S user/console.S user/protect.S user/kernel_access.S
 ZENOV_APP_EXPECTED_SHA256 := 9e1733af56a53ae31055b448f762815ba7a5e1a72be543aef325bd4ea36e0ad5
 ZENOV_COMPILER_REVISION := a58c3419b09d46be7fc7180ba910c14033910fdf
+ZGDB_V1_SHA256 := d2de9d9b05bcc61de82ab2b36149241ebb667782bcf3916dfc1d0b4fbcba360d
+ZGDB_V2_SHA256 := 033307173932c452384033db5ca36ced4cc8cacf0efa5b328044f8c7772d8c6e
+ZGDB_FILES := $(BUILD)/zenovguard-v1.zgdb $(BUILD)/zenovguard-v2.zgdb $(BUILD)/zenovguard-tampered.zgdb
 
 .PHONY: all clean check test qemu deterministic inspect
 
@@ -49,6 +53,27 @@ $(BUILD)/zenovfs-fault-test: tools/zenovfs_fault_test.cpp | $(BUILD)
 $(BUILD)/zenov-app-compiler: tools/zenov_app_compiler.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
+$(BUILD)/zgdb-builder: tools/zgdb_builder.cpp security/zgdb_crypto_material.hpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tools/zgdb_builder.cpp -o $@
+
+$(BUILD)/zgdb.stamp: $(BUILD)/zgdb-builder security/zgdb_crypto_material.hpp security/zenovguard-root-public.pem | $(BUILD)
+	$(BUILD)/zgdb-builder $(BUILD)/zenovguard-v1.zgdb $(BUILD)/zenovguard-v2.zgdb $(BUILD)/zenovguard-tampered.zgdb
+	@printf '%s  %s\n' '$(ZGDB_V1_SHA256)' '$(BUILD)/zenovguard-v1.zgdb' | sha256sum -c -
+	@printf '%s  %s\n' '$(ZGDB_V2_SHA256)' '$(BUILD)/zenovguard-v2.zgdb' | sha256sum -c -
+	@head -c -256 $(BUILD)/zenovguard-v1.zgdb > $(BUILD)/zgdb-v1.signed
+	@tail -c 256 $(BUILD)/zenovguard-v1.zgdb > $(BUILD)/zgdb-v1.signature
+	@$(OPENSSL) dgst -sha256 -verify security/zenovguard-root-public.pem -signature $(BUILD)/zgdb-v1.signature $(BUILD)/zgdb-v1.signed
+	@head -c -256 $(BUILD)/zenovguard-v2.zgdb > $(BUILD)/zgdb-v2.signed
+	@tail -c 256 $(BUILD)/zenovguard-v2.zgdb > $(BUILD)/zgdb-v2.signature
+	@$(OPENSSL) dgst -sha256 -verify security/zenovguard-root-public.pem -signature $(BUILD)/zgdb-v2.signature $(BUILD)/zgdb-v2.signed
+	@head -c -256 $(BUILD)/zenovguard-tampered.zgdb > $(BUILD)/zgdb-tampered.signed
+	@tail -c 256 $(BUILD)/zenovguard-tampered.zgdb > $(BUILD)/zgdb-tampered.signature
+	@if $(OPENSSL) dgst -sha256 -verify security/zenovguard-root-public.pem -signature $(BUILD)/zgdb-tampered.signature $(BUILD)/zgdb-tampered.signed >/dev/null 2>&1; then echo 'tampered ZGDB signature unexpectedly verified' >&2; exit 1; fi
+	@touch $@
+
+$(ZGDB_FILES): $(BUILD)/zgdb.stamp
+	@test -s $@
+
 $(BUILD)/generated/zenov_config.hpp: kernel/main.zv $(ZENOV_CONFIG_SRC) $(BUILD)/zenov-stage0 | $(BUILD)
 	$(BUILD)/zenov-stage0 kernel/main.zv -o $@
 
@@ -69,7 +94,7 @@ $(BUILD)/interrupts.o: kernel/interrupts.S | $(BUILD)
 $(BUILD)/user-runtime.o: kernel/user.S | $(BUILD)
 	$(AS) --32 $< -o $@
 
-$(BUILD)/kernel.o: kernel/kernel.cpp $(KERNEL_PARTS) $(BUILD)/generated/zenov_config.hpp | $(BUILD)
+$(BUILD)/kernel.o: kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp $(BUILD)/generated/zenov_config.hpp | $(BUILD)
 	$(HOST_CXX) $(KERNEL_FLAGS) -c $< -o $@
 
 $(BUILD)/kernel.elf: $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/kernel.o kernel/linker.ld
@@ -138,23 +163,26 @@ $(BUILD)/ZENOVAPP.ZEX: user/hello_zenov.zv $(BUILD)/zenov-app-compiler
 
 USER_APPS := $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF $(BUILD)/ARGS.ELF $(BUILD)/CONSOLE.ELF $(BUILD)/PROTECT.ELF $(BUILD)/KACCESS.ELF $(BUILD)/ZENOVAPP.ZEX
 
-$(BUILD)/zenov-data.img: $(USER_APPS) $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
-	$(BUILD)/zenovfs-builder $(USER_APPS) $@
+$(BUILD)/zenov-data.img: $(USER_APPS) $(ZGDB_FILES) $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
+	$(BUILD)/zenovfs-builder $(USER_APPS) $(ZGDB_FILES) $@
 	@test "$$(stat -c%s $@)" -eq 16777216
 	@test "$$(od -An -tc -N8 $@ | tr -d ' \n')" = "ZENOVFS1"
 	$(BUILD)/zenovfs-verify $@
 
-$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp
+$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(ZGDB_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp security/zgdb_crypto_material.hpp security/zenovguard-root-public.pem
 	@boot_hash="$$(sha256sum $(BUILD)/BOOT.BIN | cut -d' ' -f1)"; \
 	 kernel_hash="$$(sha256sum $(BUILD)/KERNEL.BIN | cut -d' ' -f1)"; \
 	 image_hash="$$(sha256sum $(BUILD)/zenov-os.img | cut -d' ' -f1)"; \
 	 data_hash="$$(sha256sum $(BUILD)/zenov-data.img | cut -d' ' -f1)"; \
-	 source_hash="$$(cat kernel/main.zv $(ZENOV_CONFIG_SRC) | sha256sum | cut -d' ' -f1)"; \
+	 source_hash="$$(cat kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp | sha256sum | cut -d' ' -f1)"; \
 	 compiler_hash="$$(sha256sum tools/zenov_app_compiler.cpp | cut -d' ' -f1)"; \
 	 zenov_app_hash="$$(sha256sum $(BUILD)/ZENOVAPP.ZEX | cut -d' ' -f1)"; \
+	 zgdb_v1_hash="$$(sha256sum $(BUILD)/zenovguard-v1.zgdb | cut -d' ' -f1)"; \
+	 zgdb_v2_hash="$$(sha256sum $(BUILD)/zenovguard-v2.zgdb | cut -d' ' -f1)"; \
+	 root_hash="$$(sha256sum security/zenovguard-root-public.pem | cut -d' ' -f1)"; \
 	 printf '%s\n' \
 	 '{' \
-	 '  "format": "zenov-os-build-v7",' \
+	 '  "format": "zenov-os-build-v8",' \
 	 '  "product": "ZenovOS",' \
 	 '  "version": "0.1.1",' \
 	 '  "target": "i686-zenov-none",' \
@@ -163,6 +191,12 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  "graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop",' \
 	 '  "input": "PS2 keyboard and 3-byte PS2 mouse packets",' \
 	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
+	 '  "security": "ZenovGuard final-read SHA-256 appraisal / signed ZGDB RSA-2048 policy / rollback state / revocation / quarantine",' \
+	 '  "zgdb_schema": 1,' \
+	 '  "zgdb_compiled_floor": 1,' \
+	 "  \"zgdb_root_public_sha256\": \"$$root_hash\"," \
+	 "  \"zgdb_v1_sha256\": \"$$zgdb_v1_hash\"," \
+	 "  \"zgdb_v2_sha256\": \"$$zgdb_v2_hash\"," \
 	 '  "application_abi": "ZEX1 + ELF32 ring3 / int 0x80 / argv / console input",' \
 	 '  "zenov_app_abi": "0.1.1",' \
 	 '  "zenov_repository_commit": "$(ZENOV_COMPILER_REVISION)",' \
@@ -189,12 +223,13 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	done
 	@! find . -path './build' -prune -o -name '*.py' -print | grep -q .
 	@grep -q 'system_version("0.1.1")' kernel/config/system.zv
-	@grep -q '"format": "zenov-os-build-v7"' $(BUILD)/build-manifest.json
-	@grep -q '"graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop"' $(BUILD)/build-manifest.json
+	@grep -q '"format": "zenov-os-build-v8"' $(BUILD)/build-manifest.json
+	@grep -q '"zgdb_schema": 1' $(BUILD)/build-manifest.json
+	@grep -q '"zgdb_v1_sha256": "$(ZGDB_V1_SHA256)"' $(BUILD)/build-manifest.json
+	@grep -q '"zgdb_v2_sha256": "$(ZGDB_V2_SHA256)"' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_app_abi": "0.1.1"' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_repository_commit": "$(ZENOV_COMPILER_REVISION)"' $(BUILD)/build-manifest.json
-	@grep -q '"zenov_app_contract_sha256": "$(ZENOV_APP_EXPECTED_SHA256)"' $(BUILD)/build-manifest.json
-	@echo 'static checks: OK (0.1.1 graphics, memory, ABI, filesystem and Zenov app contracts)'
+	@echo 'static checks: OK (0.1.1 signed ZGDB, ZenovGuard, graphics, memory, ABI and transactional storage)'
 
 qemu: all $(BUILD)/zenovfs-fault-test
 	@mkdir -p $(BUILD)/qemu
@@ -210,13 +245,14 @@ deterministic: all
 	@diff -u $(BUILD)/build-manifest.json /tmp/zenov-os-deterministic/build-manifest.json
 	@cmp $(BUILD)/zenov-data.img /tmp/zenov-os-deterministic/zenov-data.img
 	@for app in $(USER_APPS); do cmp $$app /tmp/zenov-os-deterministic/$$(basename $$app); done
-	@echo 'deterministic rebuild: OK (system, transactional data volume and seven apps are byte-identical)'
+	@for db in $(ZGDB_FILES); do cmp $$db /tmp/zenov-os-deterministic/$$(basename $$db); done
+	@echo 'deterministic rebuild: OK (system, signed policy, transactional data volume and seven apps are byte-identical)'
 
 inspect: all
 	readelf -h $(BUILD)/kernel.elf
 	readelf -S $(BUILD)/kernel.elf
 	for app in $(BUILD)/*.ELF; do readelf -h $$app; readelf -l $$app; done
-	nm -n $(BUILD)/kernel.elf | head -160
+	nm -n $(BUILD)/kernel.elf | head -180
 
 clean:
 	rm -rf $(BUILD)
