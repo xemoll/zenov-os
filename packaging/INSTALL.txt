@@ -32,9 +32,14 @@ VIRTUALBOX
 4. Attach ZenovOS-0.1.1-data.img as an IDE hard disk.
 5. Put the floppy device first in the boot order and start the VM.
 
+These settings match the BIOS/floppy/IDE interfaces used by the system. The automated
+release acceptance test runs under QEMU; VirtualBox launch is not part of CI.
+
 MEMORY AND SYSTEM DIAGNOSTICS
 -----------------------------
-ZenovOS 0.1.1 enables 4 KiB paging and an E820 physical frame allocator.
+ZenovOS 0.1.1 enables 4 KiB paging, an E820 physical frame allocator and a reusable
+split/coalesce kernel heap. Boot self-tests allocate and release multiple physical
+frames and fragmented heap blocks before storage and userspace are initialized.
 
 pmm      physical frame counts and managed memory
 vm       CR0, CR3 and active kernel/user mappings
@@ -43,7 +48,10 @@ memmap   BIOS E820 regions
 
 PERSISTENT STORAGE
 ------------------
-ZenovFS is mounted at /data. Useful commands:
+ZenovFS1 is mounted at /data. File replacement uses a copy-on-write data slot followed
+by a sector-atomic metadata commit. Mount recovery discards an uncommitted staging
+entry or completes a committed replacement, preserving old-or-new file contents.
+Useful commands:
 
 pwd
 ls
@@ -71,19 +79,38 @@ Included applications:
 
 run HELLO
 run FILEIO.ELF
+run ARGS.ELF alpha beta
+run CONSOLE.ELF
+run PROTECT.ELF
+run KACCESS.ELF
+run ZENOVAPP.ZEX
 
-FILEIO.ELF validates the 0.1.1 file syscall ABI by writing, statting, reading and
-checking /data/apps/userio.txt before returning to the shell.
+FILEIO.ELF validates the file syscall ABI and persistent data. ARGS.ELF validates
+argc/argv, stable error codes and guarded userspace pointers. CONSOLE.ELF validates
+bounded console input. PROTECT.ELF and KACCESS.ELF deliberately fault to prove that
+RX code pages and supervisor state remain protected and that control returns to the
+shell. ZENOVAPP.ZEX is compiled from the documented Zenov freestanding subset.
 
 ZEX/ELF support does not provide Windows PE or DOS MZ compatibility. Arbitrary
-Windows or DOS .exe files are not supported.
+Windows or DOS .exe files are not supported. Dynamic ELF linking is not supported.
 
-VERIFY THE DOWNLOAD
--------------------
-Linux/macOS:
+VERIFY THE DOWNLOAD AND PROVENANCE
+----------------------------------
+Outside the ZIP, SHA256SUMS.txt verifies the boot image, ZIP, build manifest and source
+revision file:
+
 sha256sum -c SHA256SUMS.txt
 
-The ZIP also includes IMAGE-SHA256SUMS.txt for the extracted boot and data images.
+Inside the ZIP:
+
+- IMAGE-SHA256SUMS.txt verifies both images, BUILD-MANIFEST.json and SOURCE-REVISION.txt.
+- BUILD-MANIFEST.json records image hashes, the Zenov app ABI, canonical app hash,
+  the merged Zenov compiler repository revision and the OS-side compiler source hash.
+- SOURCE-REVISION.txt records the exact ZenovOS commit used to create the package.
+
+Run this after extraction:
+
+sha256sum -c IMAGE-SHA256SUMS.txt
 
 SYSTEM CONTROLS
 ---------------
