@@ -11,9 +11,13 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/core.inc"
 #include "parts/hardware.inc"
 #include "parts/memory.inc"
+#include "parts/user_window.inc"
 #include "parts/storage.inc"
 #include "parts/storage_tools.inc"
+#define run run_unchecked
 #include "parts/process.inc"
+#undef run
+#include "parts/process_policy.inc"
 #include "parts/input_v2.inc"
 #define history shell_history
 #define history_count shell_history_count
@@ -34,6 +38,10 @@ extern "C" void kernel_main() {
     idt_init();
     pmm::init();
     paging::init();
+    if (!paging::scrub_process_window(true)) panic("User process window scrub self-test failed.");
+    serial::line("USER_WINDOW_SCRUB_OK");
+    if (!process::elf_policy_self_test()) panic("ELF W^X policy self-test failed.");
+    serial::line("ELF_WX_POLICY_OK");
     storage::init();
     process::init();
     pic_remap();
