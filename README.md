@@ -6,7 +6,7 @@ The current engineering focus is a small, auditable security foundation rather t
 
 ![ZenovOS 0.1.1 graphical desktop](./docs/screenshots/zenov-os-0.1.1-graphical-desktop.png)
 
-The screenshot is the actual 800×600 QEMU framebuffer captured by CI. The workflow also preserves the original PPM framebuffer, serial logs, kernel image, data image, signed policy fixtures, persistent-audit evidence and deterministic release package.
+The screenshot is the actual 800×600 QEMU framebuffer captured by CI. The workflow also preserves the original PPM framebuffer, serial logs, kernel image, data image, signed policy fixtures, audit crash images, persistent-audit evidence and deterministic release package.
 
 ## Verified 0.1.1 scope
 
@@ -24,6 +24,8 @@ Executable regression coverage includes:
 - deterministic Zenov source to ZEX1 compilation and ring-3 execution;
 - ZenovGuard integrity appraisal, detection and quarantine;
 - ZGAL1 persistent SHA-256 audit chaining, boot replay and fail-closed append;
+- 1,662-case audit COW fault matrix covering ordered crashes, torn sectors, garbage, dropped/duplicated/reordered writes and ring rotation;
+- kernel boot verification of old-state recovery, new-state recovery and invalid-journal fail-closed behavior;
 - rotated-root ZGDB2 RSA-PSS validation, key-ID enforcement, tamper rejection, sequential update, rollback rejection and revocation;
 - deterministic rebuilds and release-package provenance.
 
@@ -83,6 +85,10 @@ Signed policy updates are verified twice before activation, must be exactly vers
 
 Every BOOT, SCAN, EXEC and QUARANTINE event replaces the complete 8,288-byte journal through the same copy-on-write mechanism. If an audit append fails, ZenovGuard restores the prior in-memory state, marks the journal unavailable and locks subsequent application execution.
 
+The audit transaction is now exercised against two exact transitions: empty journal to one record and full 64-record ring rotation. Across 1,662 deterministic fault cases, the only accepted outcomes are the exact previous journal, the exact new journal or explicit fail-closed rejection. A synthetic journal must also pass a SHA-256 known-answer test and a fixed ZGAL1 record-hash vector before crash images are generated.
+
+Three complete data images are booted by QEMU: a pre-commit interruption that recovers the old journal, a post-commit interruption that recovers the new journal, and a committed replacement with one missing payload sector that must panic before `ZENOVOS_UI_READY`.
+
 The trusted applications, active policy, policy version and audit journal are protected from ordinary shell and userspace write, remove, rename and copy-over operations.
 
 Quarantine uses an atomic ZenovFS metadata rename into:
@@ -96,10 +102,14 @@ Policy version 3 contains the SHA-256 of the official harmless EICAR anti-malwar
 Important security markers include:
 
 ```text
+ZENOV_AUDIT_COW_FAULT_MATRIX_OK
+ZENOV_AUDIT_COW_FAULT_INJECTION_OK total_cases=1662
+ZENOV_AUDIT_COW_OLD_OR_NEW_OR_FAIL_CLOSED_ONLY
 ZENOV_GUARD_AUDIT_SELFTEST_OK
 ZENOV_GUARD_AUDIT_REPLAY_OK
 ZENOV_GUARD_AUDIT_READY
 ZENOV_GUARD_AUDIT_VERIFY_OK
+ZENOV_GUARD_AUDIT_INVALID
 ZENOV_GUARD_SELFTEST_OK
 ZENOV_GUARD_TRUST_BASELINE_OK
 ZENOV_GUARD_READY
@@ -193,19 +203,20 @@ The primary workflow performs:
 
 1. strict host and freestanding compilation with warnings as errors;
 2. FAT12, ZenovFS1, ZEX1 and ELF structural checks;
-3. SHA-256 known-answer, trust-baseline, execution-policy and audit-chain self-tests;
+3. SHA-256 known-answer, fixed-record-vector, trust-baseline, execution-policy and audit-chain self-tests;
 4. deterministic ZGDB2 construction and pinned version-3/version-4 artifact hashes;
 5. OpenSSL RSA-PSS verification of both positive fixtures with salt length 32;
 6. independent rejection of tampered and unknown-key policy fixtures;
 7. validation of the canonical empty ZGAL1 factory journal;
-8. exhaustive host ZenovFS1 crash-boundary injection;
-9. three QEMU phases covering audit replay, policy update, revocation, applications, persistence and interrupted recovery;
-10. independent host verification of the non-empty runtime ZGAL1 chain;
-11. generation of a payload-tampered image with a recomputed ZenovFS checksum and mandatory audit-chain rejection;
-12. framebuffer screenshot capture;
-13. deterministic system rebuilding, including policy fixtures and the empty journal seed;
-14. deterministic release ZIP generation and byte comparison;
-15. evidence upload with runtime/tampered images, binaries, signed policy, public root, manifest and serial logs.
+8. 1,662-case audit COW fault matrix over ordered crashes, torn/garbage/dropped/duplicated/reordered writes and metadata permutations;
+9. existing exhaustive general ZenovFS1 crash-boundary injection;
+10. six QEMU phases covering normal runtime, reboot persistence, general recovery, audit old-state recovery, audit new-state recovery and audit fail-closed boot;
+11. independent host verification of the non-empty runtime ZGAL1 chain;
+12. generation of a payload-tampered image with a recomputed ZenovFS checksum and mandatory audit-chain rejection;
+13. framebuffer screenshot capture;
+14. deterministic system rebuilding, including policy fixtures and the empty journal seed;
+15. deterministic release ZIP generation and byte comparison;
+16. evidence upload with runtime, recovery, corrupt and tampered images, binaries, signed policy, public root, manifest and all serial/monitor logs.
 
 ## Build
 
@@ -237,6 +248,8 @@ The compiled policy floor is `3`. Normal operation and reboots on the same data 
 
 ZGAL1 detects corruption and modification, deletion, insertion, reordering or sequence discontinuity within the retained window unless the attacker constructs and substitutes an entirely new internally consistent journal. Because the chain has no key or external witness, a complete offline data-image rewrite can recompute it. The ring retains 64 records; long-term archival requires an external collector.
 
+The audit fault matrix models ZenovFS sector and metadata writes deterministically. It does not prove physical-device behavior under undocumented volatile caches, firmware defects, controller remapping or a drive that reports flush completion dishonestly.
+
 The private key used to produce the checked-in v3/v4 fixtures is not committed. The fixtures are cryptographically verifiable, but future public policy issuance requires a separately provisioned offline root and key-custody procedure.
 
 ZenovOS remains a single-foreground-process i686/BIOS system. It does not yet provide concurrent user processes, per-process page directories, a user-space compositor, SMP, networking, USB, AHCI/NVMe, dynamic linking or ZenovFS2 variable extents.
@@ -245,7 +258,7 @@ These limitations are documented to avoid overstating the protection level. The 
 
 ## Release assets
 
-The existing `v0.1.1` release assets remain the previous installable baseline until rebuilt and republished from the exact final persistent-audit `main` commit.
+The existing `v0.1.1` release assets remain the previous installable baseline until rebuilt and republished from the exact final audit-fault-tested `main` commit.
 
 [Open the ZenovOS 0.1.1 release](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1)
 
