@@ -57,7 +57,8 @@ int main(int argc, char** argv) {
         const auto v1_records = base_records(); auto v2_records = v1_records;
         v2_records.push_back(record(kRevoked, "Revoked.ZenovApp.V2", digest({0x9e,0x17,0x33,0xaf,0x56,0xa5,0x3a,0xe3,0x10,0x55,0xb4,0x48,0xf7,0x62,0x81,0x5b,0xa7,0xa5,0xe1,0xa7,0x2b,0xe5,0x43,0xae,0xf3,0x25,0xbd,0x4e,0xa3,0x6e,0x0a,0xd5})));
         auto v1 = build(kZgdbHeaderV1, kZgdbSignatureV1, v1_records); auto v2 = build(kZgdbHeaderV2, kZgdbSignatureV2, v2_records); auto tampered = v2;
-        if (tampered.size() <= 80) throw std::runtime_error("tamper offset outside database"); tampered[80] ^= 0x01U;
+        if (tampered.size() <= 80) throw std::runtime_error("tamper offset outside database");
+        tampered[80] ^= 0x01U;
         write_file(argv[1], v1); write_file(argv[2], v2); write_file(argv[3], tampered);
         std::cout << "zgdb-builder: OK v1=" << v1.size() << " v2=" << v2.size() << " tampered=" << tampered.size() << "\n";
         return 0;
