@@ -59,11 +59,11 @@ qmp_connect() {
 }
 qmp_mouse_move() {
   local dx="$1" dy="$2"
-  qmp_call "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"rel\",\"data\":{\"axis\":\"x\",\"value\":$dx}},{\"type\":\"rel\",\"data\":{\"axis\":\"y\",\"value\":$dy}}]}}"
+  qmp_call "{\"execute\":\"input-send-event\",\"arguments\":{\"device\":\"video0\",\"events\":[{\"type\":\"rel\",\"data\":{\"axis\":\"x\",\"value\":$dx}},{\"type\":\"rel\",\"data\":{\"axis\":\"y\",\"value\":$dy}}]}}"
 }
 qmp_mouse_button() {
   local down="$1"
-  qmp_call "{\"execute\":\"input-send-event\",\"arguments\":{\"events\":[{\"type\":\"btn\",\"data\":{\"down\":$down,\"button\":\"left\"}}]}}"
+  qmp_call "{\"execute\":\"input-send-event\",\"arguments\":{\"device\":\"video0\",\"events\":[{\"type\":\"btn\",\"data\":{\"down\":$down,\"button\":\"left\"}}]}}"
 }
 send_text() {
   local text="$1" char lower
@@ -179,7 +179,8 @@ run_phase() {
   "$controller" "$serial" "$qmp_port" | timeout 55s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
     -drive "file=$data_image,format=raw,if=ide,index=0,media=disk" \
-    -boot a -m 32M -machine pc,vmport=off -vga std -display none -serial "file:$serial" -monitor stdio \
+    -boot a -m 32M -machine pc,vmport=off -vga none -device VGA,id=video0 \
+    -display vnc=127.0.0.1:99 -serial "file:$serial" -monitor stdio \
     -qmp "tcp:127.0.0.1:$qmp_port,server=on,wait=off" -no-reboot -no-shutdown \
     >"$monitor" 2>"$stderr"
   local status=$?; set -e
