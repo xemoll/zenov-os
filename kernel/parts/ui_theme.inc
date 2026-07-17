@@ -134,56 +134,44 @@ void persist_runtime_theme(uint8_t id) {
 
 void draw_wallpaper() {
     vertical_gradient(0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height), current_theme.canvas_top, current_theme.canvas_bottom);
-    fill_circle_alpha(126, 104, 190, current_theme.glow_primary, 29);
-    fill_circle_alpha(685, 430, 225, current_theme.glow_secondary, 24);
-    fill_circle_alpha(610, 74, 110, current_theme.accent, 17);
-    for (uint32_t i = 0; i < 38U; ++i) {
-        const int32_t x = static_cast<int32_t>((i * 149U + 37U) % width);
-        const int32_t y = static_cast<int32_t>((i * 83U + 61U) % height);
-        fill_rect_alpha(x, y, i % 5U == 0U ? 2 : 1, i % 5U == 0U ? 2 : 1, current_theme.text, static_cast<uint8_t>(18U + (i % 3U) * 8U));
+    fill_circle_alpha(84, 82, 176, current_theme.glow_primary, 18);
+    fill_circle_alpha(730, 528, 220, current_theme.glow_secondary, 14);
+}
+
+void draw_workspace_switcher() {
+    const int32_t group_x = 346, group_y = topbar_y + 6, item_width = 36;
+    fill_round_rect(group_x, group_y, item_width * 3, 24, 12, current_theme.surface_high);
+    for (uint32_t i = 0; i < 3U; ++i) {
+        const int32_t x = group_x + static_cast<int32_t>(i * item_width);
+        if (i == 0U) fill_round_rect(x + 2, group_y + 2, item_width - 4, 20, 10, current_theme.accent);
+        const char label[2] = {static_cast<char>('1' + i), 0};
+        draw_text_center(x + item_width / 2, group_y + 9, label, i == 0U ? rgb(255,255,255) : current_theme.text_muted, 1);
     }
 }
 
-void draw_pill(int32_t x, int32_t y, int32_t pill_width, const char* label, bool selected) {
-    const uint32_t fill = selected ? current_theme.accent : current_theme.surface_high;
-    fill_round_rect(x, y, pill_width, 26, 13, fill);
-    draw_text(x + 12, y + 9, label, selected ? rgb(255,255,255) : current_theme.text_muted, 1);
-}
-
 void draw_topbar() {
-    fill_round_rect_alpha(16, 12, 768, 42, 18, current_theme.surface_low, desktop_opacity);
-    draw_text(34, 27, "ZENOVOS", current_theme.text, 1);
-    fill_round_rect(94, 24, 5, 5, 3, current_theme.success);
-    draw_text(108, 27, "LOCAL", current_theme.text_muted, 1);
-    draw_pill(310, 20, 52, "01", true);
-    draw_pill(368, 20, 52, "02", false);
-    draw_pill(426, 20, 52, "03", false);
-    fill_round_rect(632, 20, 68, 26, 13, current_theme.surface_high);
-    draw_text(644, 29, "UP", current_theme.text_muted, 1);
-    draw_uint(664, 29, timer_ticks / 100U, current_theme.text);
-    fill_round_rect(710, 20, 56, 26, 13, current_theme.accent_soft);
-    fill_circle_alpha(727, 33, 4, current_theme.success, 255);
-    draw_text(738, 29, "OK", current_theme.text, 1);
+    fill_round_rect_alpha(topbar_x, topbar_y, topbar_width, topbar_height, 14, current_theme.surface_low, desktop_opacity);
+    draw_text(topbar_x + 16, topbar_y + 14, "ZENOVOS", current_theme.text, 1);
+    fill_circle_alpha(topbar_x + 78, topbar_y + 18, 3, current_theme.success, 255);
+    draw_text(topbar_x + 90, topbar_y + 14, "LOCAL", current_theme.text_muted, 1);
+    draw_workspace_switcher();
+    fill_circle_alpha(topbar_x + topbar_width - 24, topbar_y + 18, 3, current_theme.success, 255);
+    draw_text_right(topbar_x + topbar_width - 36, topbar_y + 14, "ONLINE", current_theme.text_muted, 1);
 }
 
-void draw_dock_icon(int32_t x, char letter, const char* tooltip, bool selected, uint32_t accent) {
-    if (selected) fill_round_rect_alpha(x - 5, 541, 52, 48, 17, current_theme.accent, 48);
-    fill_round_rect(x, 546, 38, 38, 12, selected ? accent : current_theme.surface_high);
-    draw_char(x + 14, 557, letter, current_theme.text, 2);
-    if (selected) fill_round_rect(x + 13, 590, 12, 3, 2, current_theme.accent);
-    (void)tooltip;
+void draw_dock_icon(int32_t x, char letter, bool selected, uint32_t accent) {
+    const uint32_t fill = selected ? accent : current_theme.surface_high;
+    fill_round_rect(x, dock_y + 6, 40, 40, 11, fill);
+    draw_char(x + 15, dock_y + 18, letter, current_theme.text, 2);
+    if (selected) fill_round_rect(x + 14, dock_y + dock_height - 3, 12, 2, 1, current_theme.accent);
 }
 
 void draw_dock() {
-    fill_round_rect_alpha(222, 535, 356, 61, 22, current_theme.surface_low, desktop_opacity);
-    draw_dock_icon(243, 'T', "TERMINAL", active_view == View::terminal, current_theme.accent);
-    draw_dock_icon(303, 'F', "FILES", active_view == View::files, rgb(74,156,231));
-    draw_dock_icon(363, 'S', "SETTINGS", active_view == View::settings, rgb(102,202,161));
-    draw_dock_icon(423, 'A', "APPS", active_view == View::launcher, rgb(238,163,82));
-    fill_rect_alpha(478, 548, 1, 34, current_theme.border, 180);
-    fill_round_rect(495, 546, 62, 38, 12, current_theme.surface_high);
-    fill_circle_alpha(511, 565, 4, current_theme.success, 255);
-    draw_text(522, 561, "READY", current_theme.text_muted, 1);
+    fill_round_rect_alpha(dock_x, dock_y, dock_width, dock_height, 17, current_theme.surface_low, desktop_opacity);
+    draw_dock_icon(dock_x + 12, 'T', active_view == View::terminal, current_theme.accent);
+    draw_dock_icon(dock_x + 68, 'F', active_view == View::files, rgb(74,156,231));
+    draw_dock_icon(dock_x + 124, 'S', active_view == View::settings, rgb(102,202,161));
+    draw_dock_icon(dock_x + 180, 'A', active_view == View::launcher, rgb(238,163,82));
 }
 
 void draw_window_chrome(const char* title, const char* subtitle) {
@@ -191,13 +179,12 @@ void draw_window_chrome(const char* title, const char* subtitle) {
     draw_shadow(window_x, window_y, window_width, window_height, radius);
     fill_round_rect(window_x, window_y, window_width, window_height, radius, current_theme.surface);
     draw_round_border(window_x, window_y, window_width, window_height, radius, current_theme.border);
-    fill_round_rect(window_x + 1, window_y + 1, window_width - 2, titlebar_height + 8, radius > 1 ? radius - 1 : 0, current_theme.surface_high);
-    fill_rect(window_x + 1, window_y + titlebar_height, window_width - 2, 9, current_theme.surface_high);
-    fill_circle_alpha(window_x + 22, window_y + 21, 5, current_theme.danger, 255);
-    fill_circle_alpha(window_x + 40, window_y + 21, 5, current_theme.warning, 255);
-    fill_circle_alpha(window_x + 58, window_y + 21, 5, current_theme.success, 255);
-    draw_text(window_x + 82, window_y + 14, title, current_theme.text, 1);
-    draw_text(window_x + 82, window_y + 27, subtitle, current_theme.text_muted, 1);
+    fill_round_rect(window_x + 1, window_y + 1, window_width - 2, titlebar_height + 7, radius > 1 ? radius - 1 : 0, current_theme.surface_high);
+    fill_rect(window_x + 1, window_y + titlebar_height, window_width - 2, 8, current_theme.surface_high);
+    fill_round_rect(window_x + 16, window_y + 12, 3, 16, 2, current_theme.accent);
+    draw_text(window_x + 30, window_y + 17, title, current_theme.text, 1);
+    draw_text_right(window_x + window_width - 20, window_y + 17, subtitle, current_theme.text_muted, 1);
+    fill_rect(window_x + 16, window_y + titlebar_height, window_width - 32, 1, current_theme.border);
 }
 
 constexpr uint32_t vga_colors[16] = {
@@ -206,4 +193,3 @@ constexpr uint32_t vga_colors[16] = {
     rgb(93,101,120), rgb(111,143,232), rgb(113,217,168), rgb(102,203,220),
     rgb(239,125,146), rgb(202,151,238), rgb(242,198,109), rgb(244,246,255)
 };
-
