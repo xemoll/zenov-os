@@ -92,11 +92,14 @@ bool record_name_valid(const Record& record) {
     for (uint32_t i = record.name_length + 1U; i < sizeof(record.name); ++i) if (record.name[i] != 0) return false;
     return record.type >= record_trusted && record.type <= record_revoked && record.flags == 0;
 }
-bool compiled_trust_match(const Record& record) {
-    if (record.type != record_trusted) return true;
-    for (const auto& trusted : security_guard::trusted_executables)
-        if (string_equal(record.name, trusted.path) && security_guard::digest_equal(record.digest, trusted.digest)) return true;
-    return false;
+int32_t compiled_trust_index(const Record& record) {
+    if (record.type != record_trusted) return -1;
+    const uint32_t count = sizeof(security_guard::trusted_executables) / sizeof(security_guard::trusted_executables[0]);
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto& trusted = security_guard::trusted_executables[i];
+        if (string_equal(record.name, trusted.path) && security_guard::digest_equal(record.digest, trusted.digest)) return static_cast<int32_t>(i);
+    }
+    return -1;
 }
 
 Validation validate(const uint8_t* data, uint32_t size, uint32_t minimum_version, Record output[max_records], uint32_t& output_count, uint32_t& version) {
@@ -113,13 +116,18 @@ Validation validate(const uint8_t* data, uint32_t size, uint32_t minimum_version
     if (!rsa_verify(data + size - signature_bytes, digest)) return Validation::signature;
     if (header->policy_version < minimum_version) return Validation::rollback;
     const auto* records = reinterpret_cast<const Record*>(data + sizeof(Header));
-    uint32_t trusted_count = 0;
+    constexpr uint32_t trusted_total = sizeof(security_guard::trusted_executables) / sizeof(security_guard::trusted_executables[0]);
+    bool trusted_seen[trusted_total]{};
     for (uint32_t i = 0; i < header->record_count; ++i) {
-        if (!record_name_valid(records[i]) || !compiled_trust_match(records[i])) return Validation::trust;
-        if (records[i].type == record_trusted) ++trusted_count;
+        if (!record_name_valid(records[i])) return Validation::trust;
+        if (records[i].type == record_trusted) {
+            const int32_t index = compiled_trust_index(records[i]);
+            if (index < 0 || trusted_seen[static_cast<uint32_t>(index)]) return Validation::trust;
+            trusted_seen[static_cast<uint32_t>(index)] = true;
+        }
         output[i] = records[i];
     }
-    if (trusted_count != sizeof(security_guard::trusted_executables) / sizeof(security_guard::trusted_executables[0])) return Validation::trust;
+    for (bool present : trusted_seen) if (!present) return Validation::trust;
     output_count = header->record_count; version = header->policy_version; return Validation::okay;
 }
 
@@ -154,15 +162,33 @@ const Record* matching_record(uint8_t type, const uint8_t digest[32]) {
     for (uint32_t i = 0; i < active_record_count; ++i) if (active_records[i].type == type && security_guard::digest_equal(active_records[i].digest, digest)) return &active_records[i];
     return nullptr;
 }
+void build_result(security_guard::ScanResult& result, const char* path, const uint8_t digest[32], security_guard::Verdict verdict, const char* signature, uint32_t size) {
+    result.verdict = verdict; result.size = size; result.executable = true; memcpy(result.digest, digest, 32);
+    char normalized[48];
+    if (path && storage::normalize_path(path, normalized)) storage::path_copy(result.path, normalized, sizeof(result.path));
+    else storage::path_copy(result.path, path ? path : "<memory>", sizeof(result.path));
+    storage::path_copy(result.signature, signature, sizeof(result.signature));
+}
+bool quarantine_detected(const security_guard::ScanResult& result) {
+    if (!security_guard::ensure_quarantine_directory() || security_guard::starts_with_quarantine(result.path)) return false;
+    char destination[48]; security_guard::build_quarantine_path(result.digest, destination);
+    if (!storage::rename_entry(result.path, destination)) return false;
+    ++security_guard::quarantined; security_guard::record(security_guard::AuditAction::quarantine, result);
+    security_guard::serial_decision("ZENOV_GUARD_QUARANTINE_OK", result); return true;
+}
 
 bool precheck(const char* path, const uint8_t* data, uint32_t size) {
     if (!ready) { serial::line("ZGDB_POLICY_NOT_READY"); return false; }
     uint8_t digest[32]; security_guard::sha256(data, size, digest);
     if (const Record* revoked = matching_record(record_revoked, digest)) {
-        serial::write("ZGDB_REVOCATION_BLOCKED path="); serial::write(path); serial::write(" rule="); serial::line(revoked->name); return false;
+        security_guard::ScanResult result{}; build_result(result, path, digest, security_guard::Verdict::untrusted, revoked->name, size);
+        security_guard::record(security_guard::AuditAction::execute, result);
+        serial::write("ZGDB_REVOCATION_BLOCKED path="); serial::write(result.path); serial::write(" rule="); serial::line(revoked->name); return false;
     }
     if (const Record* threat = matching_record(record_threat, digest)) {
-        serial::write("ZENOV_GUARD_DETECTED path="); serial::write(path); serial::write(" signature="); serial::line(threat->name); (void)security_guard::quarantine_path(path); return false;
+        security_guard::ScanResult result{}; build_result(result, path, digest, security_guard::Verdict::infected, threat->name, size);
+        security_guard::record(security_guard::AuditAction::execute, result); security_guard::serial_decision("ZENOV_GUARD_DETECTED", result);
+        (void)quarantine_detected(result); return false;
     }
     return true;
 }
