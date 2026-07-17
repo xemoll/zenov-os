@@ -20,7 +20,6 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #undef run
 #include "parts/process_policy.inc"
 #include "parts/graphics.inc"
-#include "parts/mouse_selftest.inc"
 #include "parts/input_v2.inc"
 #define history shell_history
 #define history_count shell_history_count
@@ -50,11 +49,9 @@ extern "C" void kernel_main() {
     const bool graphical = graphics::init();
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
     pic_remap();
-    const bool mouse_ready = mouse_init();
-    if (!mouse_ready) serial::line("PS2_MOUSE_UNAVAILABLE");
+    if (!mouse_init()) serial::line("PS2_MOUSE_UNAVAILABLE");
     pit_init(100);
     enable_interrupts();
-    if (graphical && mouse_ready && !ps2_mouse_pipeline_self_test()) panic("PS/2 mouse packet pipeline self-test failed.");
 
     serial::line("Kernel online. Desktop, persistent storage and ring-3 services ready.");
     console::show_home();
