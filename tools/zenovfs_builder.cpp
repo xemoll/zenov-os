@@ -20,23 +20,32 @@ struct Entry { std::uint8_t used, type; std::uint16_t flags; char path[48]; std:
 static_assert(sizeof(Superblock) == kSectorSize && sizeof(Entry) == 64);
 std::uint32_t fnv1a(const std::uint8_t* data, std::size_t size) { std::uint32_t hash = 2166136261u; for (std::size_t i = 0; i < size; ++i) { hash ^= data[i]; hash *= 16777619u; } return hash; }
 std::vector<std::uint8_t> read_all(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary); if (!input) throw std::runtime_error("cannot open seed file: " + path.string());
-    input.seekg(0, std::ios::end); const std::streamoff size = input.tellg();
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw std::runtime_error("cannot open seed file: " + path.string());
+    input.seekg(0, std::ios::end);
+    const std::streamoff size = input.tellg();
     if (size < 0 || size > static_cast<std::streamoff>(kMaxFileBytes)) throw std::runtime_error("seed file exceeds ZenovFS slot capacity");
-    input.seekg(0, std::ios::beg); std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    input.seekg(0, std::ios::beg);
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
     if (!bytes.empty()) input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
-    if (!input && !bytes.empty()) throw std::runtime_error("cannot read seed file"); return bytes;
+    if (!input && !bytes.empty()) throw std::runtime_error("cannot read seed file");
+    return bytes;
 }
 void set_path(Entry& entry, const std::string& path) {
     if (path.empty() || path.size() >= sizeof(entry.path) || path.front() != '/') throw std::runtime_error("invalid ZenovFS path: " + path);
-    std::memset(entry.path, 0, sizeof(entry.path)); std::memcpy(entry.path, path.data(), path.size());
+    std::memset(entry.path, 0, sizeof(entry.path));
+    std::memcpy(entry.path, path.data(), path.size());
 }
 void add_directory(std::array<Entry, kEntryCount>& entries, std::uint32_t index, const std::string& path) { Entry& entry = entries.at(index); entry.used = 1; entry.type = 2; set_path(entry, path); }
 void add_file(std::vector<std::uint8_t>& disk, std::array<Entry, kEntryCount>& entries, std::uint32_t index, const std::string& path, const std::vector<std::uint8_t>& data) {
-    if (data.size() > kMaxFileBytes) throw std::runtime_error("file too large"); Entry& entry = entries.at(index); entry.used = 1; entry.type = 1; set_path(entry, path);
+    if (data.size() > kMaxFileBytes) throw std::runtime_error("file too large");
+    Entry& entry = entries.at(index);
+    entry.used = 1; entry.type = 1; set_path(entry, path);
     entry.size = static_cast<std::uint32_t>(data.size()); entry.checksum = fnv1a(data.data(), data.size());
-    const std::uint32_t first_sector = kDataStart + index * kSlotSectors; const std::size_t offset = static_cast<std::size_t>(first_sector) * kSectorSize;
-    if (offset + data.size() > disk.size()) throw std::runtime_error("ZenovFS layout exceeds disk size"); std::copy(data.begin(), data.end(), disk.begin() + static_cast<std::ptrdiff_t>(offset));
+    const std::uint32_t first_sector = kDataStart + index * kSlotSectors;
+    const std::size_t offset = static_cast<std::size_t>(first_sector) * kSectorSize;
+    if (offset + data.size() > disk.size()) throw std::runtime_error("ZenovFS layout exceeds disk size");
+    std::copy(data.begin(), data.end(), disk.begin() + static_cast<std::ptrdiff_t>(offset));
 }
 std::vector<std::uint8_t> text_bytes(const std::string& text) { return std::vector<std::uint8_t>(text.begin(), text.end()); }
 }
