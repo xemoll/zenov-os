@@ -61,7 +61,7 @@ jobs:
       - name: Verify deterministic system rebuild
         run: make deterministic
 
-      - name: Inspect kernel, signed policy and runtime evidence
+      - name: Inspect kernel, rotated root and RSA-PSS runtime evidence
         run: |
           readelf -h build/kernel.elf
           for app in build/FILEIO.ELF build/ARGS.ELF build/CONSOLE.ELF build/PROTECT.ELF build/KACCESS.ELF; do
@@ -71,9 +71,7 @@ jobs:
           test "$(stat -c%s build/BOOT.BIN)" -eq 512
           test "$(stat -c%s build/KERNEL.BIN)" -le 524288
           test "$(stat -c%s build/zenov-data.img)" -eq 16777216
-          test -s build/zenovguard-v1.zgdb
-          test -s build/zenovguard-v2.zgdb
-          test -s build/zenovguard-tampered.zgdb
+          for db in build/zenovguard-v3.zgdb build/zenovguard-v4.zgdb build/zenovguard-tampered.zgdb build/zenovguard-wrong-key.zgdb; do test -s "$db"; done
           test -s build/qemu/screenshot.ppm
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
           grep -q PMM_STRESS_OK build/qemu/serial.log
@@ -92,11 +90,13 @@ jobs:
           grep -q ZENOV_GUARD_SELFTEST_OK build/qemu/serial.log
           grep -q ZENOV_GUARD_TRUST_BASELINE_OK build/qemu/serial.log
           grep -q ZENOV_GUARD_PROTECTED_PATH_TEST_OK build/qemu/serial.log
-          grep -q ZGDB_SIGNATURE_OK build/qemu/serial.log
-          grep -q 'ZGDB_POLICY_VERSION_OK version=1' build/qemu/serial.log
-          grep -q 'ZGDB_POLICY_VERSION_OK version=2' build/qemu/serial.log
+          grep -q 'ZGDB_ROOT_KEY_OK id=6f788074c018f5aa' build/qemu/serial.log
+          test "$(grep -c ZGDB_PSS_SIGNATURE_OK build/qemu/serial.log)" -ge 3
+          grep -q 'ZGDB_POLICY_VERSION_OK version=3' build/qemu/serial.log
+          grep -q 'ZGDB_POLICY_VERSION_OK version=4' build/qemu/serial.log
+          grep -q 'ZGDB_KEY_REJECTED reason=unknown-key' build/qemu/serial.log
           grep -q ZGDB_TAMPER_REJECTED build/qemu/serial.log
-          grep -q 'ZGDB_ATOMIC_UPDATE_OK version=2' build/qemu/serial.log
+          grep -q 'ZGDB_ATOMIC_UPDATE_OK version=4' build/qemu/serial.log
           grep -q ZGDB_ROLLBACK_REJECTED build/qemu/serial.log
           test "$(grep -c ZGDB_REVOCATION_BLOCKED build/qemu/serial.log)" -ge 2
           grep -q GRAPHICS_PCI_OK build/qemu/serial.log
@@ -128,14 +128,16 @@ jobs:
           test "$(grep -c PERSISTENCE_0_1_1_OK build/qemu/serial.log)" -ge 2
           test "$(grep -c FILE_SYSCALL_PERSIST_OK build/qemu/serial.log)" -ge 2
           grep -q 'zenov> ' build/qemu/serial.log
-          grep -q '"format": "zenov-os-build-v8"' build/build-manifest.json
-          grep -q '"zgdb_schema": 1' build/build-manifest.json
-          grep -q '"zgdb_v1_sha256": "d2de9d9b05bcc61de82ab2b36149241ebb667782bcf3916dfc1d0b4fbcba360d"' build/build-manifest.json
-          grep -q '"zgdb_v2_sha256": "033307173932c452384033db5ca36ced4cc8cacf0efa5b328044f8c7772d8c6e"' build/build-manifest.json
+          grep -q '"format": "zenov-os-build-v9"' build/build-manifest.json
+          grep -q '"zgdb_schema": 2' build/build-manifest.json
+          grep -q '"zgdb_compiled_floor": 3' build/build-manifest.json
+          grep -q '"zgdb_root_key_id": "6f788074c018f5aa"' build/build-manifest.json
+          grep -q '"zgdb_v3_sha256": "170633b6caf2348e3790cbada7ec5114b03fd73243d8fe572c9e46c237563030"' build/build-manifest.json
+          grep -q '"zgdb_v4_sha256": "8445c9d9a48e6572a3d5eb1a7f45f484a7ae8e8fdfe1cce0cc0461a25aabcca6"' build/build-manifest.json
           grep -q '"zenov_app_contract_sha256": "9e1733af56a53ae31055b448f762815ba7a5e1a72be543aef325bd4ea36e0ad5"' build/build-manifest.json
           grep -qx "ZenovOS source commit: $ZENOV_SOURCE_REVISION" dist/SOURCE-REVISION.txt
 
-      - name: Upload verified 0.1.1 signed-policy evidence
+      - name: Upload verified 0.1.1 RSA-PSS policy evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -155,9 +157,10 @@ jobs:
             build/CONSOLE.ELF
             build/PROTECT.ELF
             build/KACCESS.ELF
-            build/zenovguard-v1.zgdb
-            build/zenovguard-v2.zgdb
+            build/zenovguard-v3.zgdb
+            build/zenovguard-v4.zgdb
             build/zenovguard-tampered.zgdb
+            build/zenovguard-wrong-key.zgdb
             build/build-manifest.json
             build/qemu/serial.log
             build/qemu/serial-phase1.log
