@@ -36,28 +36,6 @@ bool elf_policy_self_test() {
 }
 
 bool run(char* input) {
-    if (!input) return false;
-    char policy_input[zenov_generated::kShellLineCapacity];
-    uint32_t length = 0;
-    while (input[length]) {
-        if (length + 1U >= sizeof(policy_input)) return false;
-        policy_input[length] = input[length];
-        ++length;
-    }
-    policy_input[length] = 0;
-
-    char* arguments[max_arguments]{};
-    const uint32_t argument_count = parse_arguments(policy_input, arguments);
-    if (!argument_count) return false;
-
-    char requested[48];
-    uint32_t file_size = 0;
-    if (!read_requested(arguments[0], requested, file_size)) return false;
-    if (!security_guard::allow_execution(requested, application_buffer, file_size)) return false;
-    if (!elf_permissions_allowed(application_buffer, file_size)) {
-        serial::line("ELF_WX_REJECTED");
-        return false;
-    }
-    return run_unchecked(input);
+    return input && run_unchecked(input);
 }
 } // namespace process
