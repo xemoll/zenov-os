@@ -11,6 +11,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/core.inc"
 #include "parts/hardware.inc"
 #include "parts/memory.inc"
+#include "parts/user_window.inc"
 #include "parts/storage.inc"
 #include "parts/storage_tools.inc"
 #include "parts/process.inc"
@@ -34,6 +35,8 @@ extern "C" void kernel_main() {
     idt_init();
     pmm::init();
     paging::init();
+    if (!paging::scrub_process_window(true)) panic("User process window scrub self-test failed.");
+    serial::line("USER_WINDOW_SCRUB_OK");
     storage::init();
     process::init();
     pic_remap();
