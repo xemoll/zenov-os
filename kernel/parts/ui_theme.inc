@@ -1,3 +1,27 @@
+enum class HoverTarget : uint8_t {
+    none,
+    workspace_one, workspace_two, workspace_three,
+    dock_terminal, dock_files, dock_settings, dock_launcher,
+    theme_midnight, theme_graphite, theme_amber,
+    launcher_terminal, launcher_files, launcher_settings
+};
+
+HoverTarget hovered_target = HoverTarget::none;
+uint8_t launcher_focus = 0;
+uint8_t settings_focus = 0;
+constexpr int32_t workspace_item_width = 32;
+constexpr int32_t workspace_group_width = workspace_item_width * 3;
+constexpr int32_t workspace_group_x = static_cast<int32_t>(width / 2U) - workspace_group_width / 2;
+constexpr int32_t workspace_group_y = topbar_y + 6;
+constexpr int32_t workspace_group_height = 24;
+
+bool is_hovered(HoverTarget target) { return hovered_target == target; }
+uint8_t workspace_for_view(View view) {
+    if (view == View::terminal) return 0;
+    if (view == View::files) return 1;
+    return 2;
+}
+
 bool text_contains(const char* text, uint32_t size, const char* needle) {
     const uint32_t needle_size = static_cast<uint32_t>(string_length(needle));
     if (!needle_size || size < needle_size) return false;
@@ -138,16 +162,16 @@ void draw_wallpaper() {
 }
 
 void draw_workspace_switcher() {
-    const int32_t item_width = 32;
-    const int32_t group_width = item_width * 3;
-    const int32_t group_x = static_cast<int32_t>(width / 2U) - group_width / 2;
-    const int32_t group_y = topbar_y + 6;
-    fill_round_rect(group_x, group_y, group_width, 24, 12, current_theme.surface_high);
+    const HoverTarget targets[3] = {HoverTarget::workspace_one, HoverTarget::workspace_two, HoverTarget::workspace_three};
+    const uint8_t active_workspace = workspace_for_view(active_view);
+    fill_round_rect(workspace_group_x, workspace_group_y, workspace_group_width, workspace_group_height, 12, current_theme.surface_high);
     for (uint32_t i = 0; i < 3U; ++i) {
-        const int32_t x = group_x + static_cast<int32_t>(i * item_width);
-        if (i == 0U) fill_round_rect(x + 2, group_y + 2, item_width - 4, 20, 10, current_theme.accent);
+        const int32_t x = workspace_group_x + static_cast<int32_t>(i * workspace_item_width);
+        if (i == active_workspace) fill_round_rect(x + 2, workspace_group_y + 2, workspace_item_width - 4, 20, 10, current_theme.accent);
+        else if (is_hovered(targets[i])) fill_round_rect(x + 2, workspace_group_y + 2, workspace_item_width - 4, 20, 10, current_theme.accent_soft);
         const char label[2] = {static_cast<char>('1' + i), 0};
-        draw_text_center(x + item_width / 2, group_y + 9, label, i == 0U ? rgb(255,255,255) : current_theme.text_muted, 1);
+        draw_text_center(x + workspace_item_width / 2, workspace_group_y + 9, label,
+                         i == active_workspace ? rgb(255,255,255) : current_theme.text_muted, 1);
     }
 }
 
@@ -189,8 +213,10 @@ void draw_shell_icon(ShellIcon icon, int32_t x, int32_t y, uint32_t color) {
     fill_round_rect(x + 13, y + 13, 8, 8, 2, color);
 }
 
-void draw_dock_icon(int32_t x, ShellIcon icon, bool selected, uint32_t accent) {
-    const uint32_t fill = selected ? accent : current_theme.surface_high;
+void draw_dock_icon(int32_t x, ShellIcon icon, bool selected, uint32_t accent, HoverTarget target) {
+    uint32_t fill = current_theme.surface_high;
+    if (selected) fill = accent;
+    else if (is_hovered(target)) fill = mix(current_theme.surface_high, accent, 1U, 4U);
     const uint32_t icon_color = selected ? rgb(255,255,255) : current_theme.text_muted;
     fill_round_rect(x, dock_y + 6, 40, 40, 11, fill);
     draw_shell_icon(icon, x + 9, dock_y + 15, icon_color);
@@ -199,10 +225,10 @@ void draw_dock_icon(int32_t x, ShellIcon icon, bool selected, uint32_t accent) {
 
 void draw_dock() {
     fill_round_rect_alpha(dock_x, dock_y, dock_width, dock_height, 17, current_theme.surface_low, desktop_opacity);
-    draw_dock_icon(dock_x + 12, ShellIcon::terminal, active_view == View::terminal, current_theme.accent);
-    draw_dock_icon(dock_x + 68, ShellIcon::files, active_view == View::files, rgb(74,156,231));
-    draw_dock_icon(dock_x + 124, ShellIcon::settings, active_view == View::settings, rgb(102,202,161));
-    draw_dock_icon(dock_x + 180, ShellIcon::apps, active_view == View::launcher, rgb(238,163,82));
+    draw_dock_icon(dock_x + 12, ShellIcon::terminal, active_view == View::terminal, current_theme.accent, HoverTarget::dock_terminal);
+    draw_dock_icon(dock_x + 68, ShellIcon::files, active_view == View::files, rgb(74,156,231), HoverTarget::dock_files);
+    draw_dock_icon(dock_x + 124, ShellIcon::settings, active_view == View::settings, rgb(102,202,161), HoverTarget::dock_settings);
+    draw_dock_icon(dock_x + 180, ShellIcon::apps, active_view == View::launcher, rgb(238,163,82), HoverTarget::dock_launcher);
 }
 
 void draw_window_chrome(const char* title, const char* subtitle) {
