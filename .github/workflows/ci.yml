@@ -26,7 +26,7 @@ jobs:
           echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
 
       - name: Install native toolchain and QEMU
-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86 zip unzip
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86 zip unzip
 
       - name: Verify no Python source remains
         run: test -z "$(find . -name '*.py' -print)"
@@ -35,7 +35,7 @@ jobs:
         run: |
           while IFS= read -r file; do
             iconv -f UTF-8 -t UTF-8 "$file" >/dev/null
-          done < <(find kernel user tools boot packaging -type f \( -name '*.cpp' -o -name '*.inc' -o -name '*.S' -o -name '*.zv' -o -name '*.ld' -o -name '*.sh' -o -name '*.txt' \) -print)
+          done < <(find kernel user tools boot packaging security -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.inc' -o -name '*.S' -o -name '*.zv' -o -name '*.ld' -o -name '*.sh' -o -name '*.txt' -o -name '*.pem' \) -print)
 
       - name: Run native checks and build
         run: |
@@ -61,7 +61,7 @@ jobs:
       - name: Verify deterministic system rebuild
         run: make deterministic
 
-      - name: Inspect kernel, graphics and runtime evidence
+      - name: Inspect kernel, signed policy and runtime evidence
         run: |
           readelf -h build/kernel.elf
           for app in build/FILEIO.ELF build/ARGS.ELF build/CONSOLE.ELF build/PROTECT.ELF build/KACCESS.ELF; do
@@ -71,6 +71,9 @@ jobs:
           test "$(stat -c%s build/BOOT.BIN)" -eq 512
           test "$(stat -c%s build/KERNEL.BIN)" -le 524288
           test "$(stat -c%s build/zenov-data.img)" -eq 16777216
+          test -s build/zenovguard-v1.zgdb
+          test -s build/zenovguard-v2.zgdb
+          test -s build/zenovguard-tampered.zgdb
           test -s build/qemu/screenshot.ppm
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
           grep -q PMM_STRESS_OK build/qemu/serial.log
@@ -86,6 +89,16 @@ jobs:
           grep -q ELF_WX_POLICY_OK build/qemu/serial.log
           grep -q ZENOVFS_MOUNT_OK build/qemu/serial.log
           grep -q PROCESS_ABI_0_1_1_OK build/qemu/serial.log
+          grep -q ZENOV_GUARD_SELFTEST_OK build/qemu/serial.log
+          grep -q ZENOV_GUARD_TRUST_BASELINE_OK build/qemu/serial.log
+          grep -q ZENOV_GUARD_PROTECTED_PATH_TEST_OK build/qemu/serial.log
+          grep -q ZGDB_SIGNATURE_OK build/qemu/serial.log
+          grep -q 'ZGDB_POLICY_VERSION_OK version=1' build/qemu/serial.log
+          grep -q 'ZGDB_POLICY_VERSION_OK version=2' build/qemu/serial.log
+          grep -q ZGDB_TAMPER_REJECTED build/qemu/serial.log
+          grep -q 'ZGDB_ATOMIC_UPDATE_OK version=2' build/qemu/serial.log
+          grep -q ZGDB_ROLLBACK_REJECTED build/qemu/serial.log
+          test "$(grep -c ZGDB_REVOCATION_BLOCKED build/qemu/serial.log)" -ge 2
           grep -q GRAPHICS_PCI_OK build/qemu/serial.log
           grep -q FRAMEBUFFER_MAPPED_OK build/qemu/serial.log
           grep -q 'GRAPHICS_MODE_OK 800x600x32' build/qemu/serial.log
@@ -115,12 +128,14 @@ jobs:
           test "$(grep -c PERSISTENCE_0_1_1_OK build/qemu/serial.log)" -ge 2
           test "$(grep -c FILE_SYSCALL_PERSIST_OK build/qemu/serial.log)" -ge 2
           grep -q 'zenov> ' build/qemu/serial.log
-          grep -q '"format": "zenov-os-build-v7"' build/build-manifest.json
-          grep -q '"graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop"' build/build-manifest.json
+          grep -q '"format": "zenov-os-build-v8"' build/build-manifest.json
+          grep -q '"zgdb_schema": 1' build/build-manifest.json
+          grep -q '"zgdb_v1_sha256": "d2de9d9b05bcc61de82ab2b36149241ebb667782bcf3916dfc1d0b4fbcba360d"' build/build-manifest.json
+          grep -q '"zgdb_v2_sha256": "033307173932c452384033db5ca36ced4cc8cacf0efa5b328044f8c7772d8c6e"' build/build-manifest.json
           grep -q '"zenov_app_contract_sha256": "9e1733af56a53ae31055b448f762815ba7a5e1a72be543aef325bd4ea36e0ad5"' build/build-manifest.json
           grep -qx "ZenovOS source commit: $ZENOV_SOURCE_REVISION" dist/SOURCE-REVISION.txt
 
-      - name: Upload verified 0.1.1 graphical evidence
+      - name: Upload verified 0.1.1 signed-policy evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -140,6 +155,9 @@ jobs:
             build/CONSOLE.ELF
             build/PROTECT.ELF
             build/KACCESS.ELF
+            build/zenovguard-v1.zgdb
+            build/zenovguard-v2.zgdb
+            build/zenovguard-tampered.zgdb
             build/build-manifest.json
             build/qemu/serial.log
             build/qemu/serial-phase1.log
@@ -147,5 +165,6 @@ jobs:
             build/qemu/serial-recovery.log
             build/qemu/zenov-data-recovery.img
             build/qemu/screenshot.ppm
+            security/zenovguard-root-public.pem
             dist/
             ci-logs/native-build.log
