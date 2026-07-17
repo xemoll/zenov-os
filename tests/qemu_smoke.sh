@@ -64,6 +64,9 @@ wait_for_boot() {
     && wait_for_serial "$serial" "HEAP_STRESS_OK" \
     && wait_for_serial "$serial" "$STORAGE_MARKER" \
     && wait_for_serial "$serial" "$PROCESS_MARKER" \
+    && wait_for_serial "$serial" "ZENOV_GUARD_SELFTEST_OK" \
+    && wait_for_serial "$serial" "ZENOV_GUARD_TRUST_BASELINE_OK" \
+    && wait_for_serial "$serial" "ZENOV_GUARD_READY" \
     && wait_for_serial "$serial" "GRAPHICS_PCI_OK" \
     && wait_for_serial "$serial" "FRAMEBUFFER_MAPPED_OK" \
     && wait_for_serial "$serial" "GRAPHICS_MODE_OK" \
@@ -87,12 +90,22 @@ controller_first() {
   wait_for_boot "$serial" || { echo quit; return 1; }
   sleep 0.3; echo "screendump $SCREENSHOT"; sleep 0.2
 
+  send_command "guard status"; wait_for_serial "$serial" "ZENOV_GUARD_STATUS_OK" || { echo quit; return 1; }
+  send_command "guard selftest"; wait_for_count "$serial" "ZENOV_GUARD_SELFTEST_OK" 2 || { echo quit; return 1; }
+  send_command "write /data/guard-test.bin ZENOV_GUARD_SAFE_TEST_VECTOR_V1"; wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
+  send_command "guard scan /data/guard-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_DETECTED" || { echo quit; return 1; }
+  send_command "guard quarantine /data/guard-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_OK" || { echo quit; return 1; }
+  send_command "cp /data/apps/hello.zex /data/apps/untrusted.zex"; wait_for_serial "$serial" "COPY_OK" || { echo quit; return 1; }
+  send_command "run UNTRUSTED.ZEX"; wait_for_serial "$serial" "ZENOV_GUARD_UNTRUSTED_BLOCKED" || { echo quit; return 1; }
+  send_command "rm /data/apps/untrusted.zex"; wait_for_serial "$serial" "REMOVE_OK" || { echo quit; return 1; }
+  send_command "guard scan all"; wait_for_serial "$serial" "ZENOV_GUARD_FULL_SCAN_OK" || { echo quit; return 1; }
+
   echo "sendkey f1 10"; wait_for_serial "$serial" "COMMAND REFERENCE" || { echo quit; return 1; }; echo "sendkey f4 10"; sleep 0.2
   send_command "vm"; wait_for_serial "$serial" "VIRTUAL MEMORY" || { echo quit; return 1; }
   send_command "fsck"; wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
   local long_payload; long_payload="$(printf 'a%.0s' {1..160})${LONG_INPUT_MARKER}"
   send_command "echo $long_payload"; wait_for_serial "$serial" "$LONG_INPUT_MARKER" || { echo quit; return 1; }
-  send_command "write PERSIST.TXT PERSISTENCE_0_1_1_OK"; wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
+  send_command "write PERSIST.TXT PERSISTENCE_0_1_1_OK"; wait_for_count "$serial" "WRITE_OK" 2 || { echo quit; return 1; }
   send_command "run HELLO"; wait_for_serial "$serial" "HELLO_ZEX_0_1_1_OK" || { echo quit; return 1; }
   send_command "run FILEIO.ELF"; wait_for_serial "$serial" "FILEIO_ELF_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
   send_command "run ARGS.ELF alpha beta"; wait_for_serial "$serial" "PROCESS_ARGV_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "SYSCALL_ERRORS_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "SYSCALL_POINTER_GUARD_OK" || { echo quit; return 1; }
@@ -116,6 +129,7 @@ controller_first() {
 controller_second() {
   local serial="$1"
   wait_for_boot "$serial" || { echo quit; return 1; }
+  send_command "guard scan /data/quarantine/q-3e98e2f48d88.qtn"; wait_for_serial "$serial" "ZENOV_GUARD_DETECTED" || { echo quit; return 1; }
   send_command "cat PERSIST.TXT"; wait_for_serial "$serial" "PERSISTENCE_0_1_1_OK" || { echo quit; return 1; }
   send_command "cat /data/apps/userio.txt"; wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
   send_command "fsck"; wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
@@ -137,7 +151,7 @@ controller_recovery() {
 run_phase() {
   local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5"
   set +e
-  "$controller" "$serial" | timeout 55s "$QEMU" \
+  "$controller" "$serial" | timeout 65s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
     -drive "file=$data_image,format=raw,if=ide,index=0,media=disk" \
     -boot a -m 32M -machine pc,vmport=off -vga std -display none \
@@ -160,7 +174,9 @@ cat "$SERIAL1" "$SERIAL2" "$SERIAL3" > "$OUT/serial.log"
 
 for marker in \
   "$BOOT_MARKER" "$PMM_MARKER" "PMM_STRESS_OK" "$PAGING_MARKER" "HEAP_REUSE_OK" "HEAP_COALESCE_OK" "HEAP_INVALID_FREE_BLOCKED" "HEAP_STRESS_OK" \
-  "$STORAGE_MARKER" "$PROCESS_MARKER" "GRAPHICS_PCI_OK" "FRAMEBUFFER_MAPPED_OK" "GRAPHICS_MODE_OK" "BACKBUFFER_PRESENT_OK" \
+  "$STORAGE_MARKER" "$PROCESS_MARKER" "ZENOV_GUARD_SELFTEST_OK" "ZENOV_GUARD_TRUST_BASELINE_OK" "ZENOV_GUARD_READY" "ZENOV_GUARD_STATUS_OK" \
+  "ZENOV_GUARD_DETECTED" "ZENOV_GUARD_QUARANTINE_OK" "ZENOV_GUARD_UNTRUSTED_BLOCKED" "ZENOV_GUARD_FULL_SCAN_OK" "ZENOV_GUARD_EXEC_ALLOWED" \
+  "GRAPHICS_PCI_OK" "FRAMEBUFFER_MAPPED_OK" "GRAPHICS_MODE_OK" "BACKBUFFER_PRESENT_OK" \
   "CLIPPING_OK" "ALPHA_BLEND_OK" "FONT_RENDER_OK" "DESKTOP_SCENE_OK" "GRAPHICAL_DESKTOP_READY" "PS2_MOUSE_OK" "PS2_MOUSE_IRQ_ROUTE_OK" \
   "MOUSE_PACKET_OK" "WINDOW_DRAG_OK" "PS2_MOUSE_DECODER_OK" "$UI_MARKER" "$LONG_INPUT_MARKER" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" \
   "FILEIO_ELF_OK" "FILE_SYSCALL_PERSIST_OK" "PROCESS_ARGV_OK" "SYSCALL_ERRORS_OK" "SYSCALL_POINTER_GUARD_OK" "CONSOLE_READ_SYSCALL_OK" \
@@ -168,9 +184,10 @@ for marker in \
   "ZENOV_SOURCE_APP_RING3_OK" "ZENOV_COMPILER_ABI_MATCH_OK" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" "recovery=committed" "ZENOVFS_FSCK_OK"; do
   grep -q "$marker" "$OUT/serial.log" || { echo "qemu-smoke: missing marker: $marker" >&2; exit 1; }
 done
+[[ "$(grep -c 'ZENOV_GUARD_EXEC_ALLOWED' "$OUT/serial.log")" -ge 7 ]] || { echo "qemu-smoke: trusted application appraisal count is too low" >&2; exit 1; }
 [[ "$(grep -c 'APP_EXIT code=0' "$OUT/serial.log")" -ge 5 ]] || { echo "qemu-smoke: successful applications did not all exit cleanly" >&2; exit 1; }
-if grep -q "Application could not be loaded" "$OUT/serial.log"; then echo "qemu-smoke: shell reported an application load failure" >&2; exit 1; fi
+[[ "$(grep -c 'Application could not be loaded' "$OUT/serial.log")" -eq 1 ]] || { echo "qemu-smoke: unexpected application load failure count" >&2; exit 1; }
 [[ "$(grep -c 'PERSISTENCE_0_1_1_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: shell persistence marker missing across reboot" >&2; exit 1; }
 [[ "$(grep -c 'FILE_SYSCALL_PERSIST_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: userspace file payload missing across reboot" >&2; exit 1; }
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: graphical framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK 0.1.1 graphical-desktop PS2-route+decoder draggable-window protected-pages stress-tested-memory argv+console guarded-syscalls recoverable-faults transactional-fs kernel-recovery zenov-source-app serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+printf 'qemu-smoke: OK 0.1.1 ZenovGuard SHA256-appraisal detection quarantine audit graphical-desktop PS2-route+decoder protected-pages transactional-fs zenov-source-app serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
