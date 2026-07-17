@@ -53,14 +53,15 @@ void write_file(const std::string& path, const std::vector<std::uint8_t>& bytes)
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 4) { std::cerr << "usage: zgdb-builder <v1.zgdb> <v2.zgdb> <tampered.zgdb>\n"; return 2; }
-        const auto v1_records = base_records(); auto v2_records = v1_records;
-        v2_records.push_back(record(kRevoked, "Revoked.ZenovApp.V2", digest({0x9e,0x17,0x33,0xaf,0x56,0xa5,0x3a,0xe3,0x10,0x55,0xb4,0x48,0xf7,0x62,0x81,0x5b,0xa7,0xa5,0xe1,0xa7,0x2b,0xe5,0x43,0xae,0xf3,0x25,0xbd,0x4e,0xa3,0x6e,0x0a,0xd5})));
-        auto v1 = build(kZgdbHeaderV1, kZgdbSignatureV1, v1_records); auto v2 = build(kZgdbHeaderV2, kZgdbSignatureV2, v2_records); auto tampered = v2;
-        if (tampered.size() <= 80) throw std::runtime_error("tamper offset outside database");
-        tampered[80] ^= 0x01U;
-        write_file(argv[1], v1); write_file(argv[2], v2); write_file(argv[3], tampered);
-        std::cout << "zgdb-builder: OK v1=" << v1.size() << " v2=" << v2.size() << " tampered=" << tampered.size() << "\n";
+        if (argc != 5) { std::cerr << "usage: zgdb-builder <v3.zgdb> <v4.zgdb> <tampered.zgdb> <wrong-key.zgdb>\n"; return 2; }
+        const auto v3_records = base_records(); auto v4_records = v3_records;
+        v4_records.push_back(record(kRevoked, "Revoked.ZenovApp.V4", digest({0x9e,0x17,0x33,0xaf,0x56,0xa5,0x3a,0xe3,0x10,0x55,0xb4,0x48,0xf7,0x62,0x81,0x5b,0xa7,0xa5,0xe1,0xa7,0x2b,0xe5,0x43,0xae,0xf3,0x25,0xbd,0x4e,0xa3,0x6e,0x0a,0xd5})));
+        auto v3 = build(kZgdbHeaderV3, kZgdbSignatureV3, v3_records); auto v4 = build(kZgdbHeaderV4, kZgdbSignatureV4, v4_records);
+        auto tampered = v4, wrong_key = v4;
+        if (tampered.size() <= 80U || wrong_key.size() <= 56U) throw std::runtime_error("fixture offset outside database");
+        tampered[80] ^= 0x01U; wrong_key[56] ^= 0xA5U;
+        write_file(argv[1], v3); write_file(argv[2], v4); write_file(argv[3], tampered); write_file(argv[4], wrong_key);
+        std::cout << "zgdb-builder: OK schema=2 pss v3=" << v3.size() << " v4=" << v4.size() << " negative=2\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << "zgdb-builder: " << error.what() << "\n"; return 1; }
 }
