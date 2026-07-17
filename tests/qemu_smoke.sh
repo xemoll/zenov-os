@@ -20,7 +20,7 @@ SCREENSHOT="$(cd "$OUT" && pwd)/screenshot.ppm"
 
 wait_for_serial() {
   local file="$1" text="$2"
-  for _ in $(seq 1 300); do
+  for _ in $(seq 1 400); do
     [[ -f "$file" ]] && grep -q "$text" "$file" && return 0
     sleep 0.1
   done
@@ -28,7 +28,7 @@ wait_for_serial() {
 }
 wait_for_count() {
   local file="$1" text="$2" expected="$3"
-  for _ in $(seq 1 300); do
+  for _ in $(seq 1 400); do
     [[ -f "$file" ]] && [[ "$(grep -c "$text" "$file" || true)" -ge "$expected" ]] && return 0
     sleep 0.1
   done
@@ -67,6 +67,9 @@ wait_for_boot() {
     && wait_for_serial "$serial" "ZENOV_GUARD_SELFTEST_OK" \
     && wait_for_serial "$serial" "ZENOV_GUARD_TRUST_BASELINE_OK" \
     && wait_for_serial "$serial" "ZENOV_GUARD_READY" \
+    && wait_for_serial "$serial" "ZGDB_SIGNATURE_OK" \
+    && wait_for_serial "$serial" "ZGDB_POLICY_VERSION_OK" \
+    && wait_for_serial "$serial" "ZGDB_READY" \
     && wait_for_serial "$serial" "GRAPHICS_PCI_OK" \
     && wait_for_serial "$serial" "FRAMEBUFFER_MAPPED_OK" \
     && wait_for_serial "$serial" "GRAPHICS_MODE_OK" \
@@ -88,6 +91,7 @@ wait_for_boot() {
 controller_first() {
   local serial="$1" prompt_count=1
   wait_for_boot "$serial" || { echo quit; return 1; }
+  wait_for_serial "$serial" "ZGDB_POLICY_VERSION_OK version=1" || { echo quit; return 1; }
   sleep 0.3; echo "screendump $SCREENSHOT"; sleep 0.2
 
   send_command "guard status"; wait_for_serial "$serial" "ZENOV_GUARD_STATUS_OK" || { echo quit; return 1; }
@@ -123,12 +127,28 @@ controller_first() {
   send_command "run ZENOVAPP.ZEX"
   wait_for_serial "$serial" "ZENOV_SOURCE_APP_RING3_OK" || { echo quit; return 1; }
   wait_for_serial "$serial" "ZENOV_COMPILER_ABI_MATCH_OK" || { echo quit; return 1; }
+
+  send_command "guard update /security/updates/zenovguard-tampered.zgdb"
+  wait_for_serial "$serial" "ZGDB_TAMPER_REJECTED" || { echo quit; return 1; }
+  send_command "guard update /security/updates/zenovguard-v2.zgdb"
+  wait_for_serial "$serial" "ZGDB_ATOMIC_UPDATE_OK version=2" || { echo quit; return 1; }
+  prompt_count="$(grep -c "$PROMPT" "$serial" || true)"
+  send_command "run ZENOVAPP.ZEX"
+  wait_for_serial "$serial" "ZGDB_REVOCATION_BLOCKED" || { echo quit; return 1; }
+  wait_for_count "$serial" "$PROMPT" $((prompt_count + 1)) || { echo quit; return 1; }
+  send_command "guard update /security/updates/zenovguard-v1.zgdb"
+  wait_for_serial "$serial" "ZGDB_ROLLBACK_REJECTED" || { echo quit; return 1; }
   sleep 0.2; echo quit
 }
 
 controller_second() {
-  local serial="$1"
+  local serial="$1" prompt_count
   wait_for_boot "$serial" || { echo quit; return 1; }
+  wait_for_serial "$serial" "ZGDB_POLICY_VERSION_OK version=2" || { echo quit; return 1; }
+  prompt_count="$(grep -c "$PROMPT" "$serial" || true)"
+  send_command "run ZENOVAPP.ZEX"
+  wait_for_serial "$serial" "ZGDB_REVOCATION_BLOCKED" || { echo quit; return 1; }
+  wait_for_count "$serial" "$PROMPT" $((prompt_count + 1)) || { echo quit; return 1; }
   send_command "guard scan /data/quarantine/q-3e98e2f48d88.qtn"; wait_for_serial "$serial" "ZENOV_GUARD_DETECTED" || { echo quit; return 1; }
   send_command "cat PERSIST.TXT"; wait_for_serial "$serial" "PERSISTENCE_0_1_1_OK" || { echo quit; return 1; }
   send_command "cat /data/apps/userio.txt"; wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
@@ -140,6 +160,7 @@ controller_second() {
 controller_recovery() {
   local serial="$1"
   wait_for_boot "$serial" || { echo quit; return 1; }
+  wait_for_serial "$serial" "ZGDB_POLICY_VERSION_OK version=1" || { echo quit; return 1; }
   wait_for_serial "$serial" "ZENOVFS_INTERRUPTED_WRITE_RECOVERED" || { echo quit; return 1; }
   send_command "cat /data/config/system.ini"
   wait_for_serial "$serial" "recovery=committed" || { echo quit; return 1; }
@@ -151,7 +172,7 @@ controller_recovery() {
 run_phase() {
   local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5"
   set +e
-  "$controller" "$serial" | timeout 65s "$QEMU" \
+  "$controller" "$serial" | timeout 80s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
     -drive "file=$data_image,format=raw,if=ide,index=0,media=disk" \
     -boot a -m 32M -machine pc,vmport=off -vga std -display none \
@@ -175,6 +196,8 @@ cat "$SERIAL1" "$SERIAL2" "$SERIAL3" > "$OUT/serial.log"
 for marker in \
   "$BOOT_MARKER" "$PMM_MARKER" "PMM_STRESS_OK" "$PAGING_MARKER" "HEAP_REUSE_OK" "HEAP_COALESCE_OK" "HEAP_INVALID_FREE_BLOCKED" "HEAP_STRESS_OK" \
   "$STORAGE_MARKER" "$PROCESS_MARKER" "ZENOV_GUARD_SELFTEST_OK" "ZENOV_GUARD_TRUST_BASELINE_OK" "ZENOV_GUARD_READY" "ZENOV_GUARD_STATUS_OK" \
+  "ZGDB_SIGNATURE_OK" "ZGDB_POLICY_VERSION_OK version=1" "ZGDB_POLICY_VERSION_OK version=2" "ZGDB_READY" "ZGDB_TAMPER_REJECTED" \
+  "ZGDB_ATOMIC_UPDATE_OK version=2" "ZGDB_ROLLBACK_REJECTED" "ZGDB_REVOCATION_BLOCKED" \
   "ZENOV_GUARD_DETECTED" "ZENOV_GUARD_QUARANTINE_OK" "ZENOV_GUARD_UNTRUSTED_BLOCKED" "ZENOV_GUARD_FULL_SCAN_OK" "ZENOV_GUARD_EXEC_ALLOWED" \
   "GRAPHICS_PCI_OK" "FRAMEBUFFER_MAPPED_OK" "GRAPHICS_MODE_OK" "BACKBUFFER_PRESENT_OK" \
   "CLIPPING_OK" "ALPHA_BLEND_OK" "FONT_RENDER_OK" "DESKTOP_SCENE_OK" "GRAPHICAL_DESKTOP_READY" "PS2_MOUSE_OK" "PS2_MOUSE_IRQ_ROUTE_OK" \
@@ -185,9 +208,10 @@ for marker in \
   grep -q "$marker" "$OUT/serial.log" || { echo "qemu-smoke: missing marker: $marker" >&2; exit 1; }
 done
 [[ "$(grep -c 'ZENOV_GUARD_EXEC_ALLOWED' "$OUT/serial.log")" -ge 7 ]] || { echo "qemu-smoke: trusted application appraisal count is too low" >&2; exit 1; }
+[[ "$(grep -c 'ZGDB_REVOCATION_BLOCKED' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: revocation did not persist across reboot" >&2; exit 1; }
 [[ "$(grep -c 'APP_EXIT code=0' "$OUT/serial.log")" -ge 5 ]] || { echo "qemu-smoke: successful applications did not all exit cleanly" >&2; exit 1; }
-[[ "$(grep -c 'Application could not be loaded' "$OUT/serial.log")" -eq 1 ]] || { echo "qemu-smoke: unexpected application load failure count" >&2; exit 1; }
+[[ "$(grep -c 'Application could not be loaded' "$OUT/serial.log")" -eq 3 ]] || { echo "qemu-smoke: unexpected application load failure count" >&2; exit 1; }
 [[ "$(grep -c 'PERSISTENCE_0_1_1_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: shell persistence marker missing across reboot" >&2; exit 1; }
 [[ "$(grep -c 'FILE_SYSCALL_PERSIST_OK' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-smoke: userspace file payload missing across reboot" >&2; exit 1; }
 [[ -s "$SCREENSHOT" ]] || { echo "qemu-smoke: graphical framebuffer screenshot missing" >&2; exit 1; }
-printf 'qemu-smoke: OK 0.1.1 ZenovGuard SHA256-appraisal detection quarantine audit graphical-desktop PS2-route+decoder protected-pages transactional-fs zenov-source-app serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
+printf 'qemu-smoke: OK 0.1.1 signed-ZGDB signature tamper rollback atomic-update revocation ZenovGuard appraisal quarantine graphical-desktop protected-pages transactional-fs serial=%s screenshot=%s\n' "$OUT/serial.log" "$SCREENSHOT"
