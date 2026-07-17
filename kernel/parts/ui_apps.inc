@@ -99,7 +99,10 @@ void render_settings() {
 
     fill_round_rect(window_x + 16, window_y + 268, 480, 64, 10, current_theme.surface_high);
     draw_text(window_x + 32, window_y + 288, "TERMINAL", current_theme.text, 1);
-    draw_text(window_x + 32, window_y + 306, "80 X 25 / PS2 / LIVE MIRROR", current_theme.text_muted, 1);
+    draw_uint(window_x + 32, window_y + 306, 80U, current_theme.text_muted);
+    draw_text(window_x + 48, window_y + 306, "X", current_theme.text_muted, 1);
+    draw_uint(window_x + 60, window_y + 306, 25U, current_theme.text_muted);
+    draw_text(window_x + 78, window_y + 306, "/ PS2 / LIVE MIRROR", current_theme.text_muted, 1);
     draw_text_right(window_x + window_width - 32, window_y + 306, "UI.CFG", current_theme.accent, 1);
 }
 
