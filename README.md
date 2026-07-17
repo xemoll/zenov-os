@@ -1,73 +1,92 @@
 # ZenovOS 0.1.1
 
-ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 provides E820-backed physical memory management, 4 KiB paging, a validated static ELF32 loader, userspace file syscalls, modular Zenov-owned system configuration and a scalable interactive shell while retaining the deterministic FAT12 boot path and writable ATA/ZenovFS data volume.
+ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 is a protected-mode foundation with deterministic BIOS/FAT12 boot, E820 physical-memory discovery, 4 KiB paging, ring-3 ZEX1 and static ELF32 applications, a reusable kernel heap, guarded syscalls, a transactional ZenovFS1 data volume and a real Zenov-source application path.
 
 ![ZenovOS 0.1.1 system console](./docs/screenshots/zenov-os-0.1.1-ci-console.png)
 
-This is the real 720×400 framebuffer captured by the successful QEMU CI run. The screenshot is stored as a normal PNG in the repository rather than an embedded data URI.
+The image is a real 720×400 QEMU framebuffer stored as a normal repository PNG.
 
-## Development status
+## 0.1.1 status
 
-The `main` branch contains the latest 0.1.1 architecture, long-input shell and ELF hardening work. The existing `v0.1.1` release remains the installable baseline; its assets should be rebuilt from the final `main` commit after the P0 completion work below is verified.
+The P0 completion scope is implemented with executable regression coverage:
 
-The remaining 0.1.1 scope is deliberately focused on correctness and a complete Zenov-to-ZenovOS workflow rather than adding unrelated large subsystems.
+- PMM and fragmented-heap stress tests;
+- page-granular application mappings and `CR0.WP`;
+- W^X ELF policy and read-only text pages;
+- complete userspace-window scrubbing between applications;
+- recoverable ring-3 page/general-protection faults;
+- stable syscall errors, guarded pointers, console input and `argc/argv`;
+- copy-on-write ZenovFS1 replacement with exhaustive sector-boundary fault injection;
+- deterministic `.zv` to ZEX1 compilation and ring-3 execution;
+- deterministic system images and release ZIP provenance.
 
-Priority order:
-
-1. enforce user page permissions and add actionable page-fault diagnostics;
-2. replace the monotonic kernel heap with a reusable, validated allocator;
-3. complete the foreground-process ABI with stable errors, console input and `argc/argv`;
-4. prove ZenovFS1 behavior under interrupted sector writes;
-5. compile and run a real `.zv` application in ring 3, with synchronized changes in the `zenov` repository.
-
-See [`docs/ROADMAP_0.1.1.md`](docs/ROADMAP_0.1.1.md) for acceptance markers, deferred features and the release rule.
+See [`docs/ROADMAP_0.1.1.md`](docs/ROADMAP_0.1.1.md) for the completion record and remaining release-freeze tasks.
 
 ## Release package
 
-The `v0.1.1` GitHub Release contains installation files only:
+The published `v0.1.1` release remains the installable baseline until its assets are rebuilt from the final post-hardening `main` commit.
 
-- `ZenovOS-0.1.1-x86.zip` — recommended package with both images, checksums, guide and QEMU launchers;
-- `ZenovOS-0.1.1-x86.img` — bootable 1.44 MiB FAT12 system image;
-- `INSTALL.txt` — QEMU, VirtualBox, storage and application instructions;
-- `SHA256SUMS.txt` — hashes for the public downloads.
+The deterministic package generator produces:
 
-The ZIP also contains `ZenovOS-0.1.1-data.img`, a writable 16 MiB ATA/ZenovFS volume. ZenovOS still boots directly from the system image and does not yet install itself to a physical hard disk.
+- `ZenovOS-0.1.1-x86.img` — 1.44 MiB FAT12 boot image;
+- `ZenovOS-0.1.1-data.img` — 16 MiB writable ATA/ZenovFS1 volume;
+- `ZenovOS-0.1.1-x86.zip` — both images, QEMU launchers and installation guide;
+- `BUILD-MANIFEST.json` — ABI, compiler revision and source/output hashes;
+- `SOURCE-REVISION.txt` — exact ZenovOS source commit;
+- external and in-package SHA-256 checksum files.
 
 [Open the ZenovOS 0.1.1 release](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1)
 
-## Memory architecture
+## Memory and isolation
 
 Version 0.1.1 provides:
 
-- E820-backed physical frame discovery for the first 128 MiB;
-- a 4 KiB frame allocator with an allocation/free startup self-test;
-- paging enabled through CR3 with `CR0.PG` and `CR0.WP`;
-- a 4 MiB supervisor-only low kernel mapping;
-- a 4 MiB user-accessible mapping beginning at `0x00400000`;
-- a 1 MiB ring-3 segment limit inside that mapping;
-- a dedicated 16 KiB TSS transition stack, separate from the kernel call stack.
+- E820-backed management of the first 128 MiB;
+- a 4 KiB frame allocator with a 16-frame allocation/free stress cycle;
+- a 2 MiB bounded heap with aligned allocation, free, split and coalesce;
+- invalid/double-free rejection and fragmentation/reuse stress testing;
+- a supervisor-only low 4 MiB kernel mapping;
+- a ring-3 linear base at `0x00400000` with a 1 MiB application limit;
+- only executable/data/stack pages for the current application marked present;
+- a 16 KiB writable application stack;
+- read-only ELF text/rodata and writable data/BSS pages;
+- rejection of ELF load segments requesting both write and execute permission;
+- full zeroing of the reused 1 MiB process window before first use and after every exit or recoverable fault.
 
 Diagnostics are available through `pmm`, `vm`, `mem` and `memmap`.
 
-The current user mapping is still broadly writable. Segment-aware page permissions and negative protection tests are the first remaining P0 item.
+## Foreground application runtime
 
-## Native applications
+ZenovOS supports:
 
-ZenovOS supports two native formats:
+- `ZEX1` — a deterministic flat ZenovOS container;
+- static little-endian ELF32/i386 with validated `PT_LOAD` segments.
 
-- `ZEX1` — the deterministic flat ZenovOS container;
-- static ELF32/i386 executables with validated `PT_LOAD` segments.
-
-Included applications:
+Bundled applications:
 
 ```text
 run HELLO
 run FILEIO.ELF
+run ARGS.ELF alpha beta
+run CONSOLE.ELF
+run PROTECT.ELF
+run KACCESS.ELF
+run ZENOVAPP.ZEX
 ```
 
-`HELLO.ZEX` verifies the ZEX1 ring-3 path. `FILEIO.ELF` obtains the system version, writes a file, reads it back, checks metadata and content, flushes the filesystem and returns through `INT 0x80`.
+Coverage:
 
-The 0.1.1 syscall ABI provides:
+- `HELLO.ZEX` — basic ZEX1 ring-3 execution;
+- `FILEIO.ELF` — version, write, stat, read, content verification and sync;
+- `ARGS.ELF` — initial stack, stable errors and pointer guards;
+- `CONSOLE.ELF` — bounded console-input syscall;
+- `PROTECT.ELF` — deliberate write to an RX page;
+- `KACCESS.ELF` — deliberate supervisor-selector access;
+- `ZENOVAPP.ZEX` — code generated from `user/hello_zenov.zv`.
+
+One foreground application runs at a time. User faults terminate only that application, record vector/error/EIP and page-fault CR2 data, scrub the process window and return to the shell. Kernel faults remain fatal.
+
+### Syscalls
 
 ```text
 0  exit
@@ -78,15 +97,28 @@ The 0.1.1 syscall ABI provides:
 5  file_stat
 6  get_version
 7  sync
+8  read_console
 ```
 
-User pointers are validated against the ring-3 address window before kernel access. One foreground application runs at a time; there is no scheduler, process spawning or dynamic linker yet.
+User ranges are checked for overflow, presence and required write permission before kernel access.
 
-See [`docs/ZEX_ABI.md`](docs/ZEX_ABI.md) and [`docs/ELF32_ABI.md`](docs/ELF32_ABI.md).
+See [`docs/ABI_0.1.1.md`](docs/ABI_0.1.1.md), [`docs/ZEX_ABI.md`](docs/ZEX_ABI.md) and [`docs/ELF32_ABI.md`](docs/ELF32_ABI.md).
+
+## Zenov source application target
+
+The `zenov` repository and ZenovOS share a pinned 0.1.1 application contract. The strict freestanding subset currently contains:
+
+```zenov
+app("name");
+say("message\n");
+exit(0);
+```
+
+The compiler produces deterministic ZEX1, verifies the container and checksum, rejects unsupported hosted-language statements, and compiles the same source twice for a byte-identical comparison. ZenovOS records the merged compiler revision and canonical generated-artifact SHA-256 in its build manifest, packages the application into `/data/apps`, and executes it in ring 3 under QEMU.
 
 ## Persistent storage
 
-The protected-mode kernel drives a primary-master ATA PIO disk and mounts `ZenovFS1` at `/data`.
+The protected-mode kernel drives a primary-master ATA PIO disk and mounts ZenovFS1 at `/data`.
 
 ```text
 mount  df  fsck  sync
@@ -95,79 +127,66 @@ write  append  cat  stat
 cp  mv  rm
 ```
 
-The release data image includes:
+ZenovFS1 keeps its compatible 128-entry, fixed 64 KiB-slot layout. File replacement is now copy-on-write:
 
-```text
-/data/apps/hello.zex
-/data/apps/fileio.elf
-/data/config/system.ini
-/data/docs/readme.txt
-/data/docs/release.txt
-```
+1. write the complete new payload into a free slot;
+2. write staging metadata;
+3. commit the new file metadata;
+4. clear old metadata and transaction fields.
 
-ZenovFS1 currently uses 128 fixed entries and 64 KiB file slots. Paths are case-sensitive. Complete file reads verify FNV-1a checksums. The host verifier and kernel `fsck` independently validate metadata, parent directories, duplicates, bounds and payload checksums.
+Mount recovery discards uncommitted staging entries or completes committed replacements. A host harness evaluates every possible sector-write prefix and permits only complete old or complete new content. QEMU separately boots an intentionally interrupted committed image, performs recovery, reads the committed content and passes kernel `fsck`.
 
-The next storage task is fault injection at sector-write boundaries. Incompatible variable extents or journaling are deferred to a future ZenovFS2 format.
+See [`docs/ZENOVFS.md`](docs/ZENOVFS.md) and [`docs/ZENOVFS1_TRANSACTIONS.md`](docs/ZENOVFS1_TRANSACTIONS.md).
 
-See [`docs/ZENOVFS.md`](docs/ZENOVFS.md).
+## Zenov-owned system configuration and shell
 
-## Zenov source architecture and shell scale
+`kernel/main.zv` is a composition root. Product identity, boot diagnostics, static shell commands and generated documents live under `kernel/config/` and are assembled through guarded relative `include(...)` directives. Stage0 rejects cycles, absolute paths, traversal outside the source root and nesting deeper than 16 levels.
 
-`kernel/main.zv` is a small composition root. Product identity, boot diagnostics, shell commands and generated system documents live in separate modules under `kernel/config/` and are assembled through guarded relative `include(...)` directives. Stage0 rejects include cycles, absolute paths, traversal outside the source root and nesting deeper than 16 levels.
+The shell provides:
 
-The release shell has a 512-byte input buffer with 511 usable characters, 128 history entries and a 1024-event keyboard IRQ queue. Long commands use a horizontal viewport instead of being truncated by the 80-column VGA display. Stage0 separately verifies a 200-declaration configuration and enforces explicit per-item and aggregate generated-text budgets.
+- a 512-byte buffer with 511 usable characters;
+- 128 history entries;
+- a 1024-event keyboard IRQ queue;
+- horizontal scrolling for long commands;
+- Left/Right, Home/End, Delete, history and Tab completion.
 
-The remaining language milestone is a cross-repository path that compiles a `.zv` source file with `zenov`, packages it into the ZenovFS image and executes it as a ring-3 ZenovOS application.
+Stage0 separately compiles a 200-declaration regression configuration and enforces explicit per-item and aggregate generated-text budgets.
 
 See [`docs/SOURCE_ARCHITECTURE.md`](docs/SOURCE_ARCHITECTURE.md).
 
-## Verified QEMU behavior
+## Verified CI behavior
 
-CI performs two independent QEMU processes against the same runtime data disk.
+The primary workflow performs:
 
-First boot:
+1. strict host and freestanding compilation with warnings as errors;
+2. FAT12, ZenovFS1, ZEX1 and ELF structural checks;
+3. PMM, heap and loader-policy self-tests;
+4. exhaustive host ZenovFS1 crash-boundary injection;
+5. a first QEMU boot running all seven application paths, long shell input and persistence writes;
+6. a second QEMU boot verifying persisted shell and userspace files;
+7. a third QEMU boot recovering a deliberately interrupted filesystem transaction;
+8. deterministic full-system rebuilding;
+9. deterministic release ZIP generation and byte comparison;
+10. upload of images, applications, manifest, serial logs and framebuffer evidence.
 
-1. validates PMM and enables paging;
-2. mounts ZenovFS;
-3. runs kernel `fsck`;
-4. enters a command beyond the legacy 80-byte input and 128-event keyboard boundaries;
-5. writes `PERSIST.TXT` from the shell;
-6. runs `HELLO.ZEX` in ring 3;
-7. runs `FILEIO.ELF`, which creates `/data/apps/userio.txt` through syscalls;
-8. cleanly returns both applications to the shell.
-
-Second boot:
-
-1. reads both persisted files;
-2. verifies the ELF-created payload;
-3. runs `fsck` again;
-4. verifies file size and checksum.
-
-Required serial evidence includes:
+Important runtime markers include:
 
 ```text
-PMM_OK
-PAGING_OK
-ZENOVFS_MOUNT_OK
-PROCESS_ABI_0_1_1_OK
-longinputend511ok
-HELLO_ZEX_0_1_1_OK
-FILEIO_ELF_OK
-FILE_SYSCALL_PERSIST_OK
-ZENOVFS_FSCK_OK
-APP_EXIT code=0
+PMM_STRESS_OK
+HEAP_STRESS_OK
+USER_WINDOW_SCRUB_OK
+USER_WINDOW_RUNTIME_SCRUB_OK
+ELF_WX_POLICY_OK
+PROCESS_ARGV_OK
+CONSOLE_READ_SYSCALL_OK
+USER_WRITE_TO_TEXT_BLOCKED
+USER_KERNEL_ACCESS_BLOCKED
+PAGE_FAULT_DIAGNOSTICS_OK
+ZENOVFS_OLD_OR_NEW_CONTENT_ONLY
+ZENOVFS_INTERRUPTED_WRITE_RECOVERED
+ZENOV_SOURCE_APP_RING3_OK
+ZENOV_COMPILER_ABI_MATCH_OK
 ```
-
-The same workflow also verifies strict native compilation, absence of Python, source encoding, FAT12 structure, undefined symbols, host-side ZenovFS integrity, deterministic boot/data/application rebuilds and byte-identical Release ZIP generation.
-
-## `.exe` compatibility
-
-ZenovOS 0.1.1 does not run arbitrary Windows or DOS `.exe` files.
-
-- Windows executables use PE/PE32+ and require Win32/NT APIs, DLL loading, virtual memory and other services.
-- DOS MZ executables require 16-bit execution, PSP/environment handling and DOS interrupt services.
-
-Static ZenovOS-targeted ELF32 applications now run, but a filename extension alone does not make a foreign executable compatible.
 
 ## Build from source
 
@@ -180,13 +199,11 @@ make test
 bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
 ```
 
-`kernel/main.zv` composes the modules under `kernel/config/`. The native stage0 compiler expands and validates those modules, generates the kernel configuration header and pins this branch to version `0.1.1`.
-
 ## Current limitations
 
-ZenovOS remains an early protected-mode operating-system foundation. Version 0.1.1 still has one foreground process, a shared user page table, a monotonic kernel heap and no tested power-loss recovery for ZenovFS1.
+ZenovOS remains an early single-address-space operating-system foundation. Version 0.1.1 intentionally does not include preemptive multitasking, concurrent processes, per-process page directories, SMP, networking, USB, graphics, AHCI/NVMe, a physical-disk installer, dynamic linking, PE/DOS/Win32 compatibility or ZenovFS2 variable extents.
 
-Multitasking, per-process address spaces, writable FAT16, a hard-disk installer, graphics, networking, USB, dynamic linking, permissions and DOS/Windows compatibility are explicitly deferred beyond the 0.1.1 completion scope.
+The automated hardware acceptance target is QEMU/i386 with BIOS, floppy and IDE. VirtualBox settings are documented but are not CI-verified.
 
 ## License
 
