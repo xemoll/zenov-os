@@ -23,7 +23,6 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/graphics.inc"
 #include "parts/mouse_regression.inc"
 #include "parts/input_v2.inc"
-#include "parts/security_commands.inc"
 #define history shell_history
 #define history_count shell_history_count
 #define shell_run shell_run_legacy_80
@@ -31,6 +30,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #undef shell_run
 #undef history_count
 #undef history
+#include "parts/security_commands.inc"
 #include "parts/shell_runtime.inc"
 
 extern "C" void kernel_main() {
