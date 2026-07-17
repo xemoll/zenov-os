@@ -1,6 +1,7 @@
 namespace paging {
 constexpr uint32_t process_window_bytes = 1U * 1024U * 1024U;
 static_assert(process_window_bytes <= table_span);
+uint32_t process_window_scrub_count = 0;
 
 bool scrub_process_window(bool verify) {
     clear_user();
@@ -24,4 +25,6 @@ bool scrub_process_window(bool verify) {
 
 extern "C" void user_window_cleanup() {
     if (!paging::scrub_process_window(false)) panic("User process window scrub failed.");
+    ++paging::process_window_scrub_count;
+    serial::line("USER_WINDOW_RUNTIME_SCRUB_OK");
 }
