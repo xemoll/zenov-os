@@ -4,9 +4,12 @@ constexpr uint16_t vbe_index_port = 0x01CE, vbe_data_port = 0x01CF;
 constexpr uint16_t vbe_id = 0, vbe_xres = 1, vbe_yres = 2, vbe_bpp = 3, vbe_enable = 4, vbe_virtual_width = 6;
 constexpr uint16_t vbe_enabled = 0x01, vbe_linear_framebuffer = 0x40;
 constexpr uint32_t qemu_vga_id = 0x11111234U;
-constexpr int32_t window_width = 510, window_height = 390, titlebar_height = 40;
+constexpr int32_t ui_grid = 8;
+constexpr int32_t window_width = 512, window_height = 400, titlebar_height = 40;
+constexpr int32_t topbar_x = 24, topbar_y = 16, topbar_width = 752, topbar_height = 36;
+constexpr int32_t dock_x = 284, dock_y = 540, dock_width = 232, dock_height = 52;
 constexpr uint32_t desktop_canvas = 0x0B1020U, desktop_surface = 0x141A2BU, desktop_accent = 0x8B7CF6U;
-constexpr uint8_t desktop_radius = 14U, desktop_opacity = 232U;
+constexpr uint8_t desktop_radius = 12U, desktop_opacity = 236U;
 constexpr bool desktop_animations = true;
 constexpr const char* desktop_theme = "zen-dark";
 constexpr const char* terminal_cursor = "beam";
@@ -51,7 +54,7 @@ uintptr_t physical_framebuffer = 0;
 bool active = false, first_mouse_packet = true, dragging = false, drag_reported = false;
 bool terminal_sync_started = false, runtime_preferences_loaded = false;
 int32_t mouse_x = static_cast<int32_t>(width / 2U), mouse_y = static_cast<int32_t>(height / 2U);
-int32_t window_x = 150, window_y = 88, drag_offset_x = 0, drag_offset_y = 0;
+int32_t window_x = 144, window_y = 76, drag_offset_x = 0, drag_offset_y = 0;
 uint8_t mouse_buttons = 0, runtime_theme = 0;
 View active_view = View::terminal;
 Theme current_theme{};
@@ -192,8 +195,8 @@ void draw_round_border(int32_t x, int32_t y, int32_t rect_width, int32_t rect_he
 }
 
 void draw_shadow(int32_t x, int32_t y, int32_t rect_width, int32_t rect_height, int32_t radius) {
-    fill_round_rect_alpha(x + 10, y + 14, rect_width, rect_height, radius + 4, rgb(0, 0, 0), 52);
-    fill_round_rect_alpha(x + 5, y + 7, rect_width, rect_height, radius + 2, rgb(0, 0, 0), 44);
+    fill_round_rect_alpha(x + 8, y + 10, rect_width, rect_height, radius + 3, rgb(0, 0, 0), 48);
+    fill_round_rect_alpha(x + 4, y + 5, rect_width, rect_height, radius + 1, rgb(0, 0, 0), 36);
 }
 
 const Glyph* glyph_for(char value) {
@@ -215,6 +218,18 @@ void draw_char(int32_t x, int32_t y, char value, uint32_t color, uint32_t scale 
 
 void draw_text(int32_t x, int32_t y, const char* text, uint32_t color, uint32_t scale = 1U) {
     while (text && *text) { draw_char(x, y, *text++, color, scale); x += static_cast<int32_t>(6U * scale); }
+}
+
+int32_t text_width(const char* text, uint32_t scale = 1U) {
+    return static_cast<int32_t>(string_length(text) * 6U * scale);
+}
+
+void draw_text_right(int32_t right, int32_t y, const char* text, uint32_t color, uint32_t scale = 1U) {
+    draw_text(right - text_width(text, scale), y, text, color, scale);
+}
+
+void draw_text_center(int32_t center, int32_t y, const char* text, uint32_t color, uint32_t scale = 1U) {
+    draw_text(center - text_width(text, scale) / 2, y, text, color, scale);
 }
 
 void draw_uint(int32_t x, int32_t y, uint32_t value, uint32_t color) {
@@ -245,4 +260,3 @@ void apply_runtime_theme(uint8_t id) {
     runtime_theme = id > 2U ? 0U : id;
     current_theme = theme_for(runtime_theme);
 }
-
