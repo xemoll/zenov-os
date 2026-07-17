@@ -1,15 +1,21 @@
 # ZenovOS 0.1.1
 
-ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 provides deterministic BIOS/FAT12 boot, E820 physical-memory discovery, 4 KiB paging, ring-3 ZEX1 and static ELF32 applications, a reusable kernel heap, guarded syscalls, transactional ZenovFS1 replacement and a real Zenov-source application target.
+ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 now boots into a real 800×600 graphical desktop on QEMU Standard VGA while retaining the text shell and serial console as diagnostic fallbacks. The system also provides deterministic BIOS/FAT12 boot, E820 physical-memory discovery, 4 KiB paging, ring-3 ZEX1 and static ELF32 applications, a reusable kernel heap, guarded syscalls and transactional ZenovFS1 storage.
 
-![ZenovOS 0.1.1 system console](./docs/screenshots/zenov-os-0.1.1-ci-console.png)
+![ZenovOS 0.1.1 graphical desktop](./docs/screenshots/zenov-os-0.1.1-graphical-desktop.png)
 
-The screenshot is a real 720×400 QEMU framebuffer stored as a normal repository PNG.
+The image above is the actual 800×600 QEMU framebuffer captured by the green 0.1.1 CI run. The workflow also preserves the original PPM framebuffer, serial logs, kernel image, data image and release package as build evidence.
 
 ## Status
 
-The P0 completion scope is implemented with executable regression coverage:
+The implemented 0.1.1 scope has executable regression coverage for:
 
+- QEMU Standard VGA discovery through PCI ID `1234:1111`;
+- Bochs VBE `800×600×32` mode and linear framebuffer access;
+- supervisor-only framebuffer MMIO mapping at `0xC0000000`;
+- heap-backed double buffering, clipping, alpha blending and bitmap text;
+- graphical desktop, taskbar, launcher dock and file-manager window;
+- PS/2 mouse initialization, IRQ12 route validation, packet decoding, cursor movement and title-bar dragging;
 - PMM and fragmented-heap stress tests;
 - page-granular application mappings and `CR0.WP`;
 - read-only code pages and W^X ELF admission policy;
@@ -18,9 +24,49 @@ The P0 completion scope is implemented with executable regression coverage:
 - stable syscall errors, guarded pointers, console input and `argc/argv`;
 - copy-on-write ZenovFS1 replacement with exhaustive sector-write fault injection;
 - deterministic `.zv` to ZEX1 compilation and ring-3 execution;
-- deterministic system and release-package provenance.
+- deterministic system rebuilds and release-package provenance.
 
 See [`docs/INDEX.md`](docs/INDEX.md) and [`docs/ROADMAP_0.1.1.md`](docs/ROADMAP_0.1.1.md).
+
+## Graphics and desktop
+
+The first graphical foundation is intentionally software-rendered and hardware-specific enough to remain testable:
+
+```text
+QEMU PCI VGA 1234:1111
+        │
+        ├── BAR0 framebuffer
+        ├── Bochs VBE ports 0x01CE / 0x01CF
+        └── 800×600×32 linear mode
+                 │
+                 ▼
+supervisor MMIO window 0xC0000000
+                 │
+                 ▼
+heap backbuffer → software renderer → full present
+```
+
+Implemented renderer primitives include rectangle fill, clipped drawing, alpha compositing, borders, bitmap glyphs, icons and complete framebuffer presentation. The visible desktop includes a top bar, launcher dock, taskbar, status indicator and movable file-manager window.
+
+Applications do not receive direct framebuffer access. The framebuffer mapping is supervisor-only. The current desktop is still rendered by the kernel and is not yet a separate display server or compositor.
+
+## Input
+
+Keyboard input continues through IRQ1 and the existing event queue. Mouse support adds:
+
+- PS/2 auxiliary-port initialization;
+- IRQ12 IDT/PIC route validation;
+- three-byte packet synchronization and sign extension;
+- bounded cursor coordinates;
+- left-button state transitions;
+- window title-bar hit testing and dragging;
+- deterministic decoder and drag regression tests.
+
+CI verifies the IRQ route and the real packet-decoder/window path separately. External host-pointer delivery can vary by headless QEMU display backend, so it is not treated as the only proof of driver correctness.
+
+## Boot loader
+
+The BIOS FAT12 loader now crosses 64 KiB destination boundaries by advancing the load segment when `BX` wraps. This removes the former 60 KiB kernel artifact ceiling. The host image verifier validates the FAT12 cluster chain and confirms that it covers the complete kernel payload.
 
 ## Memory and isolation
 
@@ -28,6 +74,7 @@ See [`docs/INDEX.md`](docs/INDEX.md) and [`docs/ROADMAP_0.1.1.md`](docs/ROADMAP_
 - 4 KiB frame allocator with a 16-frame stress cycle;
 - 2 MiB aligned heap with split, free, coalesce and invalid-free rejection;
 - supervisor-only low kernel mapping;
+- supervisor-only high framebuffer MMIO window;
 - ring-3 base at `0x00400000` with a 1 MiB application limit;
 - only current image and 16 KiB stack pages marked present;
 - RX ELF text/rodata and writable data/BSS/stack pages;
@@ -55,8 +102,6 @@ run KACCESS.ELF
 run ZENOVAPP.ZEX
 ```
 
-The applications verify basic ZEX execution, userspace file I/O and persistence, initial stack arguments, stable errors, unmapped/RX pointer guards, bounded console input, writes to read-only code, supervisor isolation and Zenov-generated ring-3 code.
-
 Syscalls use `INT 0x80`:
 
 ```text
@@ -81,7 +126,7 @@ say("message\n");
 exit(0);
 ```
 
-The compiler generates deterministic ZEX1, rejects unsupported hosted-language statements, verifies the container and compiles the same source twice for a byte-identical result. ZenovOS pins the merged compiler revision and canonical generated-artifact SHA-256 in its build manifest, packages the app into ZenovFS1 and runs it in ring 3.
+The compiler generates deterministic ZEX1, rejects unsupported hosted-language statements, verifies the container and compiles the same source twice for a byte-identical result. ZenovOS pins the compiler revision and canonical generated-artifact SHA-256 in its build manifest, packages the app into ZenovFS1 and runs it in ring 3.
 
 ## Persistent storage
 
@@ -102,7 +147,7 @@ See [`docs/ZENOVFS1_TRANSACTIONS.md`](docs/ZENOVFS1_TRANSACTIONS.md).
 
 `kernel/main.zv` is a composition root for modules under `kernel/config/`. Guarded relative `include(...)` directives reject cycles, absolute paths, traversal outside the source root and nesting deeper than 16 levels.
 
-The shell provides a 512-byte input buffer with 511 usable characters, 128 history entries, a 1024-event keyboard IRQ queue, horizontal scrolling and standard cursor/history editing. Stage0 verifies a 200-declaration configuration and explicit generated-text budgets.
+The shell remains available through VGA text memory and COM1 for diagnostics and application testing. It provides a 512-byte input buffer with 511 usable characters, 128 history entries, a 1024-event keyboard IRQ queue, horizontal scrolling and standard cursor/history editing. It is no longer the visible primary OS surface when graphics initialization succeeds.
 
 ## CI contract
 
@@ -110,30 +155,31 @@ The primary workflow performs:
 
 1. strict host and freestanding compilation with warnings as errors;
 2. FAT12, ZenovFS1, ZEX1 and ELF structural checks;
-3. PMM, heap, process-scrub and loader-policy self-tests;
+3. graphics, PMM, heap, process-scrub and loader-policy self-tests;
 4. exhaustive host ZenovFS1 crash-boundary injection;
-5. QEMU application, persistence and interrupted-recovery phases;
-6. deterministic system rebuilding;
-7. deterministic release ZIP generation and byte comparison;
-8. evidence upload with images, applications, manifest, serial logs and framebuffer.
+5. three QEMU phases for desktop boot, applications, persistence and interrupted recovery;
+6. framebuffer screenshot capture;
+7. deterministic system rebuilding;
+8. deterministic release ZIP generation and byte comparison;
+9. evidence upload with images, applications, manifest and serial logs.
 
-Important markers include:
+Important graphical markers include:
 
 ```text
-PMM_STRESS_OK
-HEAP_STRESS_OK
-USER_WINDOW_SCRUB_OK
-USER_WINDOW_RUNTIME_SCRUB_OK
-ELF_WX_POLICY_OK
-PROCESS_ARGV_OK
-CONSOLE_READ_SYSCALL_OK
-USER_WRITE_TO_TEXT_BLOCKED
-USER_KERNEL_ACCESS_BLOCKED
-PAGE_FAULT_DIAGNOSTICS_OK
-ZENOVFS_OLD_OR_NEW_CONTENT_ONLY
-ZENOVFS_INTERRUPTED_WRITE_RECOVERED
-ZENOV_SOURCE_APP_RING3_OK
-ZENOV_COMPILER_ABI_MATCH_OK
+GRAPHICS_PCI_OK
+FRAMEBUFFER_MAPPED_OK
+GRAPHICS_MODE_OK 800x600x32
+BACKBUFFER_PRESENT_OK
+CLIPPING_OK
+ALPHA_BLEND_OK
+FONT_RENDER_OK
+DESKTOP_SCENE_OK
+GRAPHICAL_DESKTOP_READY
+PS2_MOUSE_OK
+PS2_MOUSE_IRQ_ROUTE_OK
+PS2_MOUSE_DECODER_OK
+MOUSE_PACKET_OK
+WINDOW_DRAG_OK
 ```
 
 ## Build
@@ -149,15 +195,15 @@ bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist packa
 
 ## Release assets
 
-The existing `v0.1.1` assets remain the installable baseline until rebuilt from the exact final post-hardening `main` commit. The final package must include both images, manifest, source revision, launchers, installation guide and checksums, then be re-downloaded and QEMU-verified.
+The existing `v0.1.1` release assets remain the previous installable baseline until the release is rebuilt from the exact final graphical `main` commit. The final package must include both images, manifest, source revision, launchers, installation guide and checksums, then be downloaded and QEMU-verified again.
 
 [Open the ZenovOS 0.1.1 release](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1)
 
 ## Limitations
 
-ZenovOS remains a single-foreground-process i686/BIOS foundation. It intentionally does not include concurrent processes, per-process page directories, SMP, networking, USB, graphics, AHCI/NVMe, a physical-disk installer, dynamic linking, PE/DOS/Win32 compatibility or ZenovFS2 variable extents.
+ZenovOS remains a single-foreground-process i686/BIOS system. It does not yet provide concurrent user processes, per-process page directories, a user-space display server, a compositor, a reusable GUI toolkit, GPU acceleration, SMP, networking, USB, AHCI/NVMe, a physical-disk installer, dynamic linking, PE/DOS/Win32 compatibility or ZenovFS2 variable extents.
 
-The automated hardware target is QEMU i386 with BIOS, floppy and IDE. VirtualBox is documented but not CI-verified.
+The automated hardware target is QEMU i386 with BIOS, floppy, IDE and QEMU Standard VGA. VirtualBox is documented but is not CI-verified for the new graphical path.
 
 ## License
 
