@@ -62,8 +62,15 @@ void keyboard_scancode(uint8_t code) {
     if (code == 0x2A || code == 0x36) { shift_pressed = !released; extended_scancode = false; return; }
     if (released) { extended_scancode = false; return; }
     if (extended_scancode) {
-        if (code == 0x48) key_push(key_up); else if (code == 0x50) key_push(key_down); else if (code == 0x4B) key_push(key_left); else if (code == 0x4D) key_push(key_right);
-        else if (code == 0x47) key_push(key_home); else if (code == 0x4F) key_push(key_end); else if (code == 0x53) key_push(key_delete); extended_scancode = false; return;
+        if (code == 0x48) key_push(key_up);
+        else if (code == 0x50) key_push(key_down);
+        else if (code == 0x4B) key_push(key_left);
+        else if (code == 0x4D) key_push(key_right);
+        else if (code == 0x47) key_push(key_home);
+        else if (code == 0x4F) key_push(key_end);
+        else if (code == 0x53) key_push(key_delete);
+        extended_scancode = false;
+        return;
     }
     if (code == 0x01) { key_push(key_escape); return; } if (code == 0x3B) { key_push(key_f1); return; } if (code == 0x3C) { key_push(key_f2); return; }
     if (code == 0x3D) { key_push(key_f3); return; } if (code == 0x3E) { key_push(key_f4); return; } if (code == 0x3A) { caps_lock = !caps_lock; return; }
@@ -107,6 +114,7 @@ Rtc rtc_read() {
     while (cmos_read(0x0A) & 0x80) {}
     Rtc value{cmos_read(0), cmos_read(2), cmos_read(4), cmos_read(7), cmos_read(8), cmos_read(9)}; const uint8_t status = cmos_read(0x0B);
     if ((status & 0x04) == 0) { value.second = bcd(value.second); value.minute = bcd(value.minute); value.hour = bcd(static_cast<uint8_t>(value.hour & 0x7F)); value.day = bcd(value.day); value.month = bcd(value.month); value.year = bcd(value.year); }
-    if ((status & 0x02) == 0 && (value.hour & 0x80)) value.hour = static_cast<uint8_t>(((value.hour & 0x7F) + 12) % 24); return value;
+    if ((status & 0x02) == 0 && (value.hour & 0x80)) value.hour = static_cast<uint8_t>(((value.hour & 0x7F) + 12) % 24);
+    return value;
 }
 void two_digits(uint8_t value) { console::put(static_cast<char>('0' + value / 10)); console::put(static_cast<char>('0' + value % 10)); }
