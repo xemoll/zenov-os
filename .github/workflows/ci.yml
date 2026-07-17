@@ -33,7 +33,7 @@ jobs:
           set -o pipefail
           make clean check 2>&1 | tee ci-logs/native-build.log
 
-      - name: Boot paging kernel, run ZEX and ELF, verify persistence
+      - name: Boot applications, persistence and interrupted-write recovery
         run: make qemu
 
       - name: Verify deterministic installation package
@@ -51,27 +51,41 @@ jobs:
       - name: Inspect kernel and runtime evidence
         run: |
           readelf -h build/kernel.elf
-          readelf -h build/hello-user.elf
-          readelf -h build/FILEIO.ELF
+          for app in build/FILEIO.ELF build/ARGS.ELF build/CONSOLE.ELF build/PROTECT.ELF build/KACCESS.ELF; do
+            readelf -h "$app"
+            readelf -l "$app"
+          done
           test "$(stat -c%s build/BOOT.BIN)" -eq 512
           test "$(stat -c%s build/KERNEL.BIN)" -le 61440
           test "$(stat -c%s build/zenov-data.img)" -eq 16777216
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
+          grep -q PMM_STRESS_OK build/qemu/serial.log
           grep -q PMM_OK build/qemu/serial.log
+          grep -q HEAP_REUSE_OK build/qemu/serial.log
+          grep -q HEAP_COALESCE_OK build/qemu/serial.log
+          grep -q HEAP_INVALID_FREE_BLOCKED build/qemu/serial.log
+          grep -q HEAP_STRESS_OK build/qemu/serial.log
           grep -q PAGING_OK build/qemu/serial.log
           grep -q ZENOVFS_MOUNT_OK build/qemu/serial.log
           grep -q PROCESS_ABI_0_1_1_OK build/qemu/serial.log
           grep -q ZENOVOS_UI_READY build/qemu/serial.log
-          grep -q 'VIRTUAL MEMORY' build/qemu/serial.log
-          grep -q ZENOVFS_FSCK_OK build/qemu/serial.log
-          grep -q APP_START_ZEX build/qemu/serial.log
-          grep -q HELLO_ZEX_0_1_1_OK build/qemu/serial.log
-          grep -q APP_START_ELF build/qemu/serial.log
-          grep -q FILEIO_ELF_OK build/qemu/serial.log
-          test "$(grep -c 'APP_EXIT code=0' build/qemu/serial.log)" -ge 2
+          grep -q PROCESS_ARGV_OK build/qemu/serial.log
+          grep -q SYSCALL_ERRORS_OK build/qemu/serial.log
+          grep -q SYSCALL_POINTER_GUARD_OK build/qemu/serial.log
+          grep -q CONSOLE_READ_SYSCALL_OK build/qemu/serial.log
+          grep -q USER_WRITE_TO_TEXT_BLOCKED build/qemu/serial.log
+          grep -q USER_KERNEL_ACCESS_BLOCKED build/qemu/serial.log
+          grep -q PAGE_FAULT_DIAGNOSTICS_OK build/qemu/serial.log
+          grep -q USER_FAULT_RETURNED_TO_SHELL build/qemu/serial.log
+          grep -q ZENOV_SOURCE_APP_RING3_OK build/qemu/serial.log
+          grep -q ZENOV_COMPILER_ABI_MATCH_OK build/qemu/serial.log
+          grep -q ZENOVFS_INTERRUPTED_WRITE_RECOVERED build/qemu/serial.log
+          grep -q 'recovery=committed' build/qemu/serial.log
+          test "$(grep -c 'APP_EXIT code=0' build/qemu/serial.log)" -ge 5
           test "$(grep -c PERSISTENCE_0_1_1_OK build/qemu/serial.log)" -ge 2
           test "$(grep -c FILE_SYSCALL_PERSIST_OK build/qemu/serial.log)" -ge 2
           grep -q 'zenov> ' build/qemu/serial.log
+          grep -q '"zenov_app_contract_sha256": "9e1733af56a53ae31055b448f762815ba7a5e1a72be543aef325bd4ea36e0ad5"' build/build-manifest.json
 
       - name: Upload verified 0.1.1 evidence
         if: always()
@@ -87,12 +101,18 @@ jobs:
             build/zenov-os.img
             build/zenov-data.img
             build/HELLO.ZEX
-            build/hello-user.elf
+            build/ZENOVAPP.ZEX
             build/FILEIO.ELF
+            build/ARGS.ELF
+            build/CONSOLE.ELF
+            build/PROTECT.ELF
+            build/KACCESS.ELF
             build/build-manifest.json
             build/qemu/serial.log
             build/qemu/serial-phase1.log
             build/qemu/serial-phase2.log
+            build/qemu/serial-recovery.log
+            build/qemu/zenov-data-recovery.img
             build/qemu/screenshot.ppm
             dist/
             ci-logs/native-build.log
