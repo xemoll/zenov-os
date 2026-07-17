@@ -80,6 +80,7 @@ extern "C" void kernel_main() {
     if (storage::guarded_write_file("/security/zenovguard.zgdb", &mutation_probe, 1U, false)) panic("Active security database mutation guard failed.");
     serial::line("ZENOV_GUARD_PROTECTED_PATH_TEST_OK");
     const bool graphical = graphics::init();
+    if (graphical) { console::activate_shadow(); serial::line("CONSOLE_SHADOW_OK"); }
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
     pic_remap();
     const bool mouse_ready = mouse_init();
@@ -93,6 +94,7 @@ extern "C" void kernel_main() {
 
     serial::line("Kernel online. Desktop, signed policy, security, persistent storage and ring-3 services ready.");
     console::show_home();
+    if (graphical) graphics::sync_terminal_from_console();
     serial::line("ZENOVOS_UI_READY");
     shell_run();
 }
