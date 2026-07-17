@@ -129,6 +129,7 @@ void read_line(char* buffer, uint32_t capacity) {
     buffer[0] = 0;
     for (;;) {
         const uint16_t key = key_pop_blocking();
+        if (graphics::handle_navigation_key(key)) continue;
         const char* shortcut = shortcut_command(key);
         if (shortcut && length == 0) {
             replace_input(buffer, length, cursor, shortcut, origin_row, origin_column, view_start, maximum);
