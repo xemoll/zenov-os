@@ -1,146 +1,158 @@
-# ZenovOS 0.1.1 completion roadmap
+# ZenovOS 0.1.1 completion status
 
-This document defines the remaining scope for the `0.1.1` line. It is intentionally narrower than a general operating-system wishlist: graphics, networking, USB, SMP and broad hardware support belong to later releases.
+This document is the release-completion record for the `0.1.1` line. It is intentionally narrower than a general operating-system wishlist: graphics, networking, USB, SMP and broad hardware support belong to later releases.
 
-## Current verified baseline
+## P0 status: implemented and executable
 
-The `main` branch already provides:
+All original P0 areas now have implementation, host-side validation where applicable, and QEMU runtime evidence.
 
-- deterministic FAT12 boot and release packaging;
-- E820 physical-memory discovery and a 4 KiB frame allocator;
-- paging with supervisor and user address ranges;
-- ring-3 execution through ZEX1 and static ELF32/i386;
-- RX and RW ELF load segments;
-- validated userspace pointers and file syscalls;
-- persistent ATA PIO storage through ZenovFS1;
-- modular Zenov configuration with guarded recursive includes;
-- a 511-character interactive command line, 128 history entries and a 1024-event keyboard queue;
-- two-boot QEMU verification for applications and persistence.
+### 1. Page protection, process-memory hygiene and fault diagnostics
 
-## P0 — required before declaring 0.1.1 complete
+Implemented:
 
-### 1. Page protection and fault diagnostics
-
-Current state: the complete 4 MiB user window is mapped writable. ELF segments are validated and separated in the file, but page-table permissions do not yet enforce read-only code pages.
-
-Required work:
-
-- map only the pages required by the loaded program;
-- clear the writable bit for ELF text/rodata pages after loading;
-- keep data, BSS and stack writable;
-- reject overlapping or permission-conflicting `PT_LOAD` segments;
-- add a dedicated page-fault report with CR2, access type, privilege level and present/write/user bits;
-- add QEMU negative tests for user writes to code and user access to supervisor memory.
+- only pages required by the current program and its 16 KiB stack are present;
+- ELF `PT_LOAD` ranges are bounds-checked, overlap-checked and page-permission-conflict checked;
+- text/rodata pages are read-only after loading and data/BSS/stack pages are writable;
+- `CR0.WP` is enabled so supervisor writes respect read-only page mappings;
+- ELF segments requesting both write and execute permission are rejected by the 0.1.1 W^X policy;
+- the complete 1 MiB physical userspace window is scrubbed before first use and after every normal exit or recoverable user fault;
+- ring-3 faults record vector, error code, EIP and, for page faults, CR2 plus present/write/user decoding;
+- deliberate writes to RX code and supervisor-selector access return control to the shell.
 
 Acceptance evidence:
 
 ```text
+PAGING_OK
+USER_WINDOW_SCRUB_OK
+USER_WINDOW_RUNTIME_SCRUB_OK
+ELF_WX_POLICY_OK
 PAGE_PROTECTION_OK
 USER_WRITE_TO_TEXT_BLOCKED
 USER_KERNEL_ACCESS_BLOCKED
 PAGE_FAULT_DIAGNOSTICS_OK
+USER_FAULT_RETURNED_TO_SHELL
 ```
 
-### 2. Reusable kernel heap
+### 2. Physical memory and reusable kernel heap
 
-Current state: the heap is a 2 MiB monotonic bump allocator. It cannot free or reuse allocations.
+Implemented:
 
-Required work:
-
-- replace the cursor-only allocator with bounded blocks and `free`;
-- split and coalesce adjacent free blocks;
-- preserve alignment guarantees;
-- detect double-free, invalid-free and corrupted headers;
-- expose used, free, peak and allocation-count diagnostics;
-- stress-test repeated application and storage allocations.
+- a 16-frame PMM cycle checks uniqueness, alignment, invalid frees and exact counter restoration;
+- the 2 MiB heap uses bounded blocks rather than a monotonic cursor;
+- allocations support power-of-two alignment;
+- free blocks split and coalesce;
+- invalid and double frees are rejected;
+- boot stress testing exercises fragmentation, reuse and complete coalescence;
+- used, free, peak and active-allocation counters are available to kernel diagnostics.
 
 Acceptance evidence:
 
 ```text
+PMM_STRESS_OK
+PMM_OK
 HEAP_REUSE_OK
 HEAP_COALESCE_OK
 HEAP_INVALID_FREE_BLOCKED
 HEAP_STRESS_OK
 ```
 
-### 3. Process and syscall contract completion
+### 3. Foreground process and syscall ABI
 
-Current state: one foreground process runs at a time and exits through `INT 0x80`. There is no argument vector or input syscall.
+Implemented:
 
-Required work:
-
-- define stable syscall error codes instead of one generic `0xFFFFFFFF` result;
-- add `read_console` with bounded user buffers;
-- pass `argc/argv` to ZEX1 and ELF32 applications;
-- validate the initial user stack layout;
-- record application name, format, exit code and fault reason in diagnostics;
-- add a deliberately failing userspace test application.
+- stable negative 32-bit error values replace a single generic failure;
+- syscall pointer validation checks both mapping presence and required write permission;
+- bounded console input is syscall 8;
+- a validated ZenovOS 0.1.1 initial stack passes `argc` and an `argv` vector;
+- application name, format, exit code and fault details are recorded;
+- normal exits and user faults return to the shell through one cleanup path;
+- dedicated applications test arguments, unsupported calls, unmapped pointers, writes to RX destinations, console input and deliberate protection faults.
 
 Acceptance evidence:
 
 ```text
+PROCESS_ABI_0_1_1_OK
 PROCESS_ARGV_OK
-CONSOLE_READ_SYSCALL_OK
 SYSCALL_ERRORS_OK
+SYSCALL_POINTER_GUARD_OK
+CONSOLE_READ_SYSCALL_OK
 USER_FAULT_RETURNED_TO_SHELL
 ```
 
-### 4. ZenovFS1 durability audit
+See [`ABI_0.1.1.md`](ABI_0.1.1.md).
 
-Current state: metadata and payload checksums are validated, but power-loss behavior is not yet tested.
+### 4. ZenovFS1 interrupted-write durability
 
-Required work:
+Implemented without changing the ZenovFS1 superblock or 64-byte entry format:
 
-- add host-side fault injection at every sector write boundary;
-- document the exact metadata/payload write order;
-- prove that interrupted writes preserve either the old file or the new file, not inconsistent metadata;
-- add recovery behavior for an interrupted metadata update where possible without changing the disk format;
-- defer journaling, variable extents or incompatible layout changes to `ZenovFS2` if compatibility cannot be preserved.
+- replacements write payload into a free slot first;
+- a staging entry records the transaction;
+- converting that staging entry into a committed file is the metadata commit point;
+- recovery discards uncommitted staging entries or finishes committed replacements;
+- host fault injection evaluates every sector-write prefix and accepts only the complete old payload or complete new payload;
+- a dedicated QEMU boot mounts a deliberately interrupted committed transaction, performs recovery, reads the committed content and passes `fsck`.
 
 Acceptance evidence:
 
 ```text
 ZENOVFS_FAULT_INJECTION_OK
-ZENOVFS_INTERRUPTED_WRITE_RECOVERED
 ZENOVFS_OLD_OR_NEW_CONTENT_ONLY
+ZENOVFS_INTERRUPTED_WRITE_RECOVERED
+ZENOVFS_FSCK_OK
 ```
 
-### 5. Zenov source-to-application path
+See [`ZENOVFS1_TRANSACTIONS.md`](ZENOVFS1_TRANSACTIONS.md).
 
-Current state: Zenov owns system configuration, while bundled applications are assembled directly.
+### 5. Zenov source-to-ring-3 application path
 
-Required work across both repositories:
+Implemented across both repositories:
 
-- define the supported Zenov subset for freestanding ZenovOS applications;
-- compile a `.zv` application into ZEX1 or static ELF32;
-- package the result into the ZenovFS data image;
-- keep compiler/runtime changes in `zenov` synchronized with the OS ABI documentation;
-- run the generated application in ring 3 in QEMU;
-- add a cross-repository compatibility manifest containing Zenov compiler revision and ZenovOS ABI version.
+- `zenov` provides a strict `zenov-os-app` target for the documented freestanding `app`, `say` and `exit` subset;
+- compilation produces deterministic ZEX1 for ABI `0.1.1`;
+- the same source is compiled twice and compared byte-for-byte;
+- malformed or unsupported hosted-language statements are rejected;
+- ZenovOS packages the generated artifact into ZenovFS1 and executes it in ring 3;
+- the build manifest pins the merged Zenov compiler revision, ABI version, compiler-source hash and canonical artifact hash.
 
 Acceptance evidence:
 
 ```text
 ZENOV_SOURCE_APP_BUILD_OK
+ZENOV_OS_APP_ARTIFACT_OK
+ZENOV_OS_APP_COMPILER_CONTRACT_OK
 ZENOV_SOURCE_APP_RING3_OK
 ZENOV_COMPILER_ABI_MATCH_OK
 ```
 
-## P1 — recommended for the final 0.1.1 release package
+## Release provenance
 
-- replace scattered command dispatch logic with a command registry split by system, storage, process and diagnostics domains;
-- add serial-log timestamps and structured panic/fault records;
-- add release provenance: source commit, compiler commit, build manifest and image hashes in both the ZIP and the bootable system documents;
-- refresh the `v0.1.1` GitHub Release assets from the final `main` commit;
-- verify QEMU and VirtualBox launch instructions from a clean environment;
-- publish the CI framebuffer PNG directly in the repository and release notes.
+The deterministic release ZIP contains:
+
+- the boot and writable data images;
+- launch scripts and installation instructions;
+- `BUILD-MANIFEST.json` with source, compiler and output hashes;
+- `SOURCE-REVISION.txt` with the exact ZenovOS commit;
+- external and internal SHA-256 checksum files.
+
+Two independently generated packages and complete system rebuilds must remain byte-identical.
+
+## P1 remaining before freezing the release assets
+
+These tasks improve maintainability and distribution quality but no longer block the P0 functional baseline:
+
+- split the monolithic command dispatcher into domain registries;
+- add structured serial timestamps and stable machine-readable panic/fault records;
+- refresh the repository framebuffer PNG from the final post-merge CI artifact;
+- rebuild and replace GitHub Release `v0.1.1` assets from the exact final `main` commit;
+- verify the documented VirtualBox path manually; QEMU remains the automated hardware acceptance target;
+- add a reproducible source archive or SBOM to the release assets.
 
 ## Explicitly deferred beyond 0.1.1
 
-The following features should not block completion of this patch line:
+The following features do not belong in this patch line:
 
-- preemptive multitasking and multiple concurrent processes;
-- per-process address spaces;
+- preemptive multitasking and concurrent processes;
+- per-process page directories;
 - SMP;
 - networking;
 - USB;
@@ -149,8 +161,8 @@ The following features should not block completion of this patch line:
 - a physical-disk installer;
 - PE, DOS or Win32 compatibility;
 - dynamic linking;
-- ZenovFS2 variable extents or journaling.
+- ZenovFS2 variable extents or a new incompatible journal format.
 
-## Release rule
+## Freeze rule
 
-`0.1.1` is complete only when every P0 item has an executable regression test and the final package is rebuilt from the exact merged `main` commit. Documentation-only claims are not sufficient.
+`0.1.1` may be frozen only when the final `main` commit passes strict host and freestanding compilation, host crash injection, all QEMU phases, deterministic system rebuilding and deterministic release packaging. Documentation-only claims are not sufficient.
