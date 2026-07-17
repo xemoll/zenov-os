@@ -55,11 +55,12 @@ bool stress_test() {
         if (!frames[i] || (frames[i] & (page_size - 1U))) return false;
         for (uint32_t j = 0; j < i; ++j) if (frames[j] == frames[i]) return false;
     }
-    if (available_frames + self_test_frames != free_before || allocated_frames != allocated_before + self_test_frames) return false;
+    if (available_frames + self_test_frames != free_before || allocated_frames != allocated_before + self_test_frames ||
+        allocated_bytes() != (allocated_before + self_test_frames) * page_size) return false;
     if (free_frame(frames[0] + 1U)) return false;
     for (uint32_t i = self_test_frames; i > 0; --i) if (!free_frame(frames[i - 1U])) return false;
     if (free_frame(frames[0])) return false;
-    return available_frames == free_before && allocated_frames == allocated_before;
+    return available_frames == free_before && allocated_frames == allocated_before && allocated_bytes() == allocated_before * page_size;
 }
 void init() {
     for (uint32_t i = 0; i < bitmap_words; ++i) frame_bitmap[i] = 0xFFFFFFFFU;
