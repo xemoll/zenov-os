@@ -6,6 +6,9 @@
 - [`ZENOVGUARD_0.1.1.md`](ZENOVGUARD_0.1.1.md) — SHA-256 appraisal, signed policy, persistent audit and quarantine contract.
 - [`ZGDB_0.1.1.md`](ZGDB_0.1.1.md) — signed database format, RSA-PSS policy update, revocation and anti-rollback boundary.
 - [`AUDIT_JOURNAL_0.1.1.md`](AUDIT_JOURNAL_0.1.1.md) — ZGAL1 format, hash chain, 1,662-case COW fault matrix, kernel recovery images and offline-attacker boundary.
+- [`ZENPKG_FORMAT_1.md`](ZENPKG_FORMAT_1.md) — deterministic package container and canonical manifest contract.
+- [`NATIVE_PACKAGE_MANAGER_0.1.1.md`](NATIVE_PACKAGE_MANAGER_0.1.1.md) — local catalog authorization, ZPKDB1 transactions, rollback and ZenovGuard execution integration.
+- [`PACKAGE_COMPATIBILITY_ARCHITECTURE.md`](PACKAGE_COMPATIBILITY_ARCHITECTURE.md) — provider boundaries and staged foreign-runtime roadmap.
 - [`ZENOVFS1_TRANSACTIONS.md`](ZENOVFS1_TRANSACTIONS.md) — interrupted-write ordering and recovery.
 - [`POST_MERGE_HARDENING.md`](POST_MERGE_HARDENING.md) — process-window scrub and W^X audit delta.
 - [`RELEASE_CHECKLIST_0.1.1.md`](RELEASE_CHECKLIST_0.1.1.md) — final-main verification and publication gate.

@@ -1,0 +1,16 @@
+format=zenpkg-manifest-1
+name=hello-native
+version=0.3.0
+architecture=i686
+target=i686-zenov-none
+kind=application
+entrypoint=/data/apps/pkg-hello-native-0.3.0.zex
+payload_type=zex1
+runtime=native
+min_os=0.1.1
+license=BSD-2-Clause
+source=https://github.com/xemoll/zenov-os
+asset_policy=redistributable
+capability=abi.zex1.v1
+capability=kernel.ring3
+capability=storage.zenovfs1
