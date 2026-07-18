@@ -31,6 +31,10 @@ Applications use `INT 0x80`; `EAX` contains the number and result, while `EBX`, 
 | 7 | `sync` | none | zero |
 | 8 | `read_console` | `EBX=output`, `ECX=capacity` | bytes read |
 
+The syscall table is an ABI surface, not an automatic grant. After final-read trust appraisal, each bundled application receives an immutable per-application capability mask. File operations additionally require an exact normalized path scope. See [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md).
+
+`exit` remains available to every process. Unknown syscall numbers preserve the unsupported-operation result. A known syscall denied by the active profile returns `ERROR_DENIED` and creates a mandatory persistent security record.
+
 Stable errors:
 
 ```text
@@ -40,9 +44,16 @@ Stable errors:
 0xFFFFFFFC I/O failure
 0xFFFFFFFB invalid/unmapped/non-writable user pointer
 0xFFFFFFFA unsupported operation
+0xFFFFFFF9 capability or path-scope denied
 ```
 
-All user ranges are checked for overflow, mapping presence and required write permission.
+All user ranges are checked for overflow, mapping presence and required write permission. Capability checks do not replace pointer validation: an authorized operation with an invalid pointer still returns the pointer fault error.
+
+## Capability lifetime
+
+The active syscall profile is cleared before every launch attempt. A profile is installed only after ZGDB2, executable-policy, path-and-SHA-256 trust and persistent execution-audit checks succeed on the bytes consumed by the loader. It is cleared again after normal exit, recoverable fault or load failure.
+
+There is one active profile because ZenovOS 0.1.1 has one foreground process. Authority is not inherited from the preceding process and is not derived from executable format alone.
 
 ## Executable formats
 
@@ -52,4 +63,4 @@ The ELF loader accepts static little-endian ELF32/i386 with a valid entry in an 
 
 ## Fault contract
 
-A ring-3 exception terminates the foreground application, records its identity, vector, error code and EIP, and returns to the shell. Page faults additionally record CR2 and present/write/user bits. Kernel exceptions remain fatal. The common exit/fault path scrubs the reused process window before returning.
+A ring-3 exception terminates the foreground application, records its identity, vector, error code and EIP, and returns to the shell. Page faults additionally record CR2 and present/write/user bits. Kernel exceptions remain fatal. The common exit/fault path scrubs the reused process window and clears syscall authority before returning.
