@@ -42,7 +42,7 @@ DENIAL="SYSCALL_CAPABILITY_DENIED app=/apps/kaccess.elf syscall=1 capability=con
 require_line "$PHASE1" "$DENIAL"
 [[ "$(grep -Fc 'SYSCALL_CAPABILITY_DENIED app=' "$PHASE1")" -eq 1 ]] || { echo "syscall-capability-check: unexpected denial count" >&2; exit 1; }
 
-kaccess_start="$(line_number "$PHASE1" 'APP_START_ELF /apps/kaccess.elf')"
+kaccess_start="$(line_number "$PHASE1" 'APP_START_ELF /data/apps/kaccess.elf')"
 denial_line="$(line_number "$PHASE1" "$DENIAL")"
 fault_line="$(line_number "$PHASE1" 'USER_KERNEL_ACCESS_BLOCKED')"
 zenov_profile="$(line_number "$PHASE1" 'SYSCALL_CAPABILITY_PROFILE_ACTIVE app=/apps/zenovapp.zex mask=0x00000001')"
