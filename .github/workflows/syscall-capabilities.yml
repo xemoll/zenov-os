@@ -1,0 +1,97 @@
+name: ZenovOS 0.1.1 Syscall Capabilities
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  least-privilege-ring3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verify exact tested source revision
+        run: |
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+          echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
+
+      - name: Install strict native toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86 zip unzip
+
+      - name: Verify source hygiene
+        run: |
+          test -z "$(find . -name '*.py' -print)"
+          while IFS= read -r file; do
+            iconv -f UTF-8 -t UTF-8 "$file" >/dev/null
+          done < <(find kernel user tools boot packaging security tests -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.inc' -o -name '*.S' -o -name '*.zv' -o -name '*.ld' -o -name '*.sh' -o -name '*.txt' -o -name '*.pem' \) -print)
+
+      - name: Run strict build and storage security matrix
+        run: |
+          mkdir -p ci-logs
+          set -o pipefail
+          make clean check 2>&1 | tee ci-logs/capability-native-build.log
+
+      - name: Boot all QEMU phases
+        run: make qemu
+
+      - name: Verify syscall capability evidence
+        run: |
+          bash tools/check_syscall_capabilities.sh \
+            build/qemu/serial.log \
+            build/qemu/zenov-data-runtime.img \
+            build/zenovfs-audit-verify \
+            build/qemu/syscall-capability-evidence.txt
+          grep -Fqx 'status=PASS' build/qemu/syscall-capability-evidence.txt
+          grep -Fq 'SYSCALL_CAPABILITY_POLICY_OK' build/qemu/serial.log
+          grep -Fq 'SYSCALL_CAPABILITY_PROFILES_OK count=7' build/qemu/serial.log
+          grep -Fq 'SYSCALL_CAPABILITY_DENIED app=/apps/kaccess.elf syscall=1 capability=console-write reason=missing-capability' build/qemu/serial-phase1.log
+          ! grep -Fq 'SYSCALL_CAPABILITY_AUDIT_FAILED' build/qemu/serial.log
+          ! grep -Fq 'SYSCALL_CAPABILITY_PROFILE_MISSING' build/qemu/serial.log
+
+      - name: Verify deterministic system rebuild
+        run: make deterministic
+
+      - name: Verify policy source contract
+        run: |
+          grep -Fq '{"/apps/hello.zex", capability_console_write' kernel/parts/process_capabilities.inc
+          grep -Fq '"/apps/userio.txt", "/apps/userio.txt"' kernel/parts/process_capabilities.inc
+          grep -Fq '{"/apps/args.elf", capability_console_write | capability_file_read, "/docs/readme.txt", ""}' kernel/parts/process_capabilities.inc
+          grep -Fq '{"/apps/kaccess.elf", 0U, "", ""}' kernel/parts/process_capabilities.inc
+          grep -Fq 'constexpr uint32_t syscall_error_denied = 0xFFFFFFF9U;' kernel/parts/process_capabilities.inc
+          grep -Fq 'const bool result = input && run_unchecked(input);' kernel/parts/process_policy.inc
+          test "$(grep -Fc 'clear_capability_profile();' kernel/parts/process_policy.inc)" -eq 2
+          echo 'ZENOV_SYSCALL_CAPABILITY_SOURCE_CONTRACT_OK'
+
+      - name: Upload syscall capability evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-0.1.1-syscall-capabilities-ci
+          if-no-files-found: error
+          path: |
+            build/BOOT.BIN
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/zenov-os.img
+            build/zenov-data.img
+            build/build-manifest.json
+            build/qemu/serial.log
+            build/qemu/serial-phase1.log
+            build/qemu/serial-phase2.log
+            build/qemu/zenov-data-runtime.img
+            build/qemu/syscall-capability-evidence.txt
+            build/qemu/screenshot.ppm
+            kernel/parts/process_capabilities.inc
+            docs/SYSCALL_CAPABILITIES_0.1.1.md
+            ci-logs/capability-native-build.log
