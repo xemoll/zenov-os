@@ -8,8 +8,14 @@ void command_guard(char* args) {
     if (!*subcommand || string_equal(subcommand, "status")) {
         begin_view("ZENOVGUARD STATUS");
         security_guard::print_status();
+        process::print_capability_status();
         security_audit::print_status();
         zgdb::print_status();
+        return;
+    }
+    if (string_equal(subcommand, "capabilities")) {
+        begin_view("APPLICATION SYSCALL CAPABILITIES");
+        process::print_capability_profiles();
         return;
     }
     if (string_equal(subcommand, "database")) {
@@ -26,7 +32,7 @@ void command_guard(char* args) {
     }
     if (string_equal(subcommand, "selftest")) {
         begin_view("ZENOVGUARD SELF-TEST");
-        if (security_guard::self_test() && security_audit::self_test()) {
+        if (security_guard::self_test() && security_audit::self_test() && process::capability_self_test()) {
             console::success("ZENOV_GUARD_SELFTEST_OK"); serial::line("ZENOV_GUARD_SELFTEST_OK");
         } else {
             console::warning("ZENOV_GUARD_SELFTEST_FAILED"); serial::line("ZENOV_GUARD_SELFTEST_FAILED");
@@ -64,5 +70,5 @@ void command_guard(char* args) {
         else console::warning("Quarantine rejected or persistent audit commit failed.");
         return;
     }
-    console::warning("Usage: guard status | database | update <zgdb> | scan <path|all> | quarantine <path> | log [verify] | selftest");
+    console::warning("Usage: guard status | capabilities | database | update <zgdb> | scan <path|all> | quarantine <path> | log [verify] | selftest");
 }
