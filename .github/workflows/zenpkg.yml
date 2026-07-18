@@ -56,7 +56,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build 0.1.1 package-enabled image and host regressions
-        run: make clean zenpkg-check
+        run: |
+          rm -f /tmp/zenpkg-check.log
+          if ! make clean zenpkg-check > /tmp/zenpkg-check.log 2>&1; then
+            tail -n 100 /tmp/zenpkg-check.log
+            exit 1
+          fi
+          tail -n 40 /tmp/zenpkg-check.log
       - name: Run standalone ZenPkg format suite
         run: bash tests/zenpkg_test.sh
       - name: Compile package manager host model with sanitizers

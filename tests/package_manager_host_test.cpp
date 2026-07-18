@@ -93,6 +93,13 @@ bool normalize_path(const char* input, char output[48]) {
     if (std::strlen(source) >= 48U) return false;
     std::strcpy(output, source); return true;
 }
+bool path_copy(char* output, const char* input, uint32_t capacity) {
+    if (!output || !input || capacity == 0U) return false;
+    const std::size_t size = std::strlen(input);
+    if (size + 1U > capacity) return false;
+    std::memcpy(output, input, size + 1U);
+    return true;
+}
 }
 
 namespace security_guard {
@@ -184,7 +191,7 @@ int main(){
     const auto& installed_payload=storage::nodes["/data/apps/pkg-hello-native-0.1.0.zex"].data;
     assert(package_manager::allow_execution("/data/apps/pkg-hello-native-0.1.0.zex", installed_payload.data(), static_cast<uint32_t>(installed_payload.size())));
     auto altered_payload=installed_payload; altered_payload.back()^=1U;
-    assert(!package_manager::allow_execution("/data/apps/pkg-hello-native-0.1.0.zex", altered_payload.data(), static_cast<uint32_t>(altered_payload.size())));
+    assert(!package_manager::allow_execution("/data/aps/pkg-hello-native-0.1.0.zex", altered_payload.data(), static_cast<uint32_t>(altered_payload.size())));
     char dispatched[]="pkg status"; assert(package_manager::dispatch_line(dispatched));
     char unrelated[]="status"; assert(!package_manager::dispatch_line(unrelated));
     uint32_t committed_generation=package_manager::database.generation;
@@ -198,7 +205,7 @@ int main(){
     storage::nodes[package_manager::state_path].data=authentic_state;
     reset_runtime_only(); package_manager::init(); assert(package_manager::initialized);
     storage::fail_state_write=true; assert(!package_manager::install("/packages/hello-native-0.2.0.zpk")); storage::fail_state_write=false; assert(std::string(package_manager::database.records[0].active.version)=="0.1.0"); assert(storage::nodes.count("/data/apps/pkg-hello-native-0.2.0.zex"));
-    auto corrupt=v2; corrupt.back()^=0xff; put_file("/packages/corrupt.zpk",corrupt); assert(!package_manager::verify("/packages/corrupt.zpk"));
+    auto corrupt=v2; corrupt.back()^=0xff; put_file("/packages/corrup.vpk",corrupt); assert(!package_manager::verify("/packages/corrupt.vpk"));
     assert(package_manager::remove_package("hello-native")); reset_runtime_only(); package_manager::init(); assert(package_manager::find_record("hello-native")==-1);
     auto saved_state=storage::nodes["/var/lib/zenpkg/state.v1"].data;
     storage::nodes["/var/lib/zenpkg/state.v1"].data[0]^=0xff;
