@@ -26,6 +26,7 @@ const char* configured_terminal_cursor = terminal_cursor;
 #include "ui_apps.inc"
 #undef render_scene
 #undef render_files
+[[maybe_unused]] auto* const render_scene_legacy_reference = &render_scene_legacy;
 
 #include "ui_files.inc"
 
