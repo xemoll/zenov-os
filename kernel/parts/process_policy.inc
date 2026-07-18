@@ -36,6 +36,9 @@ bool elf_policy_self_test() {
 }
 
 bool run(char* input) {
-    return input && run_unchecked(input);
+    clear_capability_profile();
+    const bool result = input && run_unchecked(input);
+    clear_capability_profile();
+    return result;
 }
 } // namespace process
