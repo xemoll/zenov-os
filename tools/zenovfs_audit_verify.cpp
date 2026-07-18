@@ -14,6 +14,8 @@
 namespace {
 constexpr std::uint32_t kSectorSize = 512U;
 constexpr char kAuditPath[] = "/security/zenovguard.audit";
+constexpr std::uint8_t kActionExecute = 2U;
+constexpr std::uint8_t kVerdictUntrusted = 2U;
 
 #pragma pack(push, 1)
 struct Superblock {
@@ -55,6 +57,18 @@ bool path_equal(const Entry& entry, const char* path) {
     const std::size_t length = std::strlen(path);
     return length < sizeof(entry.path) && std::memcmp(entry.path, path, length) == 0 && entry.path[length] == 0;
 }
+bool record_path_equal(const zenov_audit_host::Record& record, const std::string& path) {
+    return path.size() == record.path_length && path.size() < sizeof(record.path) &&
+        std::memcmp(record.path, path.data(), path.size()) == 0 && record.path[path.size()] == 0;
+}
+bool contains_record(const zenov_audit_host::Journal& journal, std::uint8_t action, std::uint8_t verdict, const std::string& path) {
+    const std::uint32_t first = journal.header.count == zenov_audit_host::kCapacity ? journal.header.next_index : 0U;
+    for (std::uint32_t i = 0; i < journal.header.count; ++i) {
+        const auto& record = journal.records[(first + i) % zenov_audit_host::kCapacity];
+        if (record.action == action && record.verdict == verdict && record_path_equal(record, path)) return true;
+    }
+    return false;
+}
 void print_prefix(const std::uint8_t hash[32]) {
     for (std::size_t i = 0; i < 8U; ++i) std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(hash[i]);
     std::cout << std::dec;
@@ -64,15 +78,17 @@ void print_prefix(const std::uint8_t hash[32]) {
 int main(int argc, char** argv) {
     try {
         if (argc < 2) {
-            std::cerr << "usage: zenovfs-audit-verify <zenov-data.img> [--require-nonempty] [--emit-tampered <image>]\n";
+            std::cerr << "usage: zenovfs-audit-verify <zenov-data.img> [--require-nonempty] [--require-exec-untrusted <path>] [--emit-tampered <image>]\n";
             return 2;
         }
         if (!zenov_audit_host::sha256_self_test()) throw std::runtime_error("SHA-256 known-answer test failed");
         bool require_nonempty = false;
+        std::string required_untrusted_exec;
         std::string tampered_output;
         for (int i = 2; i < argc; ++i) {
             const std::string argument = argv[i];
             if (argument == "--require-nonempty") require_nonempty = true;
+            else if (argument == "--require-exec-untrusted" && i + 1 < argc) required_untrusted_exec = argv[++i];
             else if (argument == "--emit-tampered" && i + 1 < argc) tampered_output = argv[++i];
             else throw std::runtime_error("unknown or incomplete argument: " + argument);
         }
@@ -98,9 +114,13 @@ int main(int argc, char** argv) {
         const auto* journal = reinterpret_cast<const zenov_audit_host::Journal*>(image.data() + payload_offset);
         if (zenov_audit_host::fnv1a(reinterpret_cast<const std::uint8_t*>(journal), sizeof(*journal)) != entry.checksum) throw std::runtime_error("audit filesystem checksum mismatch");
         if (!zenov_audit_host::verify(*journal, require_nonempty)) throw std::runtime_error("audit hash-chain mismatch");
+        if (!required_untrusted_exec.empty() && !contains_record(*journal, kActionExecute, kVerdictUntrusted, required_untrusted_exec)) {
+            throw std::runtime_error("required persistent untrusted execution record missing: " + required_untrusted_exec);
+        }
 
         std::cout << "zenovfs-audit-verify: OK count=" << journal->header.count << " next=" << journal->header.next_sequence << " head=";
         print_prefix(journal->header.head_hash);
+        if (!required_untrusted_exec.empty()) std::cout << " required_exec_untrusted=" << required_untrusted_exec;
         std::cout << "\n";
 
         if (!tampered_output.empty()) {
