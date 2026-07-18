@@ -17,6 +17,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/storage.inc"
 #include "parts/storage_bytes.inc"
 #include "parts/storage_tools.inc"
+#include "parts/storage_browser.inc"
 #include "parts/security_paths.inc"
 namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uint32_t&); }
 #define read_file security_read_file
