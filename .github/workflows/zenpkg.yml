@@ -1,0 +1,81 @@
+name: ZenPkg
+
+on:
+  push:
+    paths:
+      - 'GNUmakefile'
+      - 'zenpkg.mk'
+      - 'tools/zenpkg/**'
+      - 'tools/zenovfs_package_seed.cpp'
+      - 'tests/zenpkg_test.sh'
+      - 'tests/package_manager_host_test.cpp'
+      - 'tests/qemu_zenpkg.sh'
+      - 'packages/**'
+      - 'kernel/parts/package_format.inc'
+      - 'kernel/parts/package_manager.inc'
+      - 'kernel/parts/package_manager/**'
+      - 'kernel/parts/security_io.inc'
+      - 'kernel/parts/security_paths.inc'
+      - 'kernel/kernel.cpp'
+      - 'docs/ZENPKG_FORMAT_1.md'
+      - 'docs/NATIVE_PACKAGE_MANAGER_0.1.1.md'
+      - 'docs/PACKAGE_COMPATIBILITY_ARCHITECTURE.md'
+      - '.github/workflows/zenpkg.yml'
+  pull_request:
+    paths:
+      - 'GNUmakefile'
+      - 'zenpkg.mk'
+      - 'tools/zenpkg/**'
+      - 'tools/zenovfs_package_seed.cpp'
+      - 'tests/zenpkg_test.sh'
+      - 'tests/package_manager_host_test.cpp'
+      - 'tests/qemu_zenpkg.sh'
+      - 'packages/**'
+      - 'kernel/parts/package_format.inc'
+      - 'kernel/parts/package_manager.inc'
+      - 'kernel/parts/package_manager/**'
+      - 'kernel/parts/security_io.inc'
+      - 'kernel/parts/security_paths.inc'
+      - 'kernel/kernel.cpp'
+      - 'docs/ZENPKG_FORMAT_1.md'
+      - 'docs/NATIVE_PACKAGE_MANAGER_0.1.1.md'
+      - 'docs/PACKAGE_COMPATIBILITY_ARCHITECTURE.md'
+      - '.github/workflows/zenpkg.yml'
+
+permissions:
+  contents: read
+
+env:
+  CXX: g++
+  SOURCE_DATE_EPOCH: '0'
+
+jobs:
+  package-manager:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build 0.1.1 package-enabled image and host regressions
+        run: make clean zenpkg-check
+      - name: Run standalone ZenPkg format suite
+        run: bash tests/zenpkg_test.sh
+      - name: Compile package manager host model with sanitizers
+        run: |
+          mkdir -p build/sanitized
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/package_manager_host_test.cpp -o build/sanitized/package-manager-host-test
+          build/sanitized/package-manager-host-test
+      - name: Compile release ZenPkg CLI
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tools/zenpkg/main.cpp -o build/zenpkg-release
+          build/zenpkg-release --help
+      - name: Verify deterministic package bytes
+        run: |
+          rm -rf /tmp/zenpkg-rebuild
+          make --no-print-directory BUILD=/tmp/zenpkg-rebuild zenpkg-check
+          for package in hello-native-0.1.0.zpk hello-native-0.2.0.zpk hello-native-0.3.0.zpk; do
+            cmp "build/$package" "/tmp/zenpkg-rebuild/$package"
+          done
+          cmp build/zenpkg-manifest.json /tmp/zenpkg-rebuild/zenpkg-manifest.json
