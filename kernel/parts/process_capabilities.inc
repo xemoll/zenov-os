@@ -94,6 +94,7 @@ bool capability_profile_available(const char* input) {
 }
 
 bool activate_capability_profile(const char* input, const uint8_t* data, uint32_t size) {
+    if (!capability_profile_available(input)) return false;
     char normalized[48];
     if (!normalize_capability_path(input, normalized)) return false;
     const CapabilityProfile* profile = find_capability_profile(normalized);
