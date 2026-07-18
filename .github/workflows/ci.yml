@@ -46,6 +46,9 @@ jobs:
       - name: Boot desktop and six recovery/fail-closed phases
         run: make qemu
 
+      - name: Verify Files browser navigation and preview
+        run: bash tests/qemu_files_ui.sh build/zenov-os.img build/zenov-data.img build/qemu-files-ui
+
       - name: Verify deterministic installation package and provenance
         run: |
           bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
@@ -90,6 +93,13 @@ jobs:
           fi
           for db in build/zenovguard-v3.zgdb build/zenovguard-v4.zgdb build/zenovguard-tampered.zgdb build/zenovguard-wrong-key.zgdb; do test -s "$db"; done
           test -s build/qemu/screenshot.ppm
+          test -s build/qemu-files-ui/files-root.ppm
+          test -s build/qemu-files-ui/files-apps.ppm
+          test -s build/qemu-files-ui/files-preview.ppm
+          grep -q UI_FILES_BROWSER_OK build/qemu-files-ui/serial.log
+          grep -q UI_KEYBOARD_NAV_OK build/qemu-files-ui/serial.log
+          grep -q UI_FILES_NAV_OK build/qemu-files-ui/serial.log
+          grep -q UI_FILES_PREVIEW_OK build/qemu-files-ui/serial.log
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
           grep -q PMM_STRESS_OK build/qemu/serial.log
           grep -q PMM_OK build/qemu/serial.log
@@ -203,6 +213,9 @@ jobs:
             build/qemu/qemu*.stderr
             build/qemu/zenov-data*.img
             build/qemu/screenshot.ppm
+            build/qemu-files-ui/*.log
+            build/qemu-files-ui/*.stderr
+            build/qemu-files-ui/*.ppm
             security/zenovguard-root-public.pem
             dist/
             ci-logs/native-build.log
