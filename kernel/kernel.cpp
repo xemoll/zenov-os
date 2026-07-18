@@ -86,6 +86,7 @@ extern "C" void kernel_main() {
     if (!security_audit::verify_active()) panic("Persistent security audit final-read verification failed.");
     serial::line("ZENOV_GUARD_PROTECTED_PATH_TEST_OK");
     const bool graphical = graphics::init();
+    if (graphical) { console::activate_shadow(); serial::line("CONSOLE_SHADOW_OK"); }
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
     pic_remap();
     const bool mouse_ready = mouse_init();
@@ -99,6 +100,7 @@ extern "C" void kernel_main() {
 
     serial::line("Kernel online. Desktop, signed policy, persistent audit, security, storage and ring-3 services ready.");
     console::show_home();
+    if (graphical) graphics::sync_terminal_from_console();
     serial::line("ZENOVOS_UI_READY");
     shell_run();
 }
