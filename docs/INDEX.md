@@ -10,6 +10,7 @@
 - [`AUDIT_JOURNAL_0.1.1.md`](AUDIT_JOURNAL_0.1.1.md) — ZGAL1 format, hash chain, COW fault matrix, recovery images and offline-attacker boundary.
 - [`ZENPKG_FORMAT_1.md`](ZENPKG_FORMAT_1.md) — deterministic package container and canonical manifest contract.
 - [`ZENREPO_OFFLINE_0.1.1.md`](ZENREPO_OFFLINE_0.1.1.md) — signed offline repository roles, root rotation, delegation, expiry and anti-rollback state.
+- [`ZENPKG_CACHE_0.1.1.md`](ZENPKG_CACHE_0.1.1.md) — protected staging, full target verification, atomic cache commit and five-boot QEMU evidence.
 - [`NATIVE_PACKAGE_MANAGER_0.1.1.md`](NATIVE_PACKAGE_MANAGER_0.1.1.md) — transactional lifecycle, planning, repair, rollback, signed authorization and least-privilege execution.
 - [`PACKAGE_COMPATIBILITY_ARCHITECTURE.md`](PACKAGE_COMPATIBILITY_ARCHITECTURE.md) — provider boundaries and staged foreign-runtime roadmap.
 - [`ZENUNIVERSE_REPOSITORY_0.1.1.md`](ZENUNIVERSE_REPOSITORY_0.1.1.md) — platform-neutral artifact catalog, HTTPS delivery contract and runtime-provider resolution.
