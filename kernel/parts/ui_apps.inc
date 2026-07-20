@@ -106,6 +106,13 @@ void render_terminal() {
     if (terminal_sync_started) render_terminal_cells(); else render_terminal_placeholder();
 }
 
+void draw_focus_outline(int32_t x, int32_t y, int32_t outline_width, int32_t outline_height, uint32_t color) {
+    fill_rect(x + 8, y, outline_width - 16, 1, color);
+    fill_rect(x + 8, y + outline_height - 1, outline_width - 16, 1, color);
+    fill_rect(x, y + 8, 1, outline_height - 16, color);
+    fill_rect(x + outline_width - 1, y + 8, 1, outline_height - 16, color);
+}
+
 void draw_settings_theme(uint32_t index, uint32_t color, const char* name, HoverTarget target) {
     const int32_t x = window_x + settings_theme_x_offsets[index];
     const int32_t y = window_y + settings_theme_y_offset;
@@ -118,7 +125,7 @@ void draw_settings_theme(uint32_t index, uint32_t color, const char* name, Hover
     fill_circle_alpha(x + 22, y + 22, 7, color, 255);
     draw_text(x + 40, y + 18, name, current_theme.text, 1);
     draw_text(x + 16, y + 40, selected ? "ACTIVE" : "SELECT", selected ? current_theme.success : current_theme.text_muted, 1);
-    if (focused) draw_round_border(x, y, settings_theme_width, settings_theme_height, 10, current_theme.accent);
+    if (focused) draw_focus_outline(x, y, settings_theme_width, settings_theme_height, current_theme.accent);
 }
 
 void draw_display_value(int32_t right, int32_t y) {
@@ -149,7 +156,7 @@ void draw_settings_display() {
     draw_display_value(x + card_width - 54, y + 23);
     fill_round_rect(x + card_width - 42, y + 12, 30, 30, 8, current_theme.surface_low);
     draw_char(x + card_width - 31, y + 23, '>', current_theme.text_muted, 1);
-    if (focused) draw_round_border(x, y, card_width, settings_display_height, 10, current_theme.accent);
+    if (focused) draw_focus_outline(x, y, card_width, settings_display_height, current_theme.accent);
 }
 
 void draw_settings_row(int32_t y, const char* label, const char* value, uint32_t value_color,
