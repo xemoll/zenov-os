@@ -83,10 +83,10 @@ void mgf1_sha256(const uint8_t seed[32], uint8_t* output, uint32_t size) {
     }
 }
 
-bool rsa_pss_verify(const uint8_t signature[signature_bytes], const uint8_t digest[32]) {
+bool rsa_pss_verify_with_modulus(const uint8_t signature[signature_bytes], const uint8_t digest[32], const uint8_t modulus_bytes[signature_bytes]) {
     BigInteger encoded_signature{}, modulus{}, decoded{};
-    big_from_be(encoded_signature, signature); big_from_be(modulus, kZgdbRootModulus);
-    if ((kZgdbRootModulus[0] & 0x80U) == 0 || big_compare(encoded_signature, modulus) >= 0) return false;
+    big_from_be(encoded_signature, signature); big_from_be(modulus, modulus_bytes);
+    if ((modulus_bytes[0] & 0x80U) == 0 || big_compare(encoded_signature, modulus) >= 0) return false;
     big_exp_65537(decoded, encoded_signature, modulus);
     uint8_t encoded[256]; big_to_be(decoded, encoded);
     constexpr uint32_t hash_bytes = 32U, salt_bytes = 32U, database_bytes = 223U, padding_bytes = 190U;
@@ -102,6 +102,10 @@ bool rsa_pss_verify(const uint8_t signature[signature_bytes], const uint8_t dige
     memcpy(message + 8U, digest, hash_bytes); memcpy(message + 8U + hash_bytes, database + padding_bytes + 1U, salt_bytes);
     uint8_t expected_hash[hash_bytes]; security_guard::sha256(message, sizeof(message), expected_hash);
     return malformed == 0 && security_guard::digest_equal(encoded_hash, expected_hash);
+}
+
+bool rsa_pss_verify(const uint8_t signature[signature_bytes], const uint8_t digest[32]) {
+    return rsa_pss_verify_with_modulus(signature, digest, kZgdbRootModulus);
 }
 
 bool record_name_valid(const Record& record) {

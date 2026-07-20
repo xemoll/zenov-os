@@ -115,8 +115,8 @@ Any internally valid journal different from both the exact old and exact new sta
 The verified matrix contains 1,662 cases:
 
 ```text
-empty-to-one       831 cases: old=404 new=404 fail-closed=23
-full-ring-rotation 831 cases: old=404 new=100 fail-closed=327
+empty-to-one       831 cases: old=298 new=370 fail-closed=163
+full-ring-rotation 831 cases: old=298 new=98 fail-closed=435
 ```
 
 The larger fail-closed set during rotation is expected: every retained record and the anchor participate in the new chain, so incomplete payload delivery cannot be treated as a valid replacement.

@@ -73,6 +73,8 @@ Available commands:
 guard status
 guard database
 guard update <signed-zgdb-path>
+guard capability-policy
+guard capability-update <signed-zcap-path>
 guard selftest
 guard scan <path>
 guard scan all
@@ -83,7 +85,7 @@ guard log verify
 
 `antivirus` is an alias for `guard`.
 
-Signed policy updates are verified twice before activation, must be exactly version `N+1`, and are stored through ZenovFS copy-on-write replacement. The active database is committed before `/security/zenovguard.version`; boot reconciles a newer signed database with older version state, while an older database than the stored state is rejected.
+Signed ZGDB2 and ZCAP1 updates are verified twice before activation, must be exactly version `N+1`, and are stored through ZenovFS copy-on-write replacement. Each active policy object is committed before its corresponding version file. Boot reconciles a newer valid signed policy with older version state, while an active policy older than stored state is rejected.
 
 Every BOOT, SCAN, EXEC and QUARANTINE event replaces the complete 8,288-byte journal through the same copy-on-write mechanism. If an audit append fails, ZenovGuard restores the prior in-memory state, marks the journal unavailable and locks subsequent application execution.
 
@@ -91,7 +93,7 @@ The audit transaction is now exercised against two exact transitions: empty jour
 
 Three complete data images are booted by QEMU: a pre-commit interruption that recovers the old journal, a post-commit interruption that recovers the new journal, and a committed replacement with one missing payload sector that must panic before `ZENOVOS_UI_READY`.
 
-The trusted applications, active policy, policy version and audit journal are protected from ordinary shell and userspace write, remove, rename and copy-over operations.
+The trusted applications, active ZGDB2/ZCAP1 policies, their version state and the audit journal are protected from ordinary shell and userspace write, remove, rename and copy-over operations.
 
 Quarantine uses an atomic ZenovFS metadata rename into:
 
@@ -128,6 +130,14 @@ ZGDB_ATOMIC_UPDATE_OK version=4
 ZGDB_ROLLBACK_REJECTED
 ZGDB_REVOCATION_BLOCKED
 ZGDB_POLICY_VERSION_OK version=4
+ZCAP_ROOT_KEY_OK id=9202c73fad96ad66
+ZCAP_PSS_SIGNATURE_OK
+ZCAP_POLICY_VERSION_OK version=1
+ZCAP_KEY_REJECTED reason=unknown-key
+ZCAP_TAMPER_REJECTED
+ZCAP_ATOMIC_UPDATE_OK version=2
+ZCAP_ROLLBACK_REJECTED
+ZCAP_POLICY_VERSION_OK version=2
 ```
 
 ## Memory and isolation
@@ -221,20 +231,20 @@ The primary workflow performs:
 1. strict host and freestanding compilation with warnings as errors;
 2. FAT12, ZenovFS1, ZEX1 and ELF structural checks;
 3. SHA-256 known-answer, fixed-record-vector, trust-baseline, execution-policy and audit-chain self-tests;
-4. deterministic ZGDB2 construction and pinned version-3/version-4 artifact hashes;
-5. OpenSSL RSA-PSS verification of both positive fixtures with salt length 32;
-6. independent rejection of tampered and unknown-key policy fixtures;
+4. deterministic ZGDB2 and ZCAP1 construction with pinned policy hashes;
+5. OpenSSL RSA-PSS verification of both ZGDB2 and both ZCAP1 positive fixtures with salt length 32;
+6. independent rejection of tampered and unknown-key fixtures for both policy domains;
 7. validation of the canonical empty ZGAL1 factory journal;
 8. 1,662-case audit COW fault matrix over ordered crashes, torn/garbage/dropped/duplicated/reordered writes and metadata permutations;
 9. existing exhaustive general ZenovFS1 crash-boundary injection;
-10. six QEMU phases covering normal runtime, reboot persistence, general recovery, audit old-state recovery, audit new-state recovery and audit fail-closed boot;
+10. seven QEMU phases covering normal runtime, signed ZCAP1 update, reboot persistence, general recovery, audit old/new recovery, audit fail-closed boot and corrupt-ZCAP fail-closed boot;
 11. independent host verification of the non-empty runtime ZGAL1 chain;
 12. generation of a payload-tampered image with a recomputed ZenovFS checksum and mandatory audit-chain rejection;
 13. a separate adaptive-display QEMU run that cycles all 22 VBE modes, verifies read-back, persistence, Settings keyboard control and actual framebuffer dimensions;
 14. representative desktop, compact, widescreen, 5:4, maximum-size and Settings framebuffer capture;
-15. deterministic system rebuilding, including policy fixtures and the empty journal seed;
+15. deterministic system rebuilding, including both signed policy domains, package metadata fixtures and the empty journal seed;
 16. deterministic release ZIP generation and byte comparison;
-17. evidence upload with runtime, recovery, corrupt and tampered images, binaries, signed policy, public root, manifest and all serial/monitor/framebuffer logs.
+17. evidence upload with runtime, recovery, corrupt and tampered images, binaries, both signed policy domains, both public roots, package metadata, manifest and serial/monitor/framebuffer logs.
 
 ## Build
 

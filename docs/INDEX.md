@@ -3,7 +3,8 @@
 - [`DESKTOP_0.1.1.md`](DESKTOP_0.1.1.md) — adaptive native desktop, 22 verified VBE modes, hybrid scaling, Settings controls and framebuffer evidence.
 - [`ROADMAP_0.1.1.md`](ROADMAP_0.1.1.md) — completed P0 contracts and remaining release-freeze work.
 - [`ABI_0.1.1.md`](ABI_0.1.1.md) — application memory, stack, syscall and executable-format contract.
-- [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md) — immutable per-application syscall masks, exact file scopes, denial audit and authority-lifetime contract.
+- [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md) — signed per-application syscall masks, exact file scopes, denial audit and authority-lifetime contract.
+- [`ZCAP_0.1.1.md`](ZCAP_0.1.1.md) — canonical ZCAP1 binary format, RSA-PSS root, sequential update and rollback boundary.
 - [`SECURITY_MODEL_0.1.1.md`](SECURITY_MODEL_0.1.1.md) — enforced trust boundaries and explicit non-goals.
 - [`ZENOVGUARD_0.1.1.md`](ZENOVGUARD_0.1.1.md) — SHA-256 appraisal, signed policy, persistent audit and quarantine contract.
 - [`ZGDB_0.1.1.md`](ZGDB_0.1.1.md) — signed database format, RSA-PSS policy update, revocation and anti-rollback boundary.

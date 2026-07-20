@@ -183,12 +183,17 @@ jobs:
           test "$(grep -c PERSISTENCE_0_1_1_OK build/qemu/serial.log)" -ge 2
           test "$(grep -c FILE_SYSCALL_PERSIST_OK build/qemu/serial.log)" -ge 2
           grep -q 'zenov> ' build/qemu/serial.log
-          grep -q '"format": "zenov-os-build-v11"' build/build-manifest.json
+          grep -q '"format": "zenov-os-build-v12"' build/build-manifest.json
           grep -q '"zgdb_schema": 2' build/build-manifest.json
           grep -q '"zgdb_compiled_floor": 3' build/build-manifest.json
           grep -q '"zgdb_root_key_id": "6f788074c018f5aa"' build/build-manifest.json
           grep -q '"zgdb_v3_sha256": "170633b6caf2348e3790cbada7ec5114b03fd73243d8fe572c9e46c237563030"' build/build-manifest.json
           grep -q '"zgdb_v4_sha256": "8445c9d9a48e6572a3d5eb1a7f45f484a7ae8e8fdfe1cce0cc0461a25aabcca6"' build/build-manifest.json
+          grep -q '"zcap_schema": 1' build/build-manifest.json
+          grep -q '"zcap_compiled_floor": 1' build/build-manifest.json
+          grep -q '"zcap_root_key_id": "9202c73fad96ad66"' build/build-manifest.json
+          grep -q '"zcap_v1_sha256": "029f784f01afede5d38da066ba239213ace2279eac9381876c70574e2eb89bf1"' build/build-manifest.json
+          grep -q '"zcap_v2_sha256": "f325310b94d443fb58df94b56f012ea0b6533fe0cbb453bef2c5d82551a9e51b"' build/build-manifest.json
           grep -q '"audit_schema": 1' build/build-manifest.json
           grep -q '"audit_capacity": 64' build/build-manifest.json
           grep -q '"audit_record_bytes": 128' build/build-manifest.json

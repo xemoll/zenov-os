@@ -21,10 +21,14 @@ ZENOV_COMPILER_REVISION := a58c3419b09d46be7fc7180ba910c14033910fdf
 ZGDB_V3_SHA256 := 170633b6caf2348e3790cbada7ec5114b03fd73243d8fe572c9e46c237563030
 ZGDB_V4_SHA256 := 8445c9d9a48e6572a3d5eb1a7f45f484a7ae8e8fdfe1cce0cc0461a25aabcca6
 ZGDB_FILES := $(BUILD)/zenovguard-v3.zgdb $(BUILD)/zenovguard-v4.zgdb $(BUILD)/zenovguard-tampered.zgdb $(BUILD)/zenovguard-wrong-key.zgdb
+ZCAP_V1_SHA256 := 029f784f01afede5d38da066ba239213ace2279eac9381876c70574e2eb89bf1
+ZCAP_V2_SHA256 := f325310b94d443fb58df94b56f012ea0b6533fe0cbb453bef2c5d82551a9e51b
+ZCAP_FILES := $(BUILD)/syscall-capabilities-v1.zcap $(BUILD)/syscall-capabilities-v2.zcap $(BUILD)/syscall-capabilities-tampered.zcap $(BUILD)/syscall-capabilities-wrong-key.zcap
 AUDIT_FAULT_STAMP := $(BUILD)/audit-cow-fault.stamp
 AUDIT_OLD_RECOVERY_IMAGE := $(BUILD)/qemu/zenov-data-audit-old-recovery.img
 AUDIT_NEW_RECOVERY_IMAGE := $(BUILD)/qemu/zenov-data-audit-new-recovery.img
 AUDIT_CORRUPT_IMAGE := $(BUILD)/qemu/zenov-data-audit-corrupt.img
+ZCAP_CORRUPT_IMAGE := $(BUILD)/qemu/zenov-data-zcap-corrupt.img
 
 .PHONY: all clean check test qemu deterministic inspect
 
@@ -60,11 +64,20 @@ $(BUILD)/zenovfs-audit-verify: tools/zenovfs_audit_verify.cpp | $(BUILD)
 $(BUILD)/zenovfs-audit-fault-test: tools/zenovfs_audit_fault_test.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
+$(BUILD)/zenovfs-zcap-corrupt: tools/zenovfs_zcap_corrupt.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+$(BUILD)/zcap-verify: tools/zcap_verify.cpp tools/zenov_audit_format.hpp security/zcap_crypto_material.hpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tools/zcap_verify.cpp -o $@
+
 $(BUILD)/zenov-app-compiler: tools/zenov_app_compiler.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
 $(BUILD)/zgdb-builder: tools/zgdb_builder.cpp security/zgdb_crypto_material.hpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tools/zgdb_builder.cpp -o $@
+
+$(BUILD)/zcap-builder: tools/zcap_builder.cpp security/zcap_crypto_material.hpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tools/zcap_builder.cpp -o $@
 
 $(BUILD)/zgdb.stamp: $(BUILD)/zgdb-builder security/zgdb_crypto_material.hpp security/zenovguard-root-public.pem | $(BUILD)
 	$(BUILD)/zgdb-builder $(BUILD)/zenovguard-v3.zgdb $(BUILD)/zenovguard-v4.zgdb $(BUILD)/zenovguard-tampered.zgdb $(BUILD)/zenovguard-wrong-key.zgdb
@@ -89,6 +102,31 @@ $(BUILD)/zgdb.stamp: $(BUILD)/zgdb-builder security/zgdb_crypto_material.hpp sec
 $(ZGDB_FILES): $(BUILD)/zgdb.stamp
 	@test -s $@
 
+$(BUILD)/zcap.stamp: $(BUILD)/zcap-builder $(BUILD)/zcap-verify security/zcap_crypto_material.hpp security/zcap-root-public.pem | $(BUILD)
+	$(BUILD)/zcap-builder $(BUILD)/syscall-capabilities-v1.zcap $(BUILD)/syscall-capabilities-v2.zcap $(BUILD)/syscall-capabilities-tampered.zcap $(BUILD)/syscall-capabilities-wrong-key.zcap
+	@printf '%s  %s\n' '$(ZCAP_V1_SHA256)' '$(BUILD)/syscall-capabilities-v1.zcap' | sha256sum -c -
+	@printf '%s  %s\n' '$(ZCAP_V2_SHA256)' '$(BUILD)/syscall-capabilities-v2.zcap' | sha256sum -c -
+	$(BUILD)/zcap-verify $(BUILD)/syscall-capabilities-v1.zcap --version 1 --hello-mask 1
+	$(BUILD)/zcap-verify $(BUILD)/syscall-capabilities-v2.zcap --version 2 --hello-mask 0
+	@for version in 1 2; do \
+	  head -c -256 $(BUILD)/syscall-capabilities-v$$version.zcap > $(BUILD)/zcap-v$$version.signed; \
+	  tail -c 256 $(BUILD)/syscall-capabilities-v$$version.zcap > $(BUILD)/zcap-v$$version.signature; \
+	  $(OPENSSL) dgst -sha256 -verify security/zcap-root-public.pem -signature $(BUILD)/zcap-v$$version.signature \
+	    -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 $(BUILD)/zcap-v$$version.signed; \
+	done
+	@for negative in tampered wrong-key; do \
+	  head -c -256 $(BUILD)/syscall-capabilities-$$negative.zcap > $(BUILD)/zcap-$$negative.signed; \
+	  tail -c 256 $(BUILD)/syscall-capabilities-$$negative.zcap > $(BUILD)/zcap-$$negative.signature; \
+	  if $(OPENSSL) dgst -sha256 -verify security/zcap-root-public.pem -signature $(BUILD)/zcap-$$negative.signature \
+	    -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 $(BUILD)/zcap-$$negative.signed >/dev/null 2>&1; then \
+	      echo "negative ZCAP fixture unexpectedly verified: $$negative" >&2; exit 1; \
+	  fi; \
+	done
+	@touch $@
+
+$(ZCAP_FILES): $(BUILD)/zcap.stamp
+	@test -s $@
+
 $(BUILD)/generated/zenov_config.hpp: kernel/main.zv $(ZENOV_CONFIG_SRC) $(BUILD)/zenov-stage0 | $(BUILD)
 	$(BUILD)/zenov-stage0 kernel/main.zv -o $@
 
@@ -109,7 +147,7 @@ $(BUILD)/interrupts.o: kernel/interrupts.S | $(BUILD)
 $(BUILD)/user-runtime.o: kernel/user.S | $(BUILD)
 	$(AS) --32 $< -o $@
 
-$(BUILD)/kernel.o: kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp $(BUILD)/generated/zenov_config.hpp | $(BUILD)
+$(BUILD)/kernel.o: kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp $(BUILD)/generated/zenov_config.hpp | $(BUILD)
 	$(HOST_CXX) $(KERNEL_FLAGS) -c $< -o $@
 
 $(BUILD)/kernel.elf: $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/kernel.o kernel/linker.ld
@@ -178,8 +216,8 @@ $(BUILD)/ZENOVAPP.ZEX: user/hello_zenov.zv $(BUILD)/zenov-app-compiler
 
 USER_APPS := $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF $(BUILD)/ARGS.ELF $(BUILD)/CONSOLE.ELF $(BUILD)/PROTECT.ELF $(BUILD)/KACCESS.ELF $(BUILD)/ZENOVAPP.ZEX
 
-$(BUILD)/zenov-data.img: $(USER_APPS) $(ZGDB_FILES) $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
-	$(BUILD)/zenovfs-builder $(USER_APPS) $(ZGDB_FILES) $@
+$(BUILD)/zenov-data.img: $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
+	$(BUILD)/zenovfs-builder $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $@
 	@test "$$(stat -c%s $@)" -eq 16777216
 	@test "$$(od -An -tc -N8 $@ | tr -d ' \n')" = "ZENOVFS1"
 	$(BUILD)/zenovfs-verify $@
@@ -195,20 +233,29 @@ $(AUDIT_FAULT_STAMP): $(BUILD)/zenov-data.img $(BUILD)/zenovfs-audit-fault-test
 	@test -s $(AUDIT_CORRUPT_IMAGE)
 	@touch $@
 
-$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(ZGDB_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp tools/zenovfs_audit_verify.cpp tools/zenovfs_audit_fault_test.cpp security/zgdb_crypto_material.hpp security/zenovguard-root-public.pem
+$(ZCAP_CORRUPT_IMAGE): $(BUILD)/zenov-data.img $(BUILD)/zenovfs-zcap-corrupt $(BUILD)/zenovfs-verify
+	@mkdir -p $(BUILD)/qemu
+	$(BUILD)/zenovfs-zcap-corrupt $(BUILD)/zenov-data.img $@
+	$(BUILD)/zenovfs-verify $@
+	@test -s $@
+
+$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp tools/zcap_builder.cpp tools/zcap_verify.cpp tools/zenovfs_audit_verify.cpp tools/zenovfs_audit_fault_test.cpp security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zenovguard-root-public.pem security/zcap-root-public.pem
 	@boot_hash="$$(sha256sum $(BUILD)/BOOT.BIN | cut -d' ' -f1)"; \
 	 kernel_hash="$$(sha256sum $(BUILD)/KERNEL.BIN | cut -d' ' -f1)"; \
 	 image_hash="$$(sha256sum $(BUILD)/zenov-os.img | cut -d' ' -f1)"; \
 	 data_hash="$$(sha256sum $(BUILD)/zenov-data.img | cut -d' ' -f1)"; \
-	 source_hash="$$(cat kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp | sha256sum | cut -d' ' -f1)"; \
+	 source_hash="$$(cat kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp | sha256sum | cut -d' ' -f1)"; \
 	 compiler_hash="$$(sha256sum tools/zenov_app_compiler.cpp | cut -d' ' -f1)"; \
 	 zenov_app_hash="$$(sha256sum $(BUILD)/ZENOVAPP.ZEX | cut -d' ' -f1)"; \
 	 zgdb_v3_hash="$$(sha256sum $(BUILD)/zenovguard-v3.zgdb | cut -d' ' -f1)"; \
 	 zgdb_v4_hash="$$(sha256sum $(BUILD)/zenovguard-v4.zgdb | cut -d' ' -f1)"; \
 	 root_hash="$$(sha256sum security/zenovguard-root-public.pem | cut -d' ' -f1)"; \
+	 zcap_v1_hash="$$(sha256sum $(BUILD)/syscall-capabilities-v1.zcap | cut -d' ' -f1)"; \
+	 zcap_v2_hash="$$(sha256sum $(BUILD)/syscall-capabilities-v2.zcap | cut -d' ' -f1)"; \
+	 zcap_root_hash="$$(sha256sum security/zcap-root-public.pem | cut -d' ' -f1)"; \
 	 printf '%s\n' \
 	 '{' \
-	 '  "format": "zenov-os-build-v11",' \
+	 '  "format": "zenov-os-build-v12",' \
 	 '  "product": "ZenovOS",' \
 	 '  "version": "0.1.1",' \
 	 '  "target": "i686-zenov-none",' \
@@ -217,13 +264,19 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  "graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop",' \
 	 '  "input": "PS2 keyboard and 3-byte PS2 mouse packets",' \
 	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
-	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 RSA-PSS / ZGAL1 hash chain / exhaustive audit COW fault injection / fail-closed boot",' \
+	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 executable policy / ZCAP1 syscall policy / RSA-PSS / ZGAL1 hash chain / fail-closed boot",' \
 	 '  "zgdb_schema": 2,' \
 	 '  "zgdb_compiled_floor": 3,' \
 	 '  "zgdb_root_key_id": "6f788074c018f5aa",' \
 	 "  \"zgdb_root_public_sha256\": \"$$root_hash\"," \
 	 "  \"zgdb_v3_sha256\": \"$$zgdb_v3_hash\"," \
 	 "  \"zgdb_v4_sha256\": \"$$zgdb_v4_hash\"," \
+	 '  "zcap_schema": 1,' \
+	 '  "zcap_compiled_floor": 1,' \
+	 '  "zcap_root_key_id": "9202c73fad96ad66",' \
+	 "  \"zcap_root_public_sha256\": \"$$zcap_root_hash\"," \
+	 "  \"zcap_v1_sha256\": \"$$zcap_v1_hash\"," \
+	 "  \"zcap_v2_sha256\": \"$$zcap_v2_hash\"," \
 	 '  "audit_schema": 1,' \
 	 '  "audit_capacity": 64,' \
 	 '  "audit_record_bytes": 128,' \
@@ -245,7 +298,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  }' \
 	 '}' > $@
 
-check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test all $(AUDIT_FAULT_STAMP)
+check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zcap-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE)
 	$(BUILD)/zenov-stage0 --self-test
 	$(BUILD)/image-verify $(BUILD)/zenov-os.img
 	$(BUILD)/zenovfs-verify $(BUILD)/zenov-data.img
@@ -257,25 +310,30 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	done
 	@! find . -path './build' -prune -o -name '*.py' -print | grep -q .
 	@grep -q 'system_version("0.1.1")' kernel/config/system.zv
-	@grep -q '"format": "zenov-os-build-v11"' $(BUILD)/build-manifest.json
+	@grep -q '"format": "zenov-os-build-v12"' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_schema": 2' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_compiled_floor": 3' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_root_key_id": "6f788074c018f5aa"' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_v3_sha256": "$(ZGDB_V3_SHA256)"' $(BUILD)/build-manifest.json
 	@grep -q '"zgdb_v4_sha256": "$(ZGDB_V4_SHA256)"' $(BUILD)/build-manifest.json
+	@grep -q '"zcap_schema": 1' $(BUILD)/build-manifest.json
+	@grep -q '"zcap_compiled_floor": 1' $(BUILD)/build-manifest.json
+	@grep -q '"zcap_root_key_id": "9202c73fad96ad66"' $(BUILD)/build-manifest.json
+	@grep -q '"zcap_v1_sha256": "$(ZCAP_V1_SHA256)"' $(BUILD)/build-manifest.json
+	@grep -q '"zcap_v2_sha256": "$(ZCAP_V2_SHA256)"' $(BUILD)/build-manifest.json
 	@grep -q '"audit_schema": 1' $(BUILD)/build-manifest.json
 	@grep -q '"audit_capacity": 64' $(BUILD)/build-manifest.json
 	@grep -q '"audit_journal_bytes": 8288' $(BUILD)/build-manifest.json
 	@grep -q '"audit_fault_model":' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_app_abi": "0.1.1"' $(BUILD)/build-manifest.json
-	@echo 'static checks: OK (0.1.1 ZGDB2 RSA-PSS, ZGAL1 audit COW crash matrix, graphics, memory, ABI and transactional storage)'
+	@echo 'static checks: OK (0.1.1 ZGDB2 + ZCAP1 RSA-PSS, ZGAL1 audit COW crash matrix, graphics, memory, ABI and transactional storage)'
 
-qemu: all $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(AUDIT_FAULT_STAMP)
+qemu: all $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE)
 	@mkdir -p $(BUILD)/qemu
 	@cp $(BUILD)/zenov-data.img $(BUILD)/qemu/zenov-data-runtime.img
 	$(BUILD)/zenovfs-fault-test $(BUILD)/zenov-data.img --emit-recovery $(BUILD)/qemu/zenov-data-recovery.img
 	bash tests/qemu_smoke.sh $(BUILD)/zenov-os.img $(BUILD)/qemu/zenov-data-runtime.img $(BUILD)/qemu \
-	  $(BUILD)/qemu/zenov-data-recovery.img $(AUDIT_OLD_RECOVERY_IMAGE) $(AUDIT_NEW_RECOVERY_IMAGE) $(AUDIT_CORRUPT_IMAGE)
+	  $(BUILD)/qemu/zenov-data-recovery.img $(AUDIT_OLD_RECOVERY_IMAGE) $(AUDIT_NEW_RECOVERY_IMAGE) $(AUDIT_CORRUPT_IMAGE) $(ZCAP_CORRUPT_IMAGE)
 	$(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zenov-data-runtime.img --require-nonempty --emit-tampered $(BUILD)/qemu/zenov-data-audit-tampered.img
 	@if $(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zenov-data-audit-tampered.img --require-nonempty; then echo 'tampered ZGAL1 fixture unexpectedly verified' >&2; exit 1; fi
 	@echo 'persistent audit verification: OK (runtime chain valid; FNV-repaired tamper rejected; COW crash images boot-tested)'
@@ -288,8 +346,8 @@ deterministic: all
 	@diff -u $(BUILD)/build-manifest.json /tmp/zenov-os-deterministic/build-manifest.json
 	@cmp $(BUILD)/zenov-data.img /tmp/zenov-os-deterministic/zenov-data.img
 	@for app in $(USER_APPS); do cmp $$app /tmp/zenov-os-deterministic/$$(basename $$app); done
-	@for db in $(ZGDB_FILES); do cmp $$db /tmp/zenov-os-deterministic/$$(basename $$db); done
-	@echo 'deterministic rebuild: OK (system, RSA-PSS policy, empty ZGAL1 seed, data volume and seven apps are byte-identical)'
+	@for policy in $(ZGDB_FILES) $(ZCAP_FILES); do cmp $$policy /tmp/zenov-os-deterministic/$$(basename $$policy); done
+	@echo 'deterministic rebuild: OK (system, ZGDB2/ZCAP1 RSA-PSS policies, empty ZGAL1 seed, data volume and seven apps are byte-identical)'
 
 inspect: all
 	readelf -h $(BUILD)/kernel.elf

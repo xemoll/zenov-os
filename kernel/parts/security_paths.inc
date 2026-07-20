@@ -9,6 +9,8 @@ static constexpr const char* protected_paths[] = {
     "/apps/zenovapp.zex",
     "/security/zenovguard.zgdb",
     "/security/zenovguard.version",
+    "/security/syscall-capabilities.zcap",
+    "/security/syscall-capabilities.version",
     "/security/zenovguard.audit",
 };
 

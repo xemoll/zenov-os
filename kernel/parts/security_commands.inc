@@ -9,6 +9,7 @@ void command_guard(char* args) {
         begin_view("ZENOVGUARD STATUS");
         security_guard::print_status();
         process::print_capability_status();
+        zcap::print_status();
         security_audit::print_status();
         zgdb::print_status();
         return;
@@ -16,6 +17,18 @@ void command_guard(char* args) {
     if (string_equal(subcommand, "capabilities")) {
         begin_view("APPLICATION SYSCALL CAPABILITIES");
         process::print_capability_profiles();
+        return;
+    }
+    if (string_equal(subcommand, "capability-policy")) {
+        begin_view("SIGNED SYSCALL CAPABILITY POLICY");
+        zcap::print_status();
+        return;
+    }
+    if (string_equal(subcommand, "capability-update")) {
+        begin_view("SYSCALL CAPABILITY POLICY UPDATE");
+        if (!*args) { console::warning("Usage: guard capability-update <signed-zcap-path>"); return; }
+        if (zcap::update(args)) console::success("ZCAP_ATOMIC_UPDATE_OK");
+        else console::warning("Signed capability policy update rejected; inspect the serial reason.");
         return;
     }
     if (string_equal(subcommand, "database")) {
@@ -32,7 +45,7 @@ void command_guard(char* args) {
     }
     if (string_equal(subcommand, "selftest")) {
         begin_view("ZENOVGUARD SELF-TEST");
-        if (security_guard::self_test() && security_audit::self_test() && process::capability_self_test()) {
+        if (security_guard::self_test() && security_audit::self_test() && zcap::self_test() && process::capability_self_test()) {
             console::success("ZENOV_GUARD_SELFTEST_OK"); serial::line("ZENOV_GUARD_SELFTEST_OK");
         } else {
             console::warning("ZENOV_GUARD_SELFTEST_FAILED"); serial::line("ZENOV_GUARD_SELFTEST_FAILED");
@@ -70,5 +83,5 @@ void command_guard(char* args) {
         else console::warning("Quarantine rejected or persistent audit commit failed.");
         return;
     }
-    console::warning("Usage: guard status | capabilities | database | update <zgdb> | scan <path|all> | quarantine <path> | log [verify] | selftest");
+    console::warning("Usage: guard status | capabilities | capability-policy | capability-update <zcap> | database | update <zgdb> | scan <path|all> | quarantine <path> | log [verify] | selftest");
 }
