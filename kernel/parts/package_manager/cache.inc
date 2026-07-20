@@ -54,6 +54,8 @@ void cache_report_target(const char* marker, const package_repository::Target& t
     serial::line(target.version);
 }
 
+#include "transport.inc"
+
 bool fetch_target(const package_repository::Target& target) {
     char final_path[48]{}, partial_path[48]{}, source_path[48]{};
     if (!cache_path(target, false, final_path) || !cache_path(target, true, partial_path) ||
@@ -72,25 +74,9 @@ bool fetch_target(const package_repository::Target& target) {
         serial::line("ZENPKG_CACHE_INVALID_OBJECT_REMOVE_FAILED");
         return false;
     }
-    if (storage::query(partial_path, info) && !storage::package_cache_remove(partial_path)) {
-        serial::line("ZENPKG_CACHE_PARTIAL_REMOVE_FAILED");
-        return false;
-    }
 
-    native_package::VerifiedPackage package{};
-    uint32_t package_size = 0;
-    const native_package::Error source_error = native_package::verify_file(
-        source_path, package_buffer, storage::file_capacity(), package, package_size);
-    if (source_error != native_package::Error::none || !package_matches_target(package, package_size, target)) {
-        serial::line("ZENPKG_CACHE_SOURCE_REJECTED");
-        return false;
-    }
-
-    if (!storage::package_write_file(partial_path, package_buffer, package_size, false) ||
-        !storage::sync_metadata() || !verified_target_file(partial_path, target)) {
-        (void)storage::package_cache_remove(partial_path);
-        (void)storage::sync_metadata();
-        serial::line("ZENPKG_CACHE_STAGE_REJECTED");
+    if (!transport_fetch_verified_source(source_path, partial_path, target)) {
+        serial::line("ZENPKG_CACHE_TRANSPORT_REJECTED");
         return false;
     }
 
@@ -147,7 +133,7 @@ void cache_status() {
     console::write("  Invalid objects ");
     console::unsigned_dec(invalid);
     console::put('\n');
-    console::line("  Commit model   verified .part then atomic rename");
+    console::line("  Commit model   verified resumable .part then atomic rename");
     serial::write("ZENPKG_CACHE_STATUS_OK valid=");
     process::serial_u32(valid);
     serial::write(" invalid=");
