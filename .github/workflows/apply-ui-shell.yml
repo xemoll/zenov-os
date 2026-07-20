@@ -93,7 +93,7 @@ jobs:
                   if " -> " in path:
                       path = path.split(" -> ", 1)[1]
                   if "D" in state:
-                      entries.append({"path": path, "sha": None})
+                      entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
                       continue
                   with open(path, "rb") as handle:
                       encoded = base64.b64encode(handle.read()).decode()
