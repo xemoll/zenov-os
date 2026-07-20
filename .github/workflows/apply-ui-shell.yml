@@ -22,18 +22,30 @@ jobs:
           ref: agent/zenov-os-0.1.1-windows-simple-shell
           fetch-depth: 2
 
+      - name: Detect staged patch
+        id: staged
+        run: |
+          if test -f .ci/ui-shell.patch.part.00; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Decode and apply locally verified patch
+        if: steps.staged.outputs.present == 'true'
         run: |
           cat .ci/ui-shell.patch.part.* | base64 -d | gzip -d > /tmp/ui-shell.patch
           echo "70600dea73bc4acb309c36c4348b57c99c6615f4dd0213e3bc29eb0aa650de6c  /tmp/ui-shell.patch" | sha256sum -c -
           git apply --check /tmp/ui-shell.patch
           git apply /tmp/ui-shell.patch
-          rm -f .ci/ui-shell.patch.part.* .github/workflows/apply-ui-shell.yml
+          rm -f .ci/ui-shell.patch.part.*
 
       - name: Verify strict native source before publishing branch
+        if: steps.staged.outputs.present == 'true'
         run: make clean check
 
       - name: Commit verified shell source
+        if: steps.staged.outputs.present == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
