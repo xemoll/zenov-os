@@ -54,7 +54,9 @@ cp "$ROOT/packaging/INSTALL.txt" "$DIST/INSTALL.txt"
 cp "$ROOT/packaging/INSTALL.txt" "$PACKAGE/INSTALL.txt"
 cp "$ROOT/packaging/run-qemu.sh" "$PACKAGE/run-qemu.sh"
 cp "$ROOT/packaging/run-qemu.cmd" "$PACKAGE/run-qemu.cmd"
-printf 'ZenovOS source commit: %s\n' "$SOURCE_REVISION" > "$DIST/SOURCE-REVISION.txt"
+# Machine-readable provenance files contain only the canonical commit id.
+# Human-readable wording remains in INSTALL.txt.
+printf '%s\n' "$SOURCE_REVISION" > "$DIST/SOURCE-REVISION.txt"
 cp "$DIST/SOURCE-REVISION.txt" "$PACKAGE/SOURCE-REVISION.txt"
 chmod +x "$PACKAGE/run-qemu.sh"
 
@@ -98,7 +100,7 @@ unzip -p "$DIST/ZenovOS-$VERSION-x86.zip" BUILD-MANIFEST.json | cmp - "$MANIFEST
 unzip -p "$DIST/ZenovOS-$VERSION-x86.zip" SOURCE-REVISION.txt | cmp - "$DIST/SOURCE-REVISION.txt"
 unzip -p "$DIST/ZenovOS-$VERSION-x86.zip" "ZenovOS-$VERSION-data.img" | cmp - "$DATA_IMAGE"
 unzip -p "$DIST/ZenovOS-$VERSION-x86.zip" "ZenovOS-$VERSION-x86.img" | cmp - "$BOOT_IMAGE"
-grep -qx "ZenovOS source commit: $SOURCE_REVISION" "$DIST/SOURCE-REVISION.txt"
+grep -qx "$SOURCE_REVISION" "$DIST/SOURCE-REVISION.txt"
 
 printf 'package-release: OK version=%s source=%s boot=%s data-in-zip=%s manifest=%s zip=%s\n' \
   "$VERSION" "$SOURCE_REVISION" "$DIST/ZenovOS-$VERSION-x86.img" "$DATA_IMAGE" "$MANIFEST" "$DIST/ZenovOS-$VERSION-x86.zip"
