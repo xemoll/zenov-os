@@ -1,2 +1,2 @@
 # Native ZenovOS 0.1.1 desktop defaults. Runtime overrides live in /data/config/ui.cfg.
-vfs_file("DESKTOP.CFG", "theme=midnight\nresolution=1024x768\ncanvas=0D111B\nsurface=171C28\naccent=7D8CFF\nradius=12\nopacity=240\nanimations=1\ncursor=beam\n");
+vfs_file("DESKTOP.CFG", "theme=midnight\nresolution=1024x768\ncanvas=0D111B\nsurface=171C28\naccent=7D8CFF\naccent_slot=0\nwallpaper=flow\nradius=12\nopacity=240\nanimations=1\ncursor=beam\ndensity=comfortable\ntaskbar=center\n");

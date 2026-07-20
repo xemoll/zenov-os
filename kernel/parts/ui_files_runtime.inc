@@ -72,8 +72,8 @@ bool init() {
 }
 
 bool handle_navigation_key(uint16_t key) {
-    if (active_view != View::files) return handle_navigation_key_base(key);
-    if (key == key_f5 || key == key_f6 || key == key_f7 || key == key_f8 || key == key_f9) return handle_navigation_key_base(key);
+    if (active_view != View::files || quick_settings_open) return handle_navigation_key_base(key);
+    if (key == key_f5 || key == key_f6 || key == key_f7 || key == key_f8 || key == key_f9 || key == key_f10 || key == key_super) return handle_navigation_key_base(key);
 
     if (files_preview_open) {
         if (key == '\b' || key == key_escape) {
@@ -101,7 +101,7 @@ bool handle_navigation_key(uint16_t key) {
 }
 
 void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
-    if (active_view != View::files) {
+    if (active_view != View::files || quick_settings_open) {
         on_mouse_packet_base(delta_x, delta_y, buttons);
         return;
     }
@@ -138,10 +138,10 @@ void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
         files_clear_hover();
         window_x = mouse_x - drag_offset_x;
         window_y = mouse_y - drag_offset_y;
-        if (window_x < 64) window_x = 64;
+        if (window_x < 24) window_x = 24;
         if (window_x > static_cast<int32_t>(width) - window_width - 24) window_x = static_cast<int32_t>(width) - window_width - 24;
-        if (window_y < 60) window_y = 60;
-        if (window_y > 136) window_y = 136;
+        if (window_y < 50) window_y = 50;
+        if (window_y > 116) window_y = 116;
         refresh_desktop();
         scene_changed = true;
         if (!drag_reported) { serial::line("WINDOW_DRAG_OK"); drag_reported = true; }

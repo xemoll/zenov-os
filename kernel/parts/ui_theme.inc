@@ -1,29 +1,37 @@
 enum class HoverTarget : uint8_t {
     none,
-    workspace_one, workspace_two, workspace_three,
-    dock_terminal, dock_files, dock_settings, dock_launcher,
+    taskbar_start, taskbar_terminal, taskbar_files, taskbar_settings, taskbar_tray,
+    quick_theme, quick_display, quick_motion, quick_cursor, quick_density, quick_taskbar,
+    settings_page_general, settings_page_style, settings_page_about,
     theme_midnight, theme_graphite, theme_amber,
     settings_display, settings_motion, settings_cursor,
-    launcher_terminal, launcher_files, launcher_settings
+    settings_accent, settings_wallpaper, settings_radius, settings_opacity,
+    settings_density, settings_taskbar, settings_reset,
+    launcher_terminal, launcher_files, launcher_settings, launcher_display
 };
 
 HoverTarget hovered_target = HoverTarget::none;
 uint8_t launcher_focus = 0;
 uint8_t settings_focus = 0;
-constexpr uint8_t settings_focus_count = 6U;
-constexpr int32_t workspace_item_width = 32;
-constexpr int32_t workspace_group_width = workspace_item_width * 3;
-constexpr int32_t workspace_group_x = static_cast<int32_t>(width / 2U) - workspace_group_width / 2;
-constexpr int32_t workspace_group_y = topbar_y + 6;
-constexpr int32_t workspace_group_height = 24;
+uint8_t settings_page = 0;
+uint8_t quick_settings_focus = 0;
+bool quick_settings_open = false;
+bool scene_transition_pending = false;
+int32_t ui_scene_offset_y = 0;
+char launcher_query[18]{};
+uint8_t launcher_query_length = 0;
+
+constexpr uint8_t settings_page_count = 3U;
+constexpr uint8_t launcher_item_count = 4U;
+constexpr uint8_t quick_settings_count = 6U;
+constexpr uint8_t accent_palette_size = 6U;
+uint8_t runtime_accent_slot = 0;
+uint8_t runtime_wallpaper_style = 0;
+bool runtime_compact_density = false;
+bool runtime_taskbar_left = false;
+uint32_t runtime_base_accent = desktop_accent;
 
 bool is_hovered(HoverTarget target) { return hovered_target == target; }
-uint8_t workspace_for_view(View view) {
-    if (view == View::terminal) return 0;
-    if (view == View::files) return 1;
-    return 2;
-}
-
 bool text_contains(const char* text, uint32_t size, const char* needle) {
     const uint32_t needle_size = static_cast<uint32_t>(string_length(needle));
     if (!needle_size || size < needle_size) return false;
@@ -114,6 +122,19 @@ bool parse_display_mode(const char* text, uint32_t size, uint8_t& mode) {
     return false;
 }
 
+uint32_t accent_palette_color(uint8_t slot) {
+    static constexpr uint32_t colors[accent_palette_size] = {
+        0U, rgb(80, 142, 255), rgb(133, 103, 255), rgb(35, 184, 190), rgb(70, 183, 123), rgb(230, 113, 103)
+    };
+    return slot == 0U || slot >= accent_palette_size ? runtime_base_accent : colors[slot];
+}
+
+void apply_accent_personalization() {
+    current_theme.accent = accent_palette_color(runtime_accent_slot);
+    current_theme.accent_soft = mix(current_theme.accent, current_theme.surface, 2U, 5U);
+    current_theme.glow_primary = mix(current_theme.accent, current_theme.canvas_top, 1U, 3U);
+}
+
 bool apply_config_text(const char* text, uint32_t size, bool& custom_colors) {
     if (!text || !size) return false;
     bool recognized = false;
@@ -131,6 +152,13 @@ bool apply_config_text(const char* text, uint32_t size, bool& custom_colors) {
     if (parse_hex_color(config_value(text, size, "accent"), parsed)) { desktop_accent = parsed; any_color = true; recognized = true; }
     if (any_color) custom_colors = true;
 
+    if (parse_decimal_value(config_value(text, size, "accent_slot"), parsed) && parsed < accent_palette_size) {
+        runtime_accent_slot = static_cast<uint8_t>(parsed); recognized = true;
+    }
+    if (text_contains(text, size, "wallpaper=calm")) { runtime_wallpaper_style = 1U; recognized = true; }
+    else if (text_contains(text, size, "wallpaper=plain")) { runtime_wallpaper_style = 2U; recognized = true; }
+    else if (text_contains(text, size, "wallpaper=flow")) { runtime_wallpaper_style = 0U; recognized = true; }
+
     if (parse_decimal_value(config_value(text, size, "radius"), parsed) && parsed >= 6U && parsed <= 20U) {
         desktop_radius = static_cast<uint8_t>(parsed); recognized = true;
     }
@@ -143,6 +171,10 @@ bool apply_config_text(const char* text, uint32_t size, bool& custom_colors) {
     if (text_contains(text, size, "cursor=block")) { terminal_cursor = "block"; recognized = true; }
     else if (text_contains(text, size, "cursor=underline")) { terminal_cursor = "underline"; recognized = true; }
     else if (text_contains(text, size, "cursor=beam")) { terminal_cursor = "beam"; recognized = true; }
+    if (text_contains(text, size, "density=compact")) { runtime_compact_density = true; recognized = true; }
+    else if (text_contains(text, size, "density=comfortable")) { runtime_compact_density = false; recognized = true; }
+    if (text_contains(text, size, "taskbar=left")) { runtime_taskbar_left = true; recognized = true; }
+    else if (text_contains(text, size, "taskbar=center")) { runtime_taskbar_left = false; recognized = true; }
     return recognized;
 }
 
@@ -150,14 +182,24 @@ void materialize_theme(bool custom_colors) {
     if (string_equal(desktop_theme, "graphite")) apply_runtime_theme(1);
     else if (string_equal(desktop_theme, "amber")) apply_runtime_theme(2);
     else apply_runtime_theme(0);
-    if (!custom_colors) return;
-    current_theme.canvas_top = desktop_canvas;
-    current_theme.canvas_bottom = mix(desktop_canvas, desktop_surface, 3U, 8U);
-    current_theme.surface = desktop_surface;
-    current_theme.surface_high = mix(desktop_surface, rgb(255,255,255), 22U, 255U);
-    current_theme.surface_low = mix(desktop_surface, rgb(0,0,0), 58U, 255U);
-    current_theme.accent = desktop_accent;
-    current_theme.accent_soft = mix(desktop_accent, desktop_surface, 2U, 5U);
+    if (custom_colors) {
+        current_theme.canvas_top = desktop_canvas;
+        current_theme.canvas_bottom = mix(desktop_canvas, desktop_surface, 3U, 8U);
+        current_theme.surface = desktop_surface;
+        current_theme.surface_high = mix(desktop_surface, rgb(255,255,255), 22U, 255U);
+        current_theme.surface_low = mix(desktop_surface, rgb(0,0,0), 58U, 255U);
+        current_theme.accent = desktop_accent;
+        current_theme.accent_soft = mix(desktop_accent, desktop_surface, 2U, 5U);
+    }
+    runtime_base_accent = current_theme.accent;
+    apply_accent_personalization();
+}
+
+void select_runtime_theme(uint8_t id) {
+    apply_runtime_theme(id);
+    desktop_theme = runtime_theme == 1U ? "graphite" : (runtime_theme == 2U ? "amber" : "midnight");
+    runtime_base_accent = current_theme.accent;
+    apply_accent_personalization();
 }
 
 void load_runtime_preferences() {
@@ -166,7 +208,7 @@ void load_runtime_preferences() {
     if (read_desktop_config(builtin, builtin_size) && apply_config_text(builtin, builtin_size, custom_colors)) serial::line("UI_ZENOV_CONFIG_OK");
     else serial::line("UI_ZENOV_CONFIG_FALLBACK");
 
-    char data[256]{}; uint32_t size = 0;
+    char data[384]{}; uint32_t size = 0;
     if (storage::read_file("/data/config/ui.cfg", reinterpret_cast<uint8_t*>(data), sizeof(data) - 1U, size)) {
         data[size] = 0;
         const bool runtime_has_colors = config_value(data, size, "canvas") || config_value(data, size, "surface") || config_value(data, size, "accent");
@@ -200,8 +242,9 @@ bool append_config_uint(char* output, uint32_t capacity, uint32_t& length, uint3
 }
 
 bool persist_runtime_preferences() {
-    char text[160]{}; uint32_t length = 0;
+    char text[384]{}; uint32_t length = 0;
     const char* theme_name = runtime_theme == 1U ? "graphite" : (runtime_theme == 2U ? "amber" : "midnight");
+    const char* wallpaper_name = runtime_wallpaper_style == 1U ? "calm" : (runtime_wallpaper_style == 2U ? "plain" : "flow");
     const DisplayMode mode = display_modes[active_display_mode];
     if (!append_config_text(text, sizeof(text), length, "theme=") ||
         !append_config_text(text, sizeof(text), length, theme_name) ||
@@ -213,84 +256,68 @@ bool persist_runtime_preferences() {
         !append_config_text(text, sizeof(text), length, desktop_animations ? "1\n" : "0\n") ||
         !append_config_text(text, sizeof(text), length, "cursor=") ||
         !append_config_text(text, sizeof(text), length, terminal_cursor) ||
-        !append_config_text(text, sizeof(text), length, "\n")) return false;
+        !append_config_text(text, sizeof(text), length, "\naccent_slot=") ||
+        !append_config_uint(text, sizeof(text), length, runtime_accent_slot) ||
+        !append_config_text(text, sizeof(text), length, "\nwallpaper=") ||
+        !append_config_text(text, sizeof(text), length, wallpaper_name) ||
+        !append_config_text(text, sizeof(text), length, "\nradius=") ||
+        !append_config_uint(text, sizeof(text), length, desktop_radius) ||
+        !append_config_text(text, sizeof(text), length, "\nopacity=") ||
+        !append_config_uint(text, sizeof(text), length, desktop_opacity) ||
+        !append_config_text(text, sizeof(text), length, "\ndensity=") ||
+        !append_config_text(text, sizeof(text), length, runtime_compact_density ? "compact" : "comfortable") ||
+        !append_config_text(text, sizeof(text), length, "\ntaskbar=") ||
+        !append_config_text(text, sizeof(text), length, runtime_taskbar_left ? "left\n" : "center\n")) return false;
     return storage::write_file("/data/config/ui.cfg", reinterpret_cast<const uint8_t*>(text), length, false);
-}
-
-void persist_runtime_theme(uint8_t) {
-    if (persist_runtime_preferences()) serial::line("UI_SETTINGS_PERSIST_OK");
-    else serial::line("UI_SETTINGS_PERSIST_FAILED");
 }
 
 void draw_wallpaper() {
     vertical_gradient(0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height), current_theme.canvas_top, current_theme.canvas_bottom);
-    fill_circle_alpha(126, 62, 210, current_theme.glow_primary, 14);
-    fill_circle_alpha(708, 548, 270, current_theme.glow_secondary, 11);
-    fill_circle_alpha(684, 72, 150, current_theme.accent, 5);
-    fill_rect_alpha(0, 0, static_cast<int32_t>(width), 1, current_theme.accent, 54);
-}
-
-void draw_workspace_switcher() {
-    const HoverTarget targets[3] = {HoverTarget::workspace_one, HoverTarget::workspace_two, HoverTarget::workspace_three};
-    const uint8_t active_workspace = workspace_for_view(active_view);
-    fill_round_rect_alpha(workspace_group_x, workspace_group_y + 2, workspace_group_width, workspace_group_height - 4, 10, current_theme.surface_high, 128);
-    for (uint32_t i = 0; i < 3U; ++i) {
-        const int32_t x = workspace_group_x + static_cast<int32_t>(i * workspace_item_width);
-        if (i == active_workspace) fill_round_rect(x + 4, workspace_group_y + 4, workspace_item_width - 8, 16, 8, current_theme.accent_soft);
-        else if (is_hovered(targets[i])) fill_round_rect(x + 5, workspace_group_y + 5, workspace_item_width - 10, 14, 7, current_theme.surface_high);
-        fill_circle_alpha(x + workspace_item_width / 2, workspace_group_y + 12, 2,
-                          i == active_workspace ? current_theme.accent : current_theme.text_muted, 255);
+    if (runtime_wallpaper_style == 2U) {
+        fill_rect_alpha(0, 0, static_cast<int32_t>(width), 1, current_theme.accent, 40);
+        return;
     }
+    if (runtime_wallpaper_style == 1U) {
+        fill_circle_alpha(684, 100, 180, current_theme.glow_secondary, 8);
+        fill_circle_alpha(118, 520, 220, current_theme.glow_primary, 7);
+        return;
+    }
+    fill_circle_alpha(112, 70, 230, current_theme.glow_primary, 12);
+    fill_circle_alpha(716, 522, 286, current_theme.glow_secondary, 10);
+    fill_circle_alpha(666, 82, 145, current_theme.accent, 5);
+    fill_rect_alpha(0, 0, static_cast<int32_t>(width), 1, current_theme.accent, 46);
 }
 
 void draw_topbar() {
-    fill_round_rect_alpha(topbar_x, topbar_y, topbar_width, topbar_height, 12, current_theme.surface_low, desktop_opacity);
-    draw_text(topbar_x + 16, topbar_y + 14, "ZENOVOS", current_theme.text, 1);
-    fill_round_rect(topbar_x + 74, topbar_y + 9, 54, 20, 10, current_theme.surface_high);
-    fill_circle_alpha(topbar_x + 86, topbar_y + 19, 3, current_theme.success, 255);
-    draw_text(topbar_x + 96, topbar_y + 15, "LOCAL", current_theme.text_muted, 1);
-    draw_workspace_switcher();
-    draw_text_right(topbar_x + topbar_width - 16, topbar_y + 14, zenov_generated::kVersion, current_theme.text_muted, 1);
+    draw_text(topbar_x, topbar_y + 8, "ZENOVOS", current_theme.text_muted, 1);
+    fill_circle_alpha(topbar_x + 58, topbar_y + 11, 2, current_theme.success, 255);
+    draw_text(topbar_x + 68, topbar_y + 8, "LOCAL", current_theme.text_muted, 1);
+    draw_text_right(topbar_x + topbar_width, topbar_y + 8, zenov_generated::kVersion, current_theme.text_muted, 1);
 }
 
-enum class ShellIcon : uint8_t { terminal, files, settings, apps };
+enum class ShellIcon : uint8_t { start, terminal, files, settings, apps, display };
 
 void draw_shell_icon(ShellIcon icon, int32_t x, int32_t y, uint32_t color) {
+    if (icon == ShellIcon::start) {
+        fill_rect(x + 1, y + 1, 8, 8, color); fill_rect(x + 12, y + 1, 8, 8, color);
+        fill_rect(x + 1, y + 12, 8, 8, color); fill_rect(x + 12, y + 12, 8, 8, color); return;
+    }
     if (icon == ShellIcon::terminal) {
-        draw_char(x, y + 2, '>', color, 1);
-        fill_rect(x + 10, y + 14, 10, 2, color);
-        return;
+        draw_char(x, y + 2, '>', color, 1); fill_rect(x + 10, y + 14, 10, 2, color); return;
     }
     if (icon == ShellIcon::files) {
-        fill_round_rect(x + 1, y + 6, 21, 15, 3, color);
-        fill_round_rect(x + 3, y + 2, 10, 8, 2, color);
-        return;
+        fill_round_rect(x + 1, y + 6, 21, 15, 3, color); fill_round_rect(x + 3, y + 2, 10, 8, 2, color); return;
     }
     if (icon == ShellIcon::settings) {
         fill_rect(x + 1, y + 3, 7, 2, color); fill_rect(x + 12, y + 3, 10, 2, color); fill_rect(x + 8, y + 1, 4, 6, color);
         fill_rect(x + 1, y + 10, 13, 2, color); fill_rect(x + 18, y + 10, 4, 2, color); fill_rect(x + 14, y + 8, 4, 6, color);
-        fill_rect(x + 1, y + 17, 3, 2, color); fill_rect(x + 8, y + 17, 14, 2, color); fill_rect(x + 4, y + 15, 4, 6, color);
-        return;
+        fill_rect(x + 1, y + 17, 3, 2, color); fill_rect(x + 8, y + 17, 14, 2, color); fill_rect(x + 4, y + 15, 4, 6, color); return;
+    }
+    if (icon == ShellIcon::display) {
+        fill_round_rect(x + 1, y + 2, 22, 15, 3, color); fill_rect(x + 10, y + 17, 4, 4, color); fill_rect(x + 6, y + 21, 12, 2, color); return;
     }
     fill_round_rect(x + 1, y + 1, 8, 8, 2, color); fill_round_rect(x + 13, y + 1, 8, 8, 2, color);
     fill_round_rect(x + 1, y + 13, 8, 8, 2, color); fill_round_rect(x + 13, y + 13, 8, 8, 2, color);
-}
-
-void draw_dock_icon(int32_t x, ShellIcon icon, bool selected, uint32_t accent, HoverTarget target) {
-    uint32_t fill = current_theme.surface_high;
-    if (selected) fill = current_theme.accent_soft;
-    else if (is_hovered(target)) fill = mix(current_theme.surface_high, accent, 1U, 6U);
-    fill_round_rect(x, dock_y + 6, 40, 40, 11, fill);
-    draw_shell_icon(icon, x + 9, dock_y + 15, selected ? accent : current_theme.text_muted);
-    if (selected) fill_round_rect(x + 13, dock_y + dock_height - 4, 14, 3, 2, accent);
-}
-
-void draw_dock() {
-    fill_round_rect_alpha(dock_x, dock_y, dock_width, dock_height, 16, current_theme.surface_low, desktop_opacity);
-    draw_dock_icon(dock_x + 12, ShellIcon::terminal, active_view == View::terminal, current_theme.accent, HoverTarget::dock_terminal);
-    draw_dock_icon(dock_x + 68, ShellIcon::files, active_view == View::files, rgb(91,146,199), HoverTarget::dock_files);
-    draw_dock_icon(dock_x + 124, ShellIcon::settings, active_view == View::settings, rgb(105,181,145), HoverTarget::dock_settings);
-    draw_dock_icon(dock_x + 180, ShellIcon::apps, active_view == View::launcher, rgb(205,154,91), HoverTarget::dock_launcher);
 }
 
 void draw_window_chrome(const char* title, const char* subtitle) {
@@ -300,11 +327,11 @@ void draw_window_chrome(const char* title, const char* subtitle) {
     draw_round_border(window_x, window_y, window_width, window_height, radius, current_theme.border);
     fill_round_rect(window_x + 1, window_y + 1, window_width - 2, titlebar_height + 7, radius > 1 ? radius - 1 : 0, current_theme.surface_high);
     fill_rect(window_x + 1, window_y + titlebar_height, window_width - 2, 8, current_theme.surface_high);
-    fill_circle_alpha(window_x + 20, window_y + 20, 4, current_theme.danger, 210);
-    fill_circle_alpha(window_x + 34, window_y + 20, 4, current_theme.warning, 210);
-    fill_circle_alpha(window_x + 48, window_y + 20, 4, current_theme.success, 210);
-    draw_text(window_x + 64, window_y + 17, title, current_theme.text, 1);
-    draw_text_right(window_x + window_width - 20, window_y + 17, subtitle, current_theme.text_muted, 1);
+    fill_round_rect(window_x + 14, window_y + 11, 24, 24, 6, current_theme.accent_soft);
+    draw_shell_icon(active_view == View::terminal ? ShellIcon::terminal : (active_view == View::files ? ShellIcon::files : ShellIcon::settings),
+                    window_x + 16, window_y + 13, current_theme.accent);
+    draw_text(window_x + 50, window_y + 17, title, current_theme.text, 1);
+    draw_text_right(window_x + window_width - 18, window_y + 17, subtitle, current_theme.text_muted, 1);
     fill_rect(window_x + 16, window_y + titlebar_height, window_width - 32, 1, current_theme.border);
 }
 
