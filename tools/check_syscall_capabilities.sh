@@ -87,7 +87,8 @@ require_line "$PHASE2_TEXT" "$HELLO_DENIAL"
 [[ "$(grep -Fc 'SYSCALL_CAPABILITY_DENIED app=' "$PHASE2_TEXT")" -eq 1 ]] || { echo "syscall-capability-check: reboot phase has unexpected denials" >&2; exit 1; }
 
 require_line "$ZCAP_CORRUPT_TEXT" "ZCAP_INIT_FAILED reason=payload-digest"
-require_line "$ZCAP_CORRUPT_TEXT" "ZENOVOS KERNEL PANIC Signed syscall capability policy validation failed."
+require_line "$ZCAP_CORRUPT_TEXT" "ZENOVOS KERNEL PANIC"
+require_line "$ZCAP_CORRUPT_TEXT" "Signed syscall capability policy validation failed."
 ! grep -Fq 'ZENOVOS_UI_READY' "$ZCAP_CORRUPT_TEXT" || { echo "syscall-capability-check: corrupted signed policy reached UI" >&2; exit 1; }
 
 forbid_marker "SYSCALL_CAPABILITY_POLICY_FAILED"
