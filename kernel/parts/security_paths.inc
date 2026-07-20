@@ -44,6 +44,16 @@ bool package_cache_object_path(const char* input) {
         normalized[14] != 0;
 }
 
+bool package_cache_partial_path(const char* input) {
+    char normalized[48]{};
+    if (!normalize_for_policy(input, normalized) || !string_starts_with(normalized, "/var/cache/zp/")) return false;
+    const uint32_t length = static_cast<uint32_t>(string_length(normalized));
+    const char suffix[] = ".part";
+    const uint32_t suffix_length = sizeof(suffix) - 1U;
+    if (length <= 14U + suffix_length) return false;
+    return storage::bytes_equal(normalized + length - suffix_length, suffix, suffix_length);
+}
+
 bool package_managed_path(const char* input) {
     return package_payload_path(input) || package_database_path(input) || repository_state_path(input) ||
         package_cache_object_path(input);
@@ -107,6 +117,14 @@ bool package_write_file(const char* path, const uint8_t* data, uint32_t size, bo
         return false;
     }
     return write_file(path, data, size, false);
+}
+
+bool package_cache_write_partial(const char* path, const uint8_t* data, uint32_t size, bool append) {
+    if (!security_policy::package_cache_partial_path(path)) {
+        security_policy::report_protected_path("package-cache-partial-write-rejected", path);
+        return false;
+    }
+    return write_file(path, data, size, append);
 }
 
 bool package_remove(const char* path) {
