@@ -1,5 +1,6 @@
 # ZenovOS 0.1.1 documentation
 
+- [`DESKTOP_0.1.1.md`](DESKTOP_0.1.1.md) — adaptive native desktop, 22 verified VBE modes, hybrid scaling, Settings controls and framebuffer evidence.
 - [`ROADMAP_0.1.1.md`](ROADMAP_0.1.1.md) — completed P0 contracts and remaining release-freeze work.
 - [`ABI_0.1.1.md`](ABI_0.1.1.md) — application memory, stack, syscall and executable-format contract.
 - [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md) — immutable per-application syscall masks, exact file scopes, denial audit and authority-lifetime contract.
