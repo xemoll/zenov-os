@@ -36,8 +36,21 @@ bool repository_metadata_path(const char* input) {
     return normalize_for_policy(input, normalized) && string_starts_with(normalized, "/repo/");
 }
 
+bool package_cache_path(const char* input) {
+    char normalized[48]{};
+    if (!normalize_for_policy(input, normalized)) return false;
+    return string_equal(normalized, "/var/cache/zp") || string_starts_with(normalized, "/var/cache/zp/");
+}
+
+bool package_cache_object_path(const char* input) {
+    char normalized[48]{};
+    return normalize_for_policy(input, normalized) && string_starts_with(normalized, "/var/cache/zp/") &&
+        normalized[14] != 0;
+}
+
 bool package_managed_path(const char* input) {
-    return package_payload_path(input) || package_database_path(input) || repository_state_path(input);
+    return package_payload_path(input) || package_database_path(input) || repository_state_path(input) ||
+        package_cache_object_path(input);
 }
 
 bool protected_path(const char* input) {
@@ -45,7 +58,8 @@ bool protected_path(const char* input) {
     char normalized[48]{};
     if (!normalize_for_policy(input, normalized)) return false;
     if (string_starts_with(normalized, "/apps/pkg-") || string_starts_with(normalized, "/repo/") ||
-        string_equal(normalized, "/var/lib/zenpkg/state.v1") || string_equal(normalized, "/var/lib/zenpkg/repo.v1")) return true;
+        string_equal(normalized, "/var/lib/zenpkg/state.v1") || string_equal(normalized, "/var/lib/zenpkg/repo.v1") ||
+        string_equal(normalized, "/var/cache/zp") || string_starts_with(normalized, "/var/cache/zp/")) return true;
     for (const char* path : protected_paths) if (string_equal(normalized, path)) return true;
     return false;
 }
@@ -105,5 +119,22 @@ bool package_remove(const char* path) {
         return false;
     }
     return remove(path);
+}
+
+bool package_cache_remove(const char* path) {
+    if (!security_policy::package_cache_object_path(path)) {
+        security_policy::report_protected_path("package-cache-remove-rejected", path);
+        return false;
+    }
+    return remove(path);
+}
+
+bool package_cache_rename(const char* source, const char* destination) {
+    if (!security_policy::package_cache_object_path(source) || !security_policy::package_cache_object_path(destination)) {
+        security_policy::report_protected_path("package-cache-rename-rejected",
+            security_policy::package_cache_object_path(source) ? destination : source);
+        return false;
+    }
+    return rename_entry(source, destination);
 }
 } // namespace storage
