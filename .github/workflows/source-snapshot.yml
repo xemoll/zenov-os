@@ -20,7 +20,8 @@ jobs:
       - name: Pack exact source tree
         run: |
           git rev-parse HEAD > SOURCE-SNAPSHOT-REVISION.txt
-          tar --exclude=.git --exclude=zenov-os-source.tar.gz -czf zenov-os-source.tar.gz .
+          tar --exclude=.git -czf "$RUNNER_TEMP/zenov-os-source.tar.gz" .
+          cp "$RUNNER_TEMP/zenov-os-source.tar.gz" ./zenov-os-source.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: zenov-os-ui-shell-source
