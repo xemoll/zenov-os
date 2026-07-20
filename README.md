@@ -1,19 +1,21 @@
 # ZenovOS 0.1.1
 
-ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 boots into an 800×600 graphical desktop on QEMU Standard VGA while retaining the text shell and COM1 serial console as diagnostic fallbacks.
+ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 boots into an adaptive graphical desktop on QEMU Standard VGA. The default physical mode is 1024×768; the same kernel-rendered desktop is verified across 22 VBE modes from 640×480 through 1600×1200 while retaining the text shell and COM1 serial console as diagnostic fallbacks.
 
-The current engineering focus is a small, auditable security foundation rather than additional visual design or compatibility with foreign executable formats. ZenovOS supports native ZEX1 and validated static ELF32/i386 applications. ZenovGuard adds final-read SHA-256 appraisal, fail-closed execution, ZGDB2 RSA-PSS threat/revocation policy, quarantine and a persistent bounded hash-chained audit journal around that execution boundary.
+The current engineering focus is a small, auditable security foundation combined with a usable native desktop rather than compatibility with foreign executable formats. ZenovOS supports native ZEX1 and validated static ELF32/i386 applications. ZenovGuard adds final-read SHA-256 appraisal, fail-closed execution, ZGDB2 RSA-PSS threat/revocation policy, quarantine and a persistent bounded hash-chained audit journal around that execution boundary.
 
 ![ZenovOS 0.1.1 graphical desktop](./docs/screenshots/zenov-os-0.1.1-graphical-desktop.png)
 
-The screenshot is the actual 800×600 QEMU framebuffer captured by CI. The workflow also preserves the original PPM framebuffer, serial logs, kernel image, data image, signed policy fixtures, audit crash images, persistent-audit evidence and deterministic release package.
+The screenshot is the actual 1024×768 QEMU framebuffer captured by CI from the current 0.1.1 desktop. The adaptive-display workflow also cycles all 22 supported physical modes, validates VBE read-back and persistence, captures representative framebuffers and preserves the original PPM evidence, serial logs, kernel image and data image.
 
 ## Verified 0.1.1 scope
 
 Executable regression coverage includes:
 
 - deterministic BIOS/FAT12 boot with a segmented kernel loader;
-- QEMU Standard VGA discovery, Bochs VBE `800×600×32` and supervisor-only framebuffer MMIO;
+- QEMU Standard VGA discovery, Bochs VBE modes from `640×480×32` through `1600×1200×32`, 16 MiB supervisor-only framebuffer MMIO and mode read-back;
+- a stable 800×600 logical UI canvas with aspect-preserving viewport mapping, resolution-independent mouse hit testing and a hybrid scaler that keeps exact integer modes crisp while smoothing fractional modes;
+- native Terminal, Files, Settings and Applications surfaces, persistent theme/display/motion/cursor preferences and keyboard/mouse navigation;
 - software backbuffer, clipping, alpha blending, bitmap text and a movable desktop window;
 - PS/2 keyboard and mouse initialization, IRQ routing and packet-decoder tests;
 - E820 physical-memory management, 4 KiB paging and a reusable kernel heap;
@@ -29,7 +31,7 @@ Executable regression coverage includes:
 - rotated-root ZGDB2 RSA-PSS validation, key-ID enforcement, tamper rejection, sequential update, rollback rejection and revocation;
 - deterministic rebuilds and release-package provenance.
 
-Documentation starts at [`docs/INDEX.md`](docs/INDEX.md). Security contracts are defined in [`docs/ZENOVGUARD_0.1.1.md`](docs/ZENOVGUARD_0.1.1.md), [`docs/ZGDB_0.1.1.md`](docs/ZGDB_0.1.1.md) and [`docs/AUDIT_JOURNAL_0.1.1.md`](docs/AUDIT_JOURNAL_0.1.1.md).
+Documentation starts at [`docs/INDEX.md`](docs/INDEX.md). Desktop behavior is documented in [`docs/DESKTOP_0.1.1.md`](docs/DESKTOP_0.1.1.md). Security contracts are defined in [`docs/ZENOVGUARD_0.1.1.md`](docs/ZENOVGUARD_0.1.1.md), [`docs/ZGDB_0.1.1.md`](docs/ZGDB_0.1.1.md) and [`docs/AUDIT_JOURNAL_0.1.1.md`](docs/AUDIT_JOURNAL_0.1.1.md).
 
 ## ZenovGuard, ZGDB2 and persistent audit
 
@@ -178,7 +180,22 @@ See [`docs/ABI_0.1.1.md`](docs/ABI_0.1.1.md) and [`docs/SECURITY_MODEL_0.1.1.md`
 
 ## Graphics and input
 
-The graphical foundation uses QEMU PCI VGA `1234:1111`, BAR0 framebuffer access and Bochs VBE ports `0x01CE/0x01CF`. The framebuffer is mapped into a supervisor-only MMIO window at `0xC0000000`; applications receive no direct framebuffer access.
+The graphical foundation uses QEMU PCI VGA `1234:1111`, BAR0 framebuffer access and Bochs VBE ports `0x01CE/0x01CF`. Up to 16 MiB of framebuffer MMIO is mapped into a supervisor-only window at `0xC0000000`; applications receive no direct framebuffer access.
+
+The desktop renders a stable logical 800×600 scene and maps it into these verified physical modes:
+
+```text
+640x480   720x480   800x600    960x540
+960x600   1024x576  1024x600   1024x768
+1152x648  1152x720  1152x864   1280x720
+1280x768  1280x800  1280x960   1280x1024
+1360x768  1368x768  1440x900   1536x864
+1600x900  1600x1200
+```
+
+Aspect ratio is preserved by a centered viewport. Exact integer scales use a crisp sampling path; fractional and downscaled modes use precomputed fixed-point bilinear interpolation. Physical mouse coordinates are translated back into logical hitboxes, so the dock, Settings controls, Files browser and title-bar dragging remain aligned at every mode.
+
+The default mode is `1024x768`. `F9` cycles forward through supported modes. Settings provides previous/next display selection, theme choice, motion preference and terminal cursor choice. Preferences are persisted in `/data/config/ui.cfg`.
 
 The desktop remains kernel-rendered. It is not yet a user-space display server, compositor or reusable GUI toolkit. Keyboard input uses IRQ1. Mouse support includes PS/2 auxiliary-port initialization, IRQ12 route validation, three-byte packet synchronization, bounded cursor coordinates and title-bar dragging.
 
@@ -213,10 +230,11 @@ The primary workflow performs:
 10. six QEMU phases covering normal runtime, reboot persistence, general recovery, audit old-state recovery, audit new-state recovery and audit fail-closed boot;
 11. independent host verification of the non-empty runtime ZGAL1 chain;
 12. generation of a payload-tampered image with a recomputed ZenovFS checksum and mandatory audit-chain rejection;
-13. framebuffer screenshot capture;
-14. deterministic system rebuilding, including policy fixtures and the empty journal seed;
-15. deterministic release ZIP generation and byte comparison;
-16. evidence upload with runtime, recovery, corrupt and tampered images, binaries, signed policy, public root, manifest and all serial/monitor logs.
+13. a separate adaptive-display QEMU run that cycles all 22 VBE modes, verifies read-back, persistence, Settings keyboard control and actual framebuffer dimensions;
+14. representative desktop, compact, widescreen, 5:4, maximum-size and Settings framebuffer capture;
+15. deterministic system rebuilding, including policy fixtures and the empty journal seed;
+16. deterministic release ZIP generation and byte comparison;
+17. evidence upload with runtime, recovery, corrupt and tampered images, binaries, signed policy, public root, manifest and all serial/monitor/framebuffer logs.
 
 ## Build
 
@@ -253,6 +271,8 @@ The audit fault matrix models ZenovFS sector and metadata writes deterministical
 The private key used to produce the checked-in v3/v4 fixtures is not committed. The fixtures are cryptographically verifiable, but future public policy issuance requires a separately provisioned offline root and key-custody procedure.
 
 ZenovOS remains a single-foreground-process i686/BIOS system. It does not yet provide concurrent user processes, per-process page directories, a user-space compositor, SMP, networking, USB, AHCI/NVMe, dynamic linking or ZenovFS2 variable extents.
+
+The 22 display modes are verified on QEMU Standard VGA/Bochs VBE. Physical GPUs, VirtualBox, VMware and firmware-specific VBE implementations are not covered by the current automated evidence.
 
 These limitations are documented to avoid overstating the protection level. The current security value is the narrow, deterministic and testable trusted-execution boundary.
 
