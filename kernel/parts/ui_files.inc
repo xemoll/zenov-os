@@ -259,9 +259,13 @@ void render_scene() {
     if (!backbuffer) return;
     draw_wallpaper();
     draw_topbar();
+    const int32_t saved_window_y = window_y;
+    if (active_view != View::launcher) window_y += ui_scene_offset_y;
     if (active_view == View::terminal) render_terminal();
     else if (active_view == View::files) render_files();
     else if (active_view == View::settings) render_settings();
     else render_launcher();
-    draw_dock();
+    window_y = saved_window_y;
+    draw_taskbar();
+    draw_quick_settings();
 }

@@ -38,7 +38,8 @@ void pit_init(uint32_t hz) { const uint16_t divisor = static_cast<uint16_t>(1193
 
 constexpr uint16_t key_up = 0x100, key_down = 0x101, key_left = 0x102, key_right = 0x103, key_home = 0x104, key_end = 0x105, key_delete = 0x106;
 constexpr uint16_t key_f1 = 0x110, key_f2 = 0x111, key_f3 = 0x112, key_f4 = 0x113;
-constexpr uint16_t key_f5 = 0x115, key_f6 = 0x116, key_f7 = 0x117, key_f8 = 0x118, key_f9 = 0x119, key_escape = 0x114;
+constexpr uint16_t key_f5 = 0x115, key_f6 = 0x116, key_f7 = 0x117, key_f8 = 0x118, key_f9 = 0x119, key_f10 = 0x11A;
+constexpr uint16_t key_super = 0x11B, key_escape = 0x114;
 constexpr uint32_t key_queue_capacity = 1024;
 volatile uint16_t key_queue[key_queue_capacity]; volatile uint32_t key_head = 0, key_tail = 0;
 bool shift_pressed = false, caps_lock = false, extended_scancode = false;
@@ -73,6 +74,7 @@ void keyboard_scancode(uint8_t code) {
         else if (code == 0x47) key_push(key_home);
         else if (code == 0x4F) key_push(key_end);
         else if (code == 0x53) key_push(key_delete);
+        else if (code == 0x5B || code == 0x5C) key_push(key_super);
         extended_scancode = false;
         return;
     }
@@ -81,7 +83,7 @@ void keyboard_scancode(uint8_t code) {
     if (code == 0x3D) { key_push(key_f3); return; } if (code == 0x3E) { key_push(key_f4); return; }
     if (code == 0x3F) { key_push(key_f5); return; } if (code == 0x40) { key_push(key_f6); return; }
     if (code == 0x41) { key_push(key_f7); return; } if (code == 0x42) { key_push(key_f8); return; }
-    if (code == 0x43) { key_push(key_f9); return; }
+    if (code == 0x43) { key_push(key_f9); return; } if (code == 0x44) { key_push(key_f10); return; }
     if (code == 0x3A) { caps_lock = !caps_lock; return; }
     if (code == 0x1C) { key_push('\n'); return; } if (code == 0x0E) { key_push('\b'); return; } if (code == 0x0F) { key_push('\t'); return; }
     char value = key_ascii(code, shift_pressed); if (value >= 'a' && value <= 'z' && (shift_pressed != caps_lock)) value = static_cast<char>(value - ('a' - 'A'));

@@ -30,7 +30,7 @@ jobs:
       - name: Build strict native image
         run: make clean check
 
-      - name: Exercise 22 VBE display modes and settings controls
+      - name: Exercise 22 VBE modes and native shell controls
         run: bash tests/qemu_display_ui.sh build/zenov-os.img build/zenov-data.img build/qemu-display-ui
 
       - name: Inspect adaptive display evidence
@@ -39,6 +39,11 @@ jobs:
           grep -q UI_HYBRID_SCALER_OK build/qemu-display-ui/serial.log
           grep -q 'UI_DISPLAY_MODE_COUNT 22' build/qemu-display-ui/serial.log
           grep -q UI_SETTINGS_CONTROLS_OK build/qemu-display-ui/serial.log
+          grep -q UI_START_MENU_OK build/qemu-display-ui/serial.log
+          grep -q UI_QUICK_SETTINGS_OK build/qemu-display-ui/serial.log
+          grep -q UI_PERSONALIZATION_OK build/qemu-display-ui/serial.log
+          grep -q UI_TASKBAR_OK build/qemu-display-ui/serial.log
+          grep -q UI_ANIMATION_MODEL_OK build/qemu-display-ui/serial.log
           grep -q UI_DISPLAY_CYCLE_OK build/qemu-display-ui/serial.log
           grep -q UI_DISPLAY_PERSIST_OK build/qemu-display-ui/serial.log
           for mode in \
