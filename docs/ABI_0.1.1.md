@@ -31,7 +31,7 @@ Applications use `INT 0x80`; `EAX` contains the number and result, while `EBX`, 
 | 7 | `sync` | none | zero |
 | 8 | `read_console` | `EBX=output`, `ECX=capacity` | bytes read |
 
-The syscall table is an ABI surface, not an automatic grant. After final-read trust appraisal, each bundled application receives an immutable per-application capability mask. File operations additionally require an exact normalized path scope. See [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md).
+The syscall table is an ABI surface, not an automatic grant. After final-read trust appraisal, each bundled application receives a per-application capability mask from the active RSA-PSS-signed ZCAP1 policy. File operations additionally require an exact normalized path scope. See [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md).
 
 `exit` remains available to every process. Unknown syscall numbers preserve the unsupported-operation result. A known syscall denied by the active profile returns `ERROR_DENIED` and creates a mandatory persistent security record.
 

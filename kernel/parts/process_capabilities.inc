@@ -11,23 +11,7 @@ constexpr uint32_t capability_all = capability_console_write | capability_ticks 
     capability_file_stat | capability_version | capability_sync | capability_console_read;
 constexpr uint32_t syscall_error_denied = 0xFFFFFFF9U;
 
-struct CapabilityProfile {
-    const char* path;
-    uint32_t mask;
-    const char* read_scope;
-    const char* write_scope;
-};
-
-static constexpr CapabilityProfile capability_profiles[] = {
-    {"/apps/hello.zex", capability_console_write, "", ""},
-    {"/apps/fileio.elf", capability_console_write | capability_file_read | capability_file_write | capability_file_stat | capability_version | capability_sync,
-        "/apps/userio.txt", "/apps/userio.txt"},
-    {"/apps/args.elf", capability_console_write | capability_file_read, "/docs/readme.txt", ""},
-    {"/apps/console.elf", capability_console_write | capability_console_read, "", ""},
-    {"/apps/protect.elf", capability_console_write, "", ""},
-    {"/apps/kaccess.elf", 0U, "", ""},
-    {"/apps/zenovapp.zex", capability_console_write, "", ""},
-};
+using CapabilityProfile = zcap::Record;
 
 struct ActiveCapabilityProfile {
     bool valid = false;
@@ -71,9 +55,7 @@ uint32_t syscall_capability(uint32_t number) {
 }
 
 const CapabilityProfile* find_capability_profile(const char* normalized_path) {
-    if (!normalized_path) return nullptr;
-    for (const auto& profile : capability_profiles) if (string_equal(profile.path, normalized_path)) return &profile;
-    return nullptr;
+    return zcap::find(normalized_path);
 }
 
 bool normalize_capability_path(const char* input, char output[48]) {
@@ -164,25 +146,11 @@ bool syscall_scope_allowed(uint32_t number, const char* path) {
 }
 
 bool trusted_profile_bijection() {
-    constexpr uint32_t trusted_count = sizeof(security_guard::trusted_executables) / sizeof(security_guard::trusted_executables[0]);
-    constexpr uint32_t profile_count = sizeof(capability_profiles) / sizeof(capability_profiles[0]);
-    if (trusted_count != profile_count) return false;
-    for (const auto& profile : capability_profiles) {
-        if (!profile.path || !*profile.path || (profile.mask & ~capability_all)) return false;
-        uint32_t matches = 0;
-        for (const auto& trusted : security_guard::trusted_executables) if (string_equal(profile.path, trusted.path)) ++matches;
-        if (matches != 1U) return false;
-        const bool needs_read_scope = (profile.mask & (capability_file_read | capability_file_stat)) != 0;
-        const bool needs_write_scope = (profile.mask & capability_file_write) != 0;
-        if (needs_read_scope != (profile.read_scope && *profile.read_scope)) return false;
-        if (needs_write_scope != (profile.write_scope && *profile.write_scope)) return false;
-    }
-    for (const auto& trusted : security_guard::trusted_executables) if (!find_capability_profile(trusted.path)) return false;
-    return true;
+    return zcap::ready && zcap::exact_trusted_bijection(zcap::active_records);
 }
 
 bool capability_self_test() {
-    if (!trusted_profile_bijection()) return false;
+    if (!zcap::self_test() || !trusted_profile_bijection()) return false;
     if (syscall_capability(syscall_console_write) != capability_console_write || syscall_capability(255U) != 0U) return false;
     if (!exact_scope_allows("/data/apps/userio.txt", "/apps/userio.txt")) return false;
     if (exact_scope_allows("/data/apps/other.txt", "/apps/userio.txt")) return false;
@@ -201,7 +169,7 @@ bool capability_init() {
     serial::line(capability_ready ? "SYSCALL_CAPABILITY_POLICY_OK" : "SYSCALL_CAPABILITY_POLICY_FAILED");
     if (capability_ready) {
         serial::write("SYSCALL_CAPABILITY_PROFILES_OK count=");
-        serial_u32(static_cast<uint32_t>(sizeof(capability_profiles) / sizeof(capability_profiles[0])));
+        serial_u32(zcap::profile_count);
         serial::write("\r\n");
     }
     return capability_ready;
@@ -209,17 +177,17 @@ bool capability_init() {
 
 void print_capability_status() {
     console::write("  Syscall policy "); console::line(capability_ready ? "least-privilege profiles enforced" : "unavailable / execution locked");
-    console::write("  Profiles       "); console::unsigned_dec(static_cast<uint32_t>(sizeof(capability_profiles) / sizeof(capability_profiles[0]))); console::put('\n');
+    console::write("  Profiles       "); console::unsigned_dec(zcap::profile_count); console::put('\n');
     console::write("  Cap denials    "); console::unsigned_dec(capability_denials); console::put('\n');
     console::write("  Scope denials  "); console::unsigned_dec(scope_denials); console::put('\n');
 }
 
 void print_capability_profiles() {
-    for (const auto& profile : capability_profiles) {
+    for (const auto& profile : zcap::active_records) {
         console::write("  "); console::line(profile.path);
         console::write("    mask         "); console::hex(profile.mask); console::put('\n');
-        console::write("    read scope   "); console::line(profile.read_scope && *profile.read_scope ? profile.read_scope : "<none>");
-        console::write("    write scope  "); console::line(profile.write_scope && *profile.write_scope ? profile.write_scope : "<none>");
+        console::write("    read scope   "); console::line(*profile.read_scope ? profile.read_scope : "<none>");
+        console::write("    write scope  "); console::line(*profile.write_scope ? profile.write_scope : "<none>");
     }
     serial::line("SYSCALL_CAPABILITY_LIST_OK");
 }

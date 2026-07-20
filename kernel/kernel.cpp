@@ -49,6 +49,7 @@ namespace security_audit { bool append(uint32_t, uint8_t, uint8_t, const char*, 
 #include "parts/security_guard.inc"
 #include "parts/security_audit.inc"
 #include "parts/zgdb_policy.inc"
+#include "parts/zcap_policy.inc"
 #include "parts/process_capabilities.inc"
 #include "parts/process_package_capabilities.inc"
 namespace crypto {
@@ -113,12 +114,15 @@ extern "C" void kernel_main() {
     if (!security_audit::init()) panic("Persistent ZenovGuard audit journal validation failed.");
     if (!security_guard::init()) panic("ZenovGuard cryptographic or audit self-test failed.");
     if (!zgdb::init()) panic("Signed ZenovGuard database validation failed.");
+    if (!zcap::init()) panic("Signed syscall capability policy validation failed.");
     if (!process::capability_init()) panic("Per-application syscall capability policy validation failed.");
     if (!package_repository::init()) panic("Signed ZenRepo metadata validation failed.");
     package_manager::init();
     const uint8_t mutation_probe = 0x5AU;
     if (storage::guarded_write_file("/apps/hello.zex", &mutation_probe, 1U, false)) panic("Trusted application mutation guard failed.");
     if (storage::guarded_write_file("/security/zenovguard.zgdb", &mutation_probe, 1U, false)) panic("Active security database mutation guard failed.");
+    if (storage::guarded_write_file("/security/syscall-capabilities.zcap", &mutation_probe, 1U, false)) panic("Active capability policy mutation guard failed.");
+    if (storage::guarded_write_file("/security/syscall-capabilities.version", &mutation_probe, 1U, false)) panic("Capability policy version mutation guard failed.");
     if (storage::guarded_write_file("/security/zenovguard.audit", &mutation_probe, 1U, false)) panic("Persistent security audit mutation guard failed.");
     if (storage::guarded_write_file("/repo/timestamp.zrm", &mutation_probe, 1U, false)) panic("Signed repository metadata mutation guard failed.");
     if (storage::guarded_write_file("/apps/pkg-security-probe.zex", &mutation_probe, 1U, false)) panic("Managed package payload mutation guard failed.");
@@ -143,7 +147,7 @@ extern "C" void kernel_main() {
     if (graphical && mouse_ready && !mouse_decoder_regression()) panic("PS/2 mouse decoder regression failed.");
     if (graphical && mouse_ready) serial::line("PS2_MOUSE_DECODER_OK");
 
-    serial::line("Kernel online. Desktop, signed policy, persistent audit, syscall capabilities, signed packages, storage and ring-3 services ready.");
+    serial::line("Kernel online. Desktop, signed policies, persistent audit, syscall capabilities, signed packages, security, storage and ring-3 services ready.");
     console::show_home();
     if (graphical) graphics::sync_terminal_from_console();
     serial::line("ZENOVOS_UI_READY");
