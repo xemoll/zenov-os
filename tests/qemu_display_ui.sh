@@ -14,7 +14,7 @@ cp "$DATA_IMAGE" "$RUNTIME_DATA"
 
 wait_for_serial() {
   local text="$1"
-  for _ in $(seq 1 700); do
+  for _ in $(seq 1 1200); do
     [[ -f "$SERIAL" ]] && grep -q "$text" "$SERIAL" && return 0
     sleep 0.1
   done
@@ -23,7 +23,7 @@ wait_for_serial() {
 
 wait_for_count() {
   local text="$1" expected="$2"
-  for _ in $(seq 1 700); do
+  for _ in $(seq 1 1200); do
     [[ -f "$SERIAL" ]] && [[ "$(grep -c "$text" "$SERIAL" || true)" -ge "$expected" ]] && return 0
     sleep 0.1
   done
@@ -34,41 +34,61 @@ capture_mode() {
   local name="$1"
   local file="$(cd "$OUT" && pwd)/${name}.ppm"
   echo "screendump $file"
-  sleep 0.35
+  sleep 0.45
+}
+
+should_capture() {
+  case "$1" in
+    640x480|960x540|1024x600|1024x768|1152x648|1280x720|1280x1024|1368x768|1440x900|1600x900|1600x1200) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 controller() {
   wait_for_serial "ZENOVOS_UI_READY" || { echo quit; return 1; }
   wait_for_serial "UI_ADAPTIVE_DISPLAY_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_DISPLAY_MODE_COUNT 22" || { echo quit; return 1; }
+  wait_for_serial "UI_SETTINGS_CONTROLS_OK" || { echo quit; return 1; }
   wait_for_serial "UI_DISPLAY_MODE_OK 1024x768" || { echo quit; return 1; }
   capture_mode desktop-1024x768
 
-  echo "sendkey f9 10"
-  wait_for_serial "UI_DISPLAY_MODE_OK 1280x720" || { echo quit; return 1; }
-  capture_mode desktop-1280x720
+  local modes=(
+    1152x648 1152x720 1152x864 1280x720 1280x768 1280x800
+    1280x960 1280x1024 1360x768 1368x768 1440x900 1536x864
+    1600x900 1600x1200 640x480 720x480 800x600 960x540
+    960x600 1024x576 1024x600
+  )
 
-  echo "sendkey f9 10"
-  wait_for_serial "UI_DISPLAY_MODE_OK 640x480" || { echo quit; return 1; }
-  capture_mode desktop-640x480
-
-  echo "sendkey f9 10"
-  wait_for_serial "UI_DISPLAY_MODE_OK 800x600" || { echo quit; return 1; }
-  capture_mode desktop-800x600
-
-  echo "sendkey f9 10"
-  wait_for_serial "UI_DISPLAY_MODE_OK 1024x600" || { echo quit; return 1; }
-  capture_mode desktop-1024x600
+  local mode
+  for mode in "${modes[@]}"; do
+    echo "sendkey f9 10"
+    wait_for_serial "UI_DISPLAY_MODE_OK $mode" || { echo quit; return 1; }
+    if should_capture "$mode"; then capture_mode "desktop-$mode"; fi
+  done
 
   echo "sendkey f9 10"
   wait_for_count "UI_DISPLAY_MODE_OK 1024x768" 2 || { echo quit; return 1; }
   wait_for_serial "UI_DISPLAY_CYCLE_OK" || { echo quit; return 1; }
   wait_for_serial "UI_DISPLAY_PERSIST_OK" || { echo quit; return 1; }
+
+  echo "sendkey f7 10"
+  wait_for_serial "UI_KEYBOARD_NAV_OK" || { echo quit; return 1; }
+  echo "sendkey tab 10"
+  echo "sendkey tab 10"
+  echo "sendkey tab 10"
+  sleep 0.3
+  capture_mode settings-1024x768
+
+  echo "sendkey right 10"
+  wait_for_count "UI_DISPLAY_MODE_OK 1152x648" 2 || { echo quit; return 1; }
+  echo "sendkey left 10"
+  wait_for_count "UI_DISPLAY_MODE_OK 1024x768" 3 || { echo quit; return 1; }
   sleep 0.2
   echo quit
 }
 
 set +e
-controller | timeout 75s "$QEMU" \
+controller | timeout 150s "$QEMU" \
   -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
   -drive "file=$RUNTIME_DATA,format=raw,if=ide,index=0,media=disk" \
   -boot a -m 32M -machine pc,vmport=off -vga std -display none \
@@ -94,14 +114,31 @@ check_ppm() {
   }
 }
 
-check_ppm "$OUT/desktop-1024x768.ppm" "1024 768"
-check_ppm "$OUT/desktop-1280x720.ppm" "1280 720"
 check_ppm "$OUT/desktop-640x480.ppm" "640 480"
-check_ppm "$OUT/desktop-800x600.ppm" "800 600"
+check_ppm "$OUT/desktop-960x540.ppm" "960 540"
 check_ppm "$OUT/desktop-1024x600.ppm" "1024 600"
+check_ppm "$OUT/desktop-1024x768.ppm" "1024 768"
+check_ppm "$OUT/desktop-1152x648.ppm" "1152 648"
+check_ppm "$OUT/desktop-1280x720.ppm" "1280 720"
+check_ppm "$OUT/desktop-1280x1024.ppm" "1280 1024"
+check_ppm "$OUT/desktop-1368x768.ppm" "1368 768"
+check_ppm "$OUT/desktop-1440x900.ppm" "1440 900"
+check_ppm "$OUT/desktop-1600x900.ppm" "1600 900"
+check_ppm "$OUT/desktop-1600x1200.ppm" "1600 1200"
+check_ppm "$OUT/settings-1024x768.ppm" "1024 768"
 
-for marker in UI_ADAPTIVE_DISPLAY_OK UI_DISPLAY_CYCLE_OK UI_DISPLAY_PERSIST_OK; do
+for mode in \
+  640x480 720x480 800x600 960x540 960x600 1024x576 1024x600 1024x768 \
+  1152x648 1152x720 1152x864 1280x720 1280x768 1280x800 1280x960 1280x1024 \
+  1360x768 1368x768 1440x900 1536x864 1600x900 1600x1200; do
+  grep -q "UI_DISPLAY_MODE_OK $mode" "$SERIAL" || {
+    echo "qemu-display-ui: missing verified mode: $mode" >&2
+    exit 1
+  }
+done
+
+for marker in UI_ADAPTIVE_DISPLAY_OK "UI_DISPLAY_MODE_COUNT 22" UI_SETTINGS_CONTROLS_OK UI_DISPLAY_CYCLE_OK UI_DISPLAY_PERSIST_OK; do
   grep -q "$marker" "$SERIAL" || { echo "qemu-display-ui: missing marker: $marker" >&2; exit 1; }
 done
 
-printf 'qemu-display-ui: OK serial=%s screenshots=%s\n' "$SERIAL" "$OUT/desktop-*.ppm"
+printf 'qemu-display-ui: OK modes=22 serial=%s screenshots=%s\n' "$SERIAL" "$OUT/*.ppm"
