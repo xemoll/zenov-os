@@ -1,0 +1,38 @@
+name: Apply verified native shell patch
+
+on:
+  push:
+    branches:
+      - agent/zenov-os-0.1.1-windows-simple-shell
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[ui-shell-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Decode and apply locally verified patch
+        run: |
+          cat .ci/ui-shell.patch.part.* | base64 -d | gzip -d > /tmp/ui-shell.patch
+          echo "70600dea73bc4acb309c36c4348b57c99c6615f4dd0213e3bc29eb0aa650de6c  /tmp/ui-shell.patch" | sha256sum -c -
+          git apply --check /tmp/ui-shell.patch
+          git apply /tmp/ui-shell.patch
+          rm -f .ci/ui-shell.patch.part.* .github/workflows/apply-ui-shell.yml
+
+      - name: Verify strict native source before publishing branch
+        run: make clean check
+
+      - name: Commit verified shell source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "ui: add Windows-simple customizable ZenovOS 0.1.1 shell [ui-shell-applied]"
+          git push origin HEAD:agent/zenov-os-0.1.1-windows-simple-shell
