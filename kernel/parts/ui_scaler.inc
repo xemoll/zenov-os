@@ -35,6 +35,15 @@ void configure_scaler() {
     }
 }
 
+uint32_t scaler_lerp(uint32_t first, uint32_t second, uint8_t weight) {
+    const uint32_t inverse = 256U - static_cast<uint32_t>(weight);
+    const uint32_t amount = static_cast<uint32_t>(weight);
+    const uint32_t red = ((((first >> 16U) & 0xFFU) * inverse) + (((second >> 16U) & 0xFFU) * amount) + 128U) >> 8U;
+    const uint32_t green = ((((first >> 8U) & 0xFFU) * inverse) + (((second >> 8U) & 0xFFU) * amount) + 128U) >> 8U;
+    const uint32_t blue = (((first & 0xFFU) * inverse) + ((second & 0xFFU) * amount) + 128U) >> 8U;
+    return (red << 16U) | (green << 8U) | blue;
+}
+
 uint32_t sample_scaled_pixel(uint32_t local_x, uint32_t local_y) {
     if (!scaler_linear) {
         uint32_t source_x = local_x * width / static_cast<uint32_t>(viewport_width);
@@ -48,7 +57,7 @@ uint32_t sample_scaled_pixel(uint32_t local_x, uint32_t local_y) {
     const uint32_t x0 = scaler_x0[local_x], x1 = scaler_x1[local_x];
     const uint32_t y0 = scaler_y0[local_y], y1 = scaler_y1[local_y];
     const uint8_t wx = scaler_x_weight[local_x], wy = scaler_y_weight[local_y];
-    const uint32_t top = blend(backbuffer[y0 * width + x1], backbuffer[y0 * width + x0], wx);
-    const uint32_t bottom = blend(backbuffer[y1 * width + x1], backbuffer[y1 * width + x0], wx);
-    return blend(bottom, top, wy);
+    const uint32_t top = scaler_lerp(backbuffer[y0 * width + x0], backbuffer[y0 * width + x1], wx);
+    const uint32_t bottom = scaler_lerp(backbuffer[y1 * width + x0], backbuffer[y1 * width + x1], wx);
+    return scaler_lerp(top, bottom, wy);
 }
