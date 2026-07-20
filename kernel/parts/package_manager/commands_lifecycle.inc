@@ -60,7 +60,22 @@ bool install_latest(const char* name) {
         return false;
     }
     char path[48]{};
-    return target_package_path(*target, path) && install(path);
+    if (!target_package_path(*target, path)) {
+        serial::line("ZENPKG_REPOSITORY_TARGET_PATH_INVALID");
+        return false;
+    }
+    serial::write("ZENPKG_REPOSITORY_TARGET_RESOLVED name=");
+    serial::write(target->name);
+    serial::write(" version=");
+    serial::write(target->version);
+    serial::write(" path=");
+    serial::line(path);
+    if (!install(path)) return false;
+    serial::write("ZENPKG_REPOSITORY_INSTALL_OK name=");
+    serial::write(target->name);
+    serial::write(" version=");
+    serial::line(target->version);
+    return true;
 }
 
 bool upgrade_one(const char* name) {
