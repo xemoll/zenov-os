@@ -1,0 +1,33 @@
+name: ZCAP Main Source Snapshot
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact main parent
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^2)" = "29300b0d06b8e380f34d3283dcf578481c07f980" || \
+          test "$(git rev-parse HEAD^)" = "29300b0d06b8e380f34d3283dcf578481c07f980"
+      - name: Create source archive
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=build --exclude=dist \
+            --exclude=.github/workflows/zcap-main-source-snapshot.yml \
+            -czf /tmp/zenov-os-main-29300-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-main-29300-source
+          path: /tmp/zenov-os-main-29300-source.tar.gz
+          if-no-files-found: error
