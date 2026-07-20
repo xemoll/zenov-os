@@ -46,13 +46,6 @@ bool verified_target_file(const char* path, const package_repository::Target& ta
     return error == native_package::Error::none && package_matches_target(package, package_size, target);
 }
 
-bool cache_object_available(const package_repository::Target& target, char output[48]) {
-    if (!cache_path(target, false, output)) return false;
-    storage::FileInfo info{};
-    return storage::query(output, info) && info.type == storage::zfs_type_file &&
-        info.size == target.package_length && verified_target_file(output, target);
-}
-
 void cache_report_target(const char* marker, const package_repository::Target& target) {
     serial::write(marker);
     serial::write(" name=");
