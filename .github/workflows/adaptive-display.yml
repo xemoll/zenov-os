@@ -36,6 +36,7 @@ jobs:
       - name: Inspect adaptive display evidence
         run: |
           grep -q UI_ADAPTIVE_DISPLAY_OK build/qemu-display-ui/serial.log
+          grep -q UI_HYBRID_SCALER_OK build/qemu-display-ui/serial.log
           grep -q 'UI_DISPLAY_MODE_COUNT 22' build/qemu-display-ui/serial.log
           grep -q UI_SETTINGS_CONTROLS_OK build/qemu-display-ui/serial.log
           grep -q UI_DISPLAY_CYCLE_OK build/qemu-display-ui/serial.log
