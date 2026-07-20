@@ -89,7 +89,7 @@ controller() {
   echo "sendkey f10 10"
   sleep 0.3
   capture_mode quick-settings-1024x768
-  echo "sendkey enter 10"
+  echo "sendkey ret 10"
   wait_for_serial "UI_SETTINGS_PERSIST_OK" || { echo quit; return 1; }
   echo "sendkey esc 10"
 
@@ -108,7 +108,7 @@ controller() {
   echo "sendkey end 10"
   sleep 0.3
   capture_mode settings-style-1024x768
-  echo "sendkey enter 10"
+  echo "sendkey ret 10"
   wait_for_count "UI_SETTINGS_PERSIST_OK" 2 || { echo quit; return 1; }
   sleep 0.2
   echo quit
