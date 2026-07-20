@@ -19,11 +19,7 @@ void present_physical_region(int32_t x, int32_t y, int32_t region_width, int32_t
         for (int32_t px = x; px < x + region_width; ++px) {
             uint32_t color = background;
             if (px >= viewport_x && py >= viewport_y && px < viewport_x + viewport_width && py < viewport_y + viewport_height) {
-                uint32_t source_x = static_cast<uint32_t>(px - viewport_x) * width / static_cast<uint32_t>(viewport_width);
-                uint32_t source_y = static_cast<uint32_t>(py - viewport_y) * height / static_cast<uint32_t>(viewport_height);
-                if (source_x >= width) source_x = width - 1U;
-                if (source_y >= height) source_y = height - 1U;
-                color = backbuffer[source_y * width + source_x];
+                color = sample_scaled_pixel(static_cast<uint32_t>(px - viewport_x), static_cast<uint32_t>(py - viewport_y));
             }
             framebuffer[output_row + static_cast<uint32_t>(px)] = color;
         }
@@ -103,6 +99,7 @@ bool set_display_mode(uint8_t mode) {
     display_width = target.width;
     display_height = target.height;
     configure_viewport();
+    configure_scaler();
     mouse_screen_x = static_cast<int32_t>(display_width / 2U);
     mouse_screen_y = static_cast<int32_t>(display_height / 2U);
     update_logical_mouse();
@@ -218,13 +215,15 @@ bool init() {
     const bool display_ok = display_mode_count >= 20U && display_framebuffer_bytes() <= maximum_framebuffer_bytes &&
         maximum_framebuffer_bytes <= paging::graphics_window_bytes && viewport_width > 0 && viewport_height > 0 &&
         viewport_x >= 0 && viewport_y >= 0 && viewport_x + viewport_width <= static_cast<int32_t>(display_width) && viewport_y + viewport_height <= static_cast<int32_t>(display_height);
+    const bool scaler_ok = viewport_width <= static_cast<int32_t>(scaler_max_width) && viewport_height <= static_cast<int32_t>(scaler_max_height);
     serial::line(display_ok ? "UI_ADAPTIVE_DISPLAY_OK" : "UI_ADAPTIVE_DISPLAY_FAILED");
+    serial::line(scaler_ok ? "UI_HYBRID_SCALER_OK" : "UI_HYBRID_SCALER_FAILED");
     serial::write("UI_DISPLAY_MODE_COUNT "); serial_uint(display_mode_count); serial::write("\r\n");
     serial::line("UI_SETTINGS_CONTROLS_OK");
     report_display_mode("UI_DISPLAY_MODE_OK");
     serial::write("DESKTOP_SCENE_HASH="); serial_hex(scene_hash()); serial::write("\r\n");
     serial::line("DESKTOP_SCENE_OK");
-    return clipping && runtime_preferences_loaded && bounds_ok && geometry_ok && navigation_ok && display_ok;
+    return clipping && runtime_preferences_loaded && bounds_ok && geometry_ok && navigation_ok && display_ok && scaler_ok;
 }
 
 bool hit(int32_t x, int32_t y, int32_t rect_x, int32_t rect_y, int32_t rect_width, int32_t rect_height) {
