@@ -1,0 +1,16 @@
+format=zenpkg-manifest-1
+name=hello-native
+version=0.1.0
+architecture=i686
+target=i686-zenov-none
+kind=application
+entrypoint=/data/apps/HELLO.ELF
+payload_type=elf32
+runtime=native
+min_os=0.1.1
+license=BSD-2-Clause
+source=https://github.com/xemoll/zenov-os
+asset_policy=redistributable
+capability=abi.elf32.i386.static
+capability=kernel.ring3
+capability=storage.zenovfs1

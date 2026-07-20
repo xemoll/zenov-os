@@ -3,6 +3,13 @@ bool security_read_file(const char* input, uint8_t* output, uint32_t capacity, u
     if (!read_file(input, output, capacity, actual_size)) return false;
     if (output != process::application_buffer) return true;
     if (!zgdb::precheck(input, output, actual_size)) return false;
+    if (package_manager::allow_execution(input, output, actual_size)) {
+        if (!package_manager::activate_capabilities(input, output, actual_size)) {
+            serial::line("ZENPKG_SYSCALL_CAPABILITY_ACTIVATION_FAILED");
+            return false;
+        }
+        return true;
+    }
     if (!security_guard::allow_execution(input, output, actual_size)) return false;
     if (!process::activate_capability_profile(input, output, actual_size)) {
         serial::line("SYSCALL_CAPABILITY_ACTIVATION_FAILED");
