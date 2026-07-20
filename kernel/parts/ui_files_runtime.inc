@@ -65,16 +65,14 @@ bool init() {
     if (!initialized) return false;
     files_reload();
     storage::BrowserEntry app_probe[4]{};
-    const bool browser_ok = storage::browser_mounted() && files_entry_count > 0U &&
-        storage::list_directory("/apps", app_probe, 4U) > 0U;
+    const bool browser_ok = storage::browser_mounted() && files_entry_count > 0U && storage::list_directory("/apps", app_probe, 4U) > 0U;
     serial::line(browser_ok ? "UI_FILES_BROWSER_OK" : "UI_FILES_BROWSER_FAILED");
     return initialized;
 }
 
 bool handle_navigation_key(uint16_t key) {
     if (active_view != View::files) return handle_navigation_key_base(key);
-    if (key == key_f5 || key == key_f6 || key == key_f7 || key == key_f8)
-        return handle_navigation_key_base(key);
+    if (key == key_f5 || key == key_f6 || key == key_f7 || key == key_f8 || key == key_f9) return handle_navigation_key_base(key);
 
     if (files_preview_open) {
         if (key == '\b' || key == key_escape) {
@@ -90,19 +88,12 @@ bool handle_navigation_key(uint16_t key) {
     }
     files_reload();
     if (files_entry_count == 0U) return true;
-    if (key == key_up) {
-        files_focus = files_focus == 0U ? files_entry_count - 1U : files_focus - 1U;
-    } else if (key == key_down || key == key_right || key == '\t') {
-        files_focus = (files_focus + 1U) % files_entry_count;
-    } else if (key == key_home) {
-        files_focus = 0U;
-    } else if (key == key_end) {
-        files_focus = files_entry_count - 1U;
-    } else if (key == '\n' || key == ' ') {
-        (void)files_open_focused();
-    } else {
-        return true;
-    }
+    if (key == key_up) files_focus = files_focus == 0U ? files_entry_count - 1U : files_focus - 1U;
+    else if (key == key_down || key == key_right || key == '\t') files_focus = (files_focus + 1U) % files_entry_count;
+    else if (key == key_home) files_focus = 0U;
+    else if (key == key_end) files_focus = files_entry_count - 1U;
+    else if (key == '\n' || key == ' ') (void)files_open_focused();
+    else return true;
     files_ensure_visible();
     refresh_desktop();
     return true;
@@ -114,13 +105,14 @@ void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
         return;
     }
     if (!active) return;
-    restore_cursor(mouse_x, mouse_y);
-    mouse_x += delta_x;
-    mouse_y += delta_y;
-    if (mouse_x < 0) mouse_x = 0;
-    if (mouse_y < 0) mouse_y = 0;
-    if (mouse_x >= static_cast<int32_t>(width)) mouse_x = static_cast<int32_t>(width) - 1;
-    if (mouse_y >= static_cast<int32_t>(height)) mouse_y = static_cast<int32_t>(height) - 1;
+    restore_cursor(mouse_screen_x, mouse_screen_y);
+    mouse_screen_x += delta_x;
+    mouse_screen_y += delta_y;
+    if (mouse_screen_x < 0) mouse_screen_x = 0;
+    if (mouse_screen_y < 0) mouse_screen_y = 0;
+    if (mouse_screen_x >= static_cast<int32_t>(display_width)) mouse_screen_x = static_cast<int32_t>(display_width) - 1;
+    if (mouse_screen_y >= static_cast<int32_t>(display_height)) mouse_screen_y = static_cast<int32_t>(display_height) - 1;
+    update_logical_mouse();
 
     const bool left = (buttons & 1U) != 0;
     const bool previous_left = (mouse_buttons & 1U) != 0;
@@ -133,8 +125,7 @@ void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
         } else if (files_handle_click_at(mouse_x, mouse_y)) {
             refresh_desktop();
             scene_changed = true;
-        } else if (mouse_x >= window_x && mouse_x < window_x + window_width &&
-                   mouse_y >= window_y && mouse_y < window_y + titlebar_height) {
+        } else if (mouse_x >= window_x && mouse_x < window_x + window_width && mouse_y >= window_y && mouse_y < window_y + titlebar_height) {
             dragging = true;
             drag_offset_x = mouse_x - window_x;
             drag_offset_y = mouse_y - window_y;
