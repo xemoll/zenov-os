@@ -6,8 +6,8 @@ constexpr int32_t terminal_line_height = 10;
 
 constexpr int32_t settings_sidebar_x_offset = 16;
 constexpr int32_t settings_sidebar_width = 120;
-constexpr int32_t settings_page_y_offsets[3] = {104, 148, 192};
-constexpr int32_t settings_page_height = 34;
+constexpr int32_t settings_page_y_offsets[4] = {96, 134, 172, 210};
+constexpr int32_t settings_page_height = 32;
 constexpr int32_t settings_content_x_offset = 152;
 constexpr int32_t settings_content_width = 336;
 constexpr int32_t settings_theme_width = 96;
@@ -24,18 +24,21 @@ constexpr int32_t settings_radius_y_offset = 218;
 constexpr int32_t settings_opacity_y_offset = 260;
 constexpr int32_t settings_density_y_offset = 302;
 constexpr int32_t settings_taskbar_y_offset = 344;
+constexpr int32_t settings_access_contrast_y_offset = 132;
+constexpr int32_t settings_access_pointer_y_offset = 184;
+constexpr int32_t settings_access_motion_y_offset = 236;
 constexpr int32_t settings_reset_y_offset = 314;
 
 constexpr int32_t launcher_panel_x = 160;
-constexpr int32_t launcher_panel_y = 68;
+constexpr int32_t launcher_panel_y = 50;
 constexpr int32_t launcher_panel_width = 480;
-constexpr int32_t launcher_panel_height = 454;
+constexpr int32_t launcher_panel_height = 482;
 constexpr int32_t launcher_search_x = launcher_panel_x + 22;
 constexpr int32_t launcher_search_y = launcher_panel_y + 58;
 constexpr int32_t launcher_search_width = launcher_panel_width - 44;
 constexpr int32_t launcher_search_height = 40;
 constexpr int32_t launcher_card_width = 202;
-constexpr int32_t launcher_card_height = 76;
+constexpr int32_t launcher_card_height = 64;
 
 char terminal_cell_char(uint32_t row, uint32_t column) {
     if (row >= console::height || column >= console::width) return 0;
@@ -121,13 +124,18 @@ void draw_focus_outline(int32_t x, int32_t y, int32_t outline_width, int32_t out
     fill_rect(x + outline_width - 1, y + 8, 1, outline_height - 16, color);
 }
 
-uint8_t settings_focus_count() { return settings_page == 2U ? 1U : 6U; }
+uint8_t settings_focus_count() {
+    if (settings_page == 2U) return 3U;
+    if (settings_page == 3U) return 1U;
+    return 6U;
+}
 
 HoverTarget settings_page_target(uint8_t index) {
-    static constexpr HoverTarget targets[3] = {
-        HoverTarget::settings_page_general, HoverTarget::settings_page_style, HoverTarget::settings_page_about
+    static constexpr HoverTarget targets[settings_page_count] = {
+        HoverTarget::settings_page_general, HoverTarget::settings_page_style,
+        HoverTarget::settings_page_access, HoverTarget::settings_page_about
     };
-    return index < 3U ? targets[index] : HoverTarget::none;
+    return index < settings_page_count ? targets[index] : HoverTarget::none;
 }
 
 void draw_settings_page_button(uint8_t index, const char* name, ShellIcon icon) {
@@ -146,7 +154,8 @@ void draw_settings_sidebar() {
     draw_text(window_x + 20, window_y + 84, "ZENOVOS", current_theme.text_muted, 1);
     draw_settings_page_button(0, "GENERAL", ShellIcon::settings);
     draw_settings_page_button(1, "STYLE", ShellIcon::apps);
-    draw_settings_page_button(2, "ABOUT", ShellIcon::display);
+    draw_settings_page_button(2, "ACCESS", ShellIcon::display);
+    draw_settings_page_button(3, "ABOUT", ShellIcon::start);
     fill_rect(window_x + 140, window_y + 58, 1, 322, current_theme.border);
 }
 
@@ -253,6 +262,20 @@ void render_settings_style() {
     draw_settings_row(window_y + settings_taskbar_y_offset, "TASKBAR", runtime_taskbar_left ? "LEFT" : "CENTER", 5U, HoverTarget::settings_taskbar);
 }
 
+
+void render_settings_access() {
+    draw_text(window_x + settings_content_x_offset, window_y + 68, "ACCESSIBILITY", current_theme.text, 2);
+    draw_text(window_x + settings_content_x_offset, window_y + 91, "CLEAR FEEDBACK  LOW FRICTION", current_theme.text_muted, 1);
+    const int32_t x = window_x + settings_content_x_offset;
+    fill_round_rect(x, window_y + 104, settings_content_width, 38, 9, current_theme.surface_low);
+    fill_circle_alpha(x + 18, window_y + 123, 5, runtime_high_contrast ? current_theme.accent : current_theme.text_muted, 255);
+    draw_text(x + 32, window_y + 120, "VISUAL ASSISTANCE", current_theme.text, 1);
+    draw_settings_row(window_y + settings_access_contrast_y_offset + 34, "HIGH CONTRAST", runtime_high_contrast ? "ON" : "OFF", 0U, HoverTarget::settings_contrast);
+    draw_settings_row(window_y + settings_access_pointer_y_offset + 34, "POINTER SIZE", runtime_large_pointer ? "LARGE" : "NORMAL", 1U, HoverTarget::settings_pointer);
+    draw_settings_row(window_y + settings_access_motion_y_offset + 34, "MOTION", desktop_animations ? "SMOOTH" : "REDUCED", 2U, HoverTarget::settings_access_motion);
+    draw_text(x, window_y + 336, "F11 OPENS SYSTEM CENTER", current_theme.text_muted, 1);
+}
+
 void render_settings_about() {
     draw_text(window_x + settings_content_x_offset, window_y + 68, "ABOUT", current_theme.text, 2);
     draw_text(window_x + settings_content_x_offset, window_y + 91, "ZENOVOS 0.1.1", current_theme.text_muted, 1);
@@ -275,16 +298,20 @@ void render_settings_about() {
 }
 
 void render_settings() {
-    draw_window_chrome("SETTINGS", settings_page == 0U ? "GENERAL" : (settings_page == 1U ? "STYLE" : "ABOUT"));
+    const char* section = settings_page == 0U ? "GENERAL" : (settings_page == 1U ? "STYLE" : (settings_page == 2U ? "ACCESS" : "ABOUT"));
+    draw_window_chrome("SETTINGS", section);
     draw_settings_sidebar();
     if (settings_page == 0U) render_settings_general();
     else if (settings_page == 1U) render_settings_style();
+    else if (settings_page == 2U) render_settings_access();
     else render_settings_about();
 }
 
-const char* launcher_names[launcher_item_count] = {"TERMINAL", "FILES", "SETTINGS", "DISPLAY"};
-const char* launcher_details[launcher_item_count] = {"SHELL AND TOOLS", "ZENOVFS BROWSER", "SYSTEM CONTROLS", "SCREEN MODES"};
-constexpr ShellIcon launcher_icons[launcher_item_count] = {ShellIcon::terminal, ShellIcon::files, ShellIcon::settings, ShellIcon::display};
+const char* launcher_names[launcher_item_count] = {"TERMINAL", "FILES", "SETTINGS", "DISPLAY", "PACKAGES", "SECURITY"};
+const char* launcher_details[launcher_item_count] = {"SHELL AND TOOLS", "ZENOVFS BROWSER", "SYSTEM CONTROLS", "SCREEN MODES", "SIGNED ZENPKG", "ZENOVGUARD STATUS"};
+constexpr ShellIcon launcher_icons[launcher_item_count] = {
+    ShellIcon::terminal, ShellIcon::files, ShellIcon::settings, ShellIcon::display, ShellIcon::apps, ShellIcon::settings
+};
 
 char launcher_lower(char value) { return value >= 'A' && value <= 'Z' ? static_cast<char>(value + ('a' - 'A')) : value; }
 
@@ -330,10 +357,11 @@ void launcher_backspace() {
 }
 
 int32_t launcher_card_x(uint8_t index) { return launcher_panel_x + 22 + static_cast<int32_t>(index % 2U) * 218; }
-int32_t launcher_card_y(uint8_t index) { return launcher_panel_y + 142 + static_cast<int32_t>(index / 2U) * 88; }
+int32_t launcher_card_y(uint8_t index) { return launcher_panel_y + 130 + static_cast<int32_t>(index / 2U) * 72; }
 HoverTarget launcher_target(uint8_t index) {
     static constexpr HoverTarget targets[launcher_item_count] = {
-        HoverTarget::launcher_terminal, HoverTarget::launcher_files, HoverTarget::launcher_settings, HoverTarget::launcher_display
+        HoverTarget::launcher_terminal, HoverTarget::launcher_files, HoverTarget::launcher_settings,
+        HoverTarget::launcher_display, HoverTarget::launcher_packages, HoverTarget::launcher_security
     };
     return index < launcher_item_count ? targets[index] : HoverTarget::none;
 }
@@ -349,11 +377,11 @@ void draw_launcher_card(uint8_t index) {
     else if (focused) fill = current_theme.accent_soft;
     else if (hovered) fill = mix(current_theme.surface_high, current_theme.accent, 1U, 8U);
     fill_round_rect(x, y, launcher_card_width, launcher_card_height, 11, fill);
-    fill_round_rect(x + 12, y + 14, 46, 46, 11, current_theme.surface_low);
-    draw_shell_icon(launcher_icons[index], x + 24, y + 25, visible ? current_theme.accent : current_theme.border);
-    draw_text(x + 72, y + 24, launcher_names[index], visible ? current_theme.text : current_theme.text_muted, 1);
-    draw_text(x + 72, y + 45, launcher_details[index], current_theme.text_muted, 1);
-    if (focused) fill_round_rect(x + 72, y + 64, 72, 2, 1, current_theme.accent);
+    fill_round_rect(x + 12, y + 10, 42, 42, 10, current_theme.surface_low);
+    draw_shell_icon(launcher_icons[index], x + 22, y + 19, visible ? current_theme.accent : current_theme.border);
+    draw_text(x + 66, y + 20, launcher_names[index], visible ? current_theme.text : current_theme.text_muted, 1);
+    draw_text(x + 66, y + 40, launcher_details[index], current_theme.text_muted, 1);
+    if (focused) fill_round_rect(x + 66, y + 55, 72, 2, 1, current_theme.accent);
 }
 
 void render_launcher() {
@@ -368,14 +396,14 @@ void render_launcher() {
     draw_char(launcher_search_x + 15, launcher_search_y + 16 + ui_scene_offset_y, '>', current_theme.accent, 1);
     if (launcher_query_length) draw_text(launcher_search_x + 34, launcher_search_y + 16 + ui_scene_offset_y, launcher_query, current_theme.text, 1);
     else draw_text(launcher_search_x + 34, launcher_search_y + 16 + ui_scene_offset_y, "TYPE TO SEARCH", current_theme.text_muted, 1);
-    draw_text(launcher_panel_x + 22, y + 122, launcher_query_length ? "RESULTS" : "PINNED", current_theme.text_muted, 1);
+    draw_text(launcher_panel_x + 22, y + 116, launcher_query_length ? "RESULTS" : "PINNED", current_theme.text_muted, 1);
     for (uint8_t i = 0; i < launcher_item_count; ++i) draw_launcher_card(i);
-    fill_rect(launcher_panel_x + 22, y + 326, launcher_panel_width - 44, 1, current_theme.border);
-    draw_text(launcher_panel_x + 22, y + 346, "RECOMMENDED", current_theme.text_muted, 1);
-    fill_round_rect(launcher_panel_x + 22, y + 366, launcher_panel_width - 44, 48, 9, current_theme.surface_high);
-    fill_circle_alpha(launcher_panel_x + 42, y + 390, 6, current_theme.success, 255);
-    draw_text(launcher_panel_x + 58, y + 382, "LOCAL SESSION", current_theme.text, 1);
-    draw_text(launcher_panel_x + 58, y + 400, runtime_compact_density ? "COMPACT UI" : "COMFORTABLE UI", current_theme.text_muted, 1);
-    draw_text_right(launcher_panel_x + launcher_panel_width - 34, y + 390, wallpaper_name(), current_theme.accent, 1);
-    draw_text_center(launcher_panel_x + launcher_panel_width / 2, y + 432, "ARROWS SELECT   ENTER OPEN   ESC CLOSE", current_theme.text_muted, 1);
+    fill_rect(launcher_panel_x + 22, y + 350, launcher_panel_width - 44, 1, current_theme.border);
+    draw_text(launcher_panel_x + 22, y + 368, "RECOMMENDED", current_theme.text_muted, 1);
+    fill_round_rect(launcher_panel_x + 22, y + 386, launcher_panel_width - 44, 42, 9, current_theme.surface_high);
+    fill_circle_alpha(launcher_panel_x + 42, y + 407, 5, current_theme.success, 255);
+    draw_text(launcher_panel_x + 56, y + 399, "LOCAL SESSION", current_theme.text, 1);
+    draw_text(launcher_panel_x + 56, y + 415, runtime_compact_density ? "COMPACT UI" : "COMFORTABLE UI", current_theme.text_muted, 1);
+    draw_text_right(launcher_panel_x + launcher_panel_width - 34, y + 407, wallpaper_name(), current_theme.accent, 1);
+    draw_text_center(launcher_panel_x + launcher_panel_width / 2, y + 454, "ARROWS SELECT   ENTER OPEN   ESC CLOSE", current_theme.text_muted, 1);
 }

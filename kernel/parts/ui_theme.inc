@@ -1,13 +1,14 @@
 enum class HoverTarget : uint8_t {
     none,
-    taskbar_start, taskbar_terminal, taskbar_files, taskbar_settings, taskbar_tray,
-    quick_theme, quick_display, quick_motion, quick_cursor, quick_density, quick_taskbar,
-    settings_page_general, settings_page_style, settings_page_about,
+    taskbar_start, taskbar_terminal, taskbar_files, taskbar_settings, taskbar_tray, taskbar_status, taskbar_clock,
+    quick_theme, quick_display, quick_motion, quick_contrast, quick_density, quick_taskbar,
+    settings_page_general, settings_page_style, settings_page_access, settings_page_about,
     theme_midnight, theme_graphite, theme_amber,
     settings_display, settings_motion, settings_cursor,
     settings_accent, settings_wallpaper, settings_radius, settings_opacity,
     settings_density, settings_taskbar, settings_reset,
-    launcher_terminal, launcher_files, launcher_settings, launcher_display
+    settings_contrast, settings_pointer, settings_access_motion,
+    launcher_terminal, launcher_files, launcher_settings, launcher_display, launcher_packages, launcher_security
 };
 
 HoverTarget hovered_target = HoverTarget::none;
@@ -16,19 +17,22 @@ uint8_t settings_focus = 0;
 uint8_t settings_page = 0;
 uint8_t quick_settings_focus = 0;
 bool quick_settings_open = false;
+bool status_center_open = false;
 bool scene_transition_pending = false;
 int32_t ui_scene_offset_y = 0;
 char launcher_query[18]{};
 uint8_t launcher_query_length = 0;
 
-constexpr uint8_t settings_page_count = 3U;
-constexpr uint8_t launcher_item_count = 4U;
+constexpr uint8_t settings_page_count = 4U;
+constexpr uint8_t launcher_item_count = 6U;
 constexpr uint8_t quick_settings_count = 6U;
 constexpr uint8_t accent_palette_size = 6U;
 uint8_t runtime_accent_slot = 0;
 uint8_t runtime_wallpaper_style = 0;
 bool runtime_compact_density = false;
 bool runtime_taskbar_left = false;
+bool runtime_high_contrast = false;
+bool runtime_large_pointer = false;
 uint32_t runtime_base_accent = desktop_accent;
 
 bool is_hovered(HoverTarget target) { return hovered_target == target; }
@@ -135,6 +139,24 @@ void apply_accent_personalization() {
     current_theme.glow_primary = mix(current_theme.accent, current_theme.canvas_top, 1U, 3U);
 }
 
+void apply_accessibility_personalization() {
+    if (!runtime_high_contrast) return;
+    const uint32_t accessible_accent = current_theme.accent;
+    current_theme.canvas_top = rgb(0,0,0);
+    current_theme.canvas_bottom = rgb(0,0,0);
+    current_theme.glow_primary = rgb(0,0,0);
+    current_theme.glow_secondary = rgb(0,0,0);
+    current_theme.surface = rgb(8,8,10);
+    current_theme.surface_high = rgb(28,28,32);
+    current_theme.surface_low = rgb(0,0,0);
+    current_theme.border = rgb(244,244,248);
+    current_theme.text = rgb(255,255,255);
+    current_theme.text_muted = rgb(218,218,224);
+    current_theme.accent = accessible_accent;
+    current_theme.accent_soft = mix(accessible_accent, rgb(0,0,0), 3U, 5U);
+    current_theme.terminal = rgb(0,0,0);
+}
+
 bool apply_config_text(const char* text, uint32_t size, bool& custom_colors) {
     if (!text || !size) return false;
     bool recognized = false;
@@ -175,6 +197,10 @@ bool apply_config_text(const char* text, uint32_t size, bool& custom_colors) {
     else if (text_contains(text, size, "density=comfortable")) { runtime_compact_density = false; recognized = true; }
     if (text_contains(text, size, "taskbar=left")) { runtime_taskbar_left = true; recognized = true; }
     else if (text_contains(text, size, "taskbar=center")) { runtime_taskbar_left = false; recognized = true; }
+    if (text_contains(text, size, "contrast=high")) { runtime_high_contrast = true; recognized = true; }
+    else if (text_contains(text, size, "contrast=normal")) { runtime_high_contrast = false; recognized = true; }
+    if (text_contains(text, size, "pointer=large")) { runtime_large_pointer = true; recognized = true; }
+    else if (text_contains(text, size, "pointer=normal")) { runtime_large_pointer = false; recognized = true; }
     return recognized;
 }
 
@@ -193,6 +219,7 @@ void materialize_theme(bool custom_colors) {
     }
     runtime_base_accent = current_theme.accent;
     apply_accent_personalization();
+    apply_accessibility_personalization();
 }
 
 void select_runtime_theme(uint8_t id) {
@@ -200,6 +227,7 @@ void select_runtime_theme(uint8_t id) {
     desktop_theme = runtime_theme == 1U ? "graphite" : (runtime_theme == 2U ? "amber" : "midnight");
     runtime_base_accent = current_theme.accent;
     apply_accent_personalization();
+    apply_accessibility_personalization();
 }
 
 void load_runtime_preferences() {
@@ -267,7 +295,11 @@ bool persist_runtime_preferences() {
         !append_config_text(text, sizeof(text), length, "\ndensity=") ||
         !append_config_text(text, sizeof(text), length, runtime_compact_density ? "compact" : "comfortable") ||
         !append_config_text(text, sizeof(text), length, "\ntaskbar=") ||
-        !append_config_text(text, sizeof(text), length, runtime_taskbar_left ? "left\n" : "center\n")) return false;
+        !append_config_text(text, sizeof(text), length, runtime_taskbar_left ? "left" : "center") ||
+        !append_config_text(text, sizeof(text), length, "\ncontrast=") ||
+        !append_config_text(text, sizeof(text), length, runtime_high_contrast ? "high" : "normal") ||
+        !append_config_text(text, sizeof(text), length, "\npointer=") ||
+        !append_config_text(text, sizeof(text), length, runtime_large_pointer ? "large\n" : "normal\n")) return false;
     return storage::write_file("/data/config/ui.cfg", reinterpret_cast<const uint8_t*>(text), length, false);
 }
 

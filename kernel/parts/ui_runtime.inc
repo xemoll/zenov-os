@@ -29,18 +29,23 @@ void present_physical_region(int32_t x, int32_t y, int32_t region_width, int32_t
 
 void restore_cursor(int32_t screen_x, int32_t screen_y) {
     if (!active) return;
-    present_physical_region(screen_x - 1, screen_y - 1, 16, 22);
+    const int32_t scale = runtime_large_pointer ? 2 : 1;
+    present_physical_region(screen_x - scale, screen_y - scale, 16 * scale, 22 * scale);
 }
 
 void draw_cursor() {
     if (!active || !framebuffer) return;
+    const int32_t scale = runtime_large_pointer ? 2 : 1;
     for (int32_t row = 0; row < 18; ++row) {
         const int32_t span = row < 12 ? (row / 2 + 2) : (row < 15 ? 5 : 3);
         for (int32_t column = 0; column < span; ++column) {
-            const int32_t px = mouse_screen_x + column, py = mouse_screen_y + row;
-            if (px < 0 || py < 0 || px >= static_cast<int32_t>(display_width) || py >= static_cast<int32_t>(display_height)) continue;
             const bool edge = column == 0 || column + 1 == span || row == 0 || row == 17;
-            framebuffer[static_cast<uint32_t>(py) * display_width + static_cast<uint32_t>(px)] = edge ? rgb(8,9,12) : rgb(242,243,247);
+            for (int32_t sy = 0; sy < scale; ++sy) for (int32_t sx = 0; sx < scale; ++sx) {
+                const int32_t px = mouse_screen_x + column * scale + sx;
+                const int32_t py = mouse_screen_y + row * scale + sy;
+                if (px < 0 || py < 0 || px >= static_cast<int32_t>(display_width) || py >= static_cast<int32_t>(display_height)) continue;
+                framebuffer[static_cast<uint32_t>(py) * display_width + static_cast<uint32_t>(px)] = edge ? rgb(8,9,12) : rgb(242,243,247);
+            }
         }
     }
 }
@@ -160,7 +165,7 @@ void toggle_motion() { desktop_animations = !desktop_animations; persist_persona
 void cycle_accent(bool forward) {
     runtime_accent_slot = forward ? static_cast<uint8_t>((runtime_accent_slot + 1U) % accent_palette_size)
                                   : static_cast<uint8_t>((runtime_accent_slot + accent_palette_size - 1U) % accent_palette_size);
-    apply_accent_personalization(); persist_personalization();
+    apply_accent_personalization(); apply_accessibility_personalization(); persist_personalization();
 }
 void cycle_wallpaper(bool forward) {
     runtime_wallpaper_style = forward ? static_cast<uint8_t>((runtime_wallpaper_style + 1U) % 3U)
@@ -181,10 +186,20 @@ void cycle_opacity(bool forward) {
 }
 void toggle_density() { runtime_compact_density = !runtime_compact_density; persist_personalization(); }
 void toggle_taskbar_alignment() { runtime_taskbar_left = !runtime_taskbar_left; persist_personalization(); }
+void toggle_high_contrast() {
+    runtime_high_contrast = !runtime_high_contrast;
+    select_runtime_theme(runtime_theme); persist_personalization();
+    serial::line(runtime_high_contrast ? "UI_HIGH_CONTRAST_ON" : "UI_HIGH_CONTRAST_OFF");
+}
+void toggle_large_pointer() {
+    runtime_large_pointer = !runtime_large_pointer; persist_personalization();
+    serial::line(runtime_large_pointer ? "UI_LARGE_POINTER_ON" : "UI_LARGE_POINTER_OFF");
+}
 
 void reset_personalization() {
     runtime_accent_slot = 0U; runtime_wallpaper_style = 0U;
     runtime_compact_density = false; runtime_taskbar_left = false;
+    runtime_high_contrast = false; runtime_large_pointer = false;
     desktop_radius = 12U; desktop_opacity = 240U; desktop_animations = true; terminal_cursor = "beam";
     select_runtime_theme(0U); persist_personalization();
     serial::line("UI_PERSONALIZATION_RESET_OK");
@@ -198,7 +213,7 @@ void sync_terminal_from_console() {
         render_scene(); present_full();
         serial::line("UI_TERMINAL_RENDER_OK"); serial::line("ZENOV_SHELL_READY"); return;
     }
-    if (active_view != View::terminal || dragging || quick_settings_open) return;
+    if (active_view != View::terminal || dragging || quick_settings_open || status_center_open) return;
     render_terminal();
     present_region(window_x - 12, window_y - 12, window_width + 24, window_height + 24);
 }
@@ -242,8 +257,8 @@ bool init() {
         taskbar_main_x() >= taskbar_margin && taskbar_tray_x() + taskbar_tray_width <= static_cast<int32_t>(width) - taskbar_margin &&
         launcher_panel_x + launcher_panel_width <= static_cast<int32_t>(width);
     serial::line(geometry_ok ? "UI_GEOMETRY_OK" : "UI_GEOMETRY_FAILED");
-    const bool navigation_ok = launcher_item_count == 4U && settings_page_count == 3U && quick_settings_count == 6U &&
-        key_f10 > key_f9 && key_super > key_f10;
+    const bool navigation_ok = launcher_item_count == 6U && settings_page_count == 4U && quick_settings_count == 6U &&
+        key_f10 > key_f9 && key_f11 > key_f10 && key_super > key_f10;
     serial::line(navigation_ok ? "UI_NAVIGATION_MODEL_OK" : "UI_NAVIGATION_MODEL_FAILED");
     const bool display_ok = display_mode_count >= 20U && display_framebuffer_bytes() <= maximum_framebuffer_bytes &&
         maximum_framebuffer_bytes <= paging::graphics_window_bytes && viewport_width > 0 && viewport_height > 0 &&
@@ -257,6 +272,9 @@ bool init() {
     serial::line("UI_PERSONALIZATION_OK");
     serial::line("UI_TASKBAR_OK");
     serial::line(rtc_ok ? "UI_TASKBAR_CLOCK_OK" : "UI_TASKBAR_CLOCK_FALLBACK");
+    serial::line("UI_SYSTEM_CENTER_OK");
+    serial::line("UI_ACCESSIBILITY_OK");
+    serial::line("UI_START_SYSTEM_TOOLS_OK");
     serial::line("UI_ANIMATION_MODEL_OK");
     serial::write("UI_DISPLAY_MODE_COUNT "); serial_uint(display_mode_count); serial::write("\r\n");
     serial::line("UI_SETTINGS_CONTROLS_OK");
@@ -289,9 +307,9 @@ void refresh_desktop() {
 }
 
 void set_active_view(View view) {
-    if (active_view == view) { hovered_target = HoverTarget::none; quick_settings_open = false; return; }
+    if (active_view == view) { hovered_target = HoverTarget::none; quick_settings_open = false; status_center_open = false; return; }
     if (view == View::launcher) launcher_return_view = active_view;
-    active_view = view; hovered_target = HoverTarget::none; quick_settings_open = false;
+    active_view = view; hovered_target = HoverTarget::none; quick_settings_open = false; status_center_open = false;
     scene_transition_pending = desktop_animations;
     if (view == View::launcher) launcher_focus = launcher_first_match();
     if (view == View::settings) { settings_page = 0U; settings_focus = 0U; }
@@ -305,7 +323,16 @@ void toggle_start_menu() {
 
 void toggle_quick_settings() {
     if (active_view == View::launcher) set_active_view(launcher_return_view);
+    status_center_open = false;
     quick_settings_open = !quick_settings_open;
+    hovered_target = HoverTarget::none;
+    refresh_desktop();
+}
+
+void toggle_status_center() {
+    if (active_view == View::launcher) set_active_view(launcher_return_view);
+    quick_settings_open = false;
+    status_center_open = !status_center_open;
     hovered_target = HoverTarget::none;
     refresh_desktop();
 }
@@ -313,9 +340,15 @@ void toggle_quick_settings() {
 void open_launcher_item(uint8_t index) {
     if (index == 0U) set_active_view(View::terminal);
     else if (index == 1U) set_active_view(View::files);
-    else {
+    else if (index == 2U || index == 3U) {
         set_active_view(View::settings);
         if (index == 3U) settings_focus = 3U;
+    } else {
+        set_active_view(View::terminal);
+        if (index == 4U) package_manager::status();
+        else security_guard::print_status();
+        render_scene(); present_full();
+        serial::line(index == 4U ? "UI_START_PACKAGES_OPEN_OK" : "UI_START_SECURITY_OPEN_OK");
     }
 }
 
@@ -329,7 +362,7 @@ bool apply_quick_setting(uint8_t index, bool forward) {
     if (index == 0U) cycle_runtime_theme(forward);
     else if (index == 1U) return forward ? cycle_display_mode() : previous_display_mode();
     else if (index == 2U) toggle_motion();
-    else if (index == 3U) cycle_terminal_cursor(forward);
+    else if (index == 3U) toggle_high_contrast();
     else if (index == 4U) toggle_density();
     else if (index == 5U) toggle_taskbar_alignment();
     else return false;
@@ -352,6 +385,10 @@ bool apply_settings_control(bool forward) {
         else if (settings_focus == 3U) cycle_opacity(forward);
         else if (settings_focus == 4U) toggle_density();
         else toggle_taskbar_alignment();
+    } else if (settings_page == 2U) {
+        if (settings_focus == 0U) toggle_high_contrast();
+        else if (settings_focus == 1U) toggle_large_pointer();
+        else toggle_motion();
     } else reset_personalization();
     refresh_desktop(); return true;
 }
@@ -363,18 +400,20 @@ HoverTarget hover_target_at(int32_t x, int32_t y) {
         HoverTarget::taskbar_start, HoverTarget::taskbar_terminal, HoverTarget::taskbar_files, HoverTarget::taskbar_settings
     };
     for (uint8_t i = 0; i < 4U; ++i) if (hit(x, y, taskbar_button_x(i), button_y, button_size, button_size)) return taskbar_targets[i];
-    if (hit(x, y, taskbar_tray_x(), taskbar_y(), taskbar_tray_width, taskbar_height())) return HoverTarget::taskbar_tray;
+    if (hit(x, y, taskbar_tray_x(), taskbar_y(), taskbar_status_width, taskbar_height())) return HoverTarget::taskbar_status;
+    if (hit(x, y, taskbar_clock_x(), taskbar_y(), taskbar_clock_width(), taskbar_height())) return HoverTarget::taskbar_clock;
     if (quick_settings_open) {
         for (uint8_t i = 0; i < quick_settings_count; ++i)
             if (hit(x, y, quick_tile_x(i), quick_tile_y(i), quick_tile_width, quick_tile_height)) return quick_target(i);
         return HoverTarget::none;
     }
+    if (status_center_open) return HoverTarget::none;
     if (active_view == View::launcher) {
         for (uint8_t i = 0; i < launcher_item_count; ++i)
             if (launcher_item_matches(i) && hit(x, y, launcher_card_x(i), launcher_card_y(i), launcher_card_width, launcher_card_height)) return launcher_target(i);
     }
     if (active_view == View::settings) {
-        for (uint8_t i = 0; i < 3U; ++i)
+        for (uint8_t i = 0; i < settings_page_count; ++i)
             if (hit(x, y, window_x + settings_sidebar_x_offset, window_y + settings_page_y_offsets[i], settings_sidebar_width, settings_page_height)) return settings_page_target(i);
         if (settings_page == 0U) {
             if (hit(x, y, window_x + settings_theme_x_offsets[0], window_y + settings_theme_y_offset, settings_theme_width, settings_theme_height)) return HoverTarget::theme_midnight;
@@ -390,6 +429,10 @@ HoverTarget hover_target_at(int32_t x, int32_t y) {
             if (hit(x, y, window_x + settings_content_x_offset, window_y + settings_opacity_y_offset - 10, settings_content_width, 36)) return HoverTarget::settings_opacity;
             if (hit(x, y, window_x + settings_content_x_offset, window_y + settings_density_y_offset - 10, settings_content_width, 36)) return HoverTarget::settings_density;
             if (hit(x, y, window_x + settings_content_x_offset, window_y + settings_taskbar_y_offset - 10, settings_content_width, 36)) return HoverTarget::settings_taskbar;
+        } else if (settings_page == 2U) {
+            if (hit(x, y, window_x + settings_content_x_offset, window_y + settings_access_contrast_y_offset + 24, settings_content_width, 36)) return HoverTarget::settings_contrast;
+            if (hit(x, y, window_x + settings_content_x_offset, window_y + settings_access_pointer_y_offset + 24, settings_content_width, 36)) return HoverTarget::settings_pointer;
+            if (hit(x, y, window_x + settings_content_x_offset, window_y + settings_access_motion_y_offset + 24, settings_content_width, 36)) return HoverTarget::settings_access_motion;
         } else if (hit(x, y, window_x + settings_content_x_offset, window_y + settings_reset_y_offset, settings_content_width, 46)) return HoverTarget::settings_reset;
     }
     return HoverTarget::none;
@@ -402,7 +445,8 @@ bool handle_click() {
     if (hit(mouse_x, mouse_y, taskbar_button_x(1), button_y, button_size, button_size)) { set_active_view(View::terminal); refresh_desktop(); return true; }
     if (hit(mouse_x, mouse_y, taskbar_button_x(2), button_y, button_size, button_size)) { set_active_view(View::files); refresh_desktop(); return true; }
     if (hit(mouse_x, mouse_y, taskbar_button_x(3), button_y, button_size, button_size)) { set_active_view(View::settings); refresh_desktop(); return true; }
-    if (hit(mouse_x, mouse_y, taskbar_tray_x(), taskbar_y(), taskbar_tray_width, taskbar_height())) { toggle_quick_settings(); return true; }
+    if (hit(mouse_x, mouse_y, taskbar_tray_x(), taskbar_y(), taskbar_status_width, taskbar_height())) { toggle_quick_settings(); return true; }
+    if (hit(mouse_x, mouse_y, taskbar_clock_x(), taskbar_y(), taskbar_clock_width(), taskbar_height())) { toggle_status_center(); return true; }
 
     if (quick_settings_open) {
         for (uint8_t i = 0; i < quick_settings_count; ++i) {
@@ -414,6 +458,12 @@ bool handle_click() {
         }
         return true;
     }
+    if (status_center_open) {
+        if (!hit(mouse_x, mouse_y, status_panel_x(), status_panel_y(), status_panel_width, status_panel_height)) {
+            status_center_open = false; refresh_desktop();
+        }
+        return true;
+    }
 
     if (active_view == View::launcher) {
         for (uint8_t i = 0; i < launcher_item_count; ++i) {
@@ -422,7 +472,7 @@ bool handle_click() {
         }
     }
     if (active_view == View::settings) {
-        for (uint8_t i = 0; i < 3U; ++i) {
+        for (uint8_t i = 0; i < settings_page_count; ++i) {
             if (!hit(mouse_x, mouse_y, window_x + settings_sidebar_x_offset, window_y + settings_page_y_offsets[i], settings_sidebar_width, settings_page_height)) continue;
             settings_page = i; settings_focus = 0U; refresh_desktop(); return true;
         }
@@ -451,6 +501,12 @@ bool handle_click() {
             for (uint8_t i = 0; i < 5U; ++i) if (hit(mouse_x, mouse_y, content_x, window_y + rows[i] - 10, settings_content_width, 36)) {
                 settings_focus = static_cast<uint8_t>(i + 1U); return apply_settings_control(true);
             }
+        } else if (settings_page == 2U) {
+            const int32_t content_x = window_x + settings_content_x_offset;
+            const int32_t rows[3] = {settings_access_contrast_y_offset + 34, settings_access_pointer_y_offset + 34, settings_access_motion_y_offset + 34};
+            for (uint8_t i = 0; i < 3U; ++i) if (hit(mouse_x, mouse_y, content_x, window_y + rows[i] - 10, settings_content_width, 36)) {
+                settings_focus = i; return apply_settings_control(true);
+            }
         } else if (hit(mouse_x, mouse_y, window_x + settings_content_x_offset, window_y + settings_reset_y_offset, settings_content_width, 46)) {
             settings_focus = 0U; reset_personalization(); refresh_desktop(); return true;
         }
@@ -461,6 +517,7 @@ bool handle_click() {
 bool handle_navigation_key(uint16_t key) {
     if (key == key_f9) return cycle_display_mode();
     if (key == key_f10) { toggle_quick_settings(); return true; }
+    if (key == key_f11) { toggle_status_center(); return true; }
     if (key == key_f8 || key == key_super) { toggle_start_menu(); return true; }
 
     View direct_view = active_view; bool direct = true;
@@ -471,6 +528,11 @@ bool handle_navigation_key(uint16_t key) {
     if (direct) {
         set_active_view(direct_view); refresh_desktop();
         if (!keyboard_navigation_reported) { serial::line("UI_KEYBOARD_NAV_OK"); keyboard_navigation_reported = true; }
+        return true;
+    }
+
+    if (status_center_open) {
+        if (key == key_escape || key == '\n' || key == ' ') { status_center_open = false; refresh_desktop(); }
         return true;
     }
 
