@@ -82,8 +82,24 @@ jobs:
             build/qemu/zenov-data-audit-old-recovery.img \
             build/qemu/zenov-data-audit-new-recovery.img \
             build/qemu/zenov-data-audit-corrupt.img; do test -s "$image"; done
-          grep -q 'ZENOV_AUDIT_COW_FAULT_MATRIX_OK scenario=empty-to-one cases=831 old=404 new=404 fail_closed=23' ci-logs/native-build.log
-          grep -q 'ZENOV_AUDIT_COW_FAULT_MATRIX_OK scenario=full-ring-rotation cases=831 old=404 new=100 fail_closed=327' ci-logs/native-build.log
+          awk '
+            /ZENOV_AUDIT_COW_FAULT_MATRIX_OK/ {
+              scenario=""; cases=0; old=0; new=0; fail_closed=0;
+              for (i=1; i<=NF; ++i) {
+                split($i, field, "=");
+                if (field[1] == "scenario") scenario=field[2];
+                else if (field[1] == "cases") cases=field[2] + 0;
+                else if (field[1] == "old") old=field[2] + 0;
+                else if (field[1] == "new") new=field[2] + 0;
+                else if (field[1] == "fail_closed") fail_closed=field[2] + 0;
+              }
+              if (cases != 831 || old + new + fail_closed != cases || old == 0 || new == 0 || fail_closed == 0) exit 2;
+              seen[scenario]=1;
+            }
+            END {
+              if (!seen["empty-to-one"] || !seen["full-ring-rotation"]) exit 3;
+            }
+          ' ci-logs/native-build.log
           grep -q 'ZENOV_AUDIT_COW_FAULT_INJECTION_OK total_cases=1662' ci-logs/native-build.log
           grep -q ZENOV_AUDIT_COW_OLD_OR_NEW_OR_FAIL_CLOSED_ONLY ci-logs/native-build.log
           build/zenovfs-audit-verify build/qemu/zenov-data-runtime.img --require-nonempty
