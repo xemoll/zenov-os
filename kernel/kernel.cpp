@@ -1,10 +1,12 @@
 using uint8_t = unsigned char;
 using uint16_t = unsigned short;
 using uint32_t = unsigned int;
+using uint64_t = unsigned long long;
 using int32_t = int;
+using int64_t = long long;
 using uintptr_t = unsigned int;
 using size_t = unsigned int;
-static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) == 4);
+static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) == 4 && sizeof(uint64_t) == 8);
 
 #include "generated/zenov_config.hpp"
 
@@ -17,6 +19,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/storage.inc"
 #include "parts/storage_bytes.inc"
 #include "parts/storage_tools.inc"
+#include "parts/storage_browser.inc"
 #include "parts/security_paths.inc"
 namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uint32_t&); }
 #define read_file security_read_file
@@ -90,6 +93,7 @@ extern "C" void kernel_main() {
     if (!security_audit::verify_active()) panic("Persistent security audit final-read verification failed.");
     serial::line("ZENOV_GUARD_PROTECTED_PATH_TEST_OK");
     const bool graphical = graphics::init();
+    if (graphical) { console::activate_shadow(); serial::line("CONSOLE_SHADOW_OK"); }
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
     pic_remap();
     const bool mouse_ready = mouse_init();
@@ -103,6 +107,7 @@ extern "C" void kernel_main() {
 
     serial::line("Kernel online. Desktop, signed policy, persistent audit, syscall capabilities, security, storage and ring-3 services ready.");
     console::show_home();
+    if (graphical) graphics::sync_terminal_from_console();
     serial::line("ZENOVOS_UI_READY");
     shell_run();
 }

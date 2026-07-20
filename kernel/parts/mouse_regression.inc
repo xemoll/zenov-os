@@ -14,13 +14,22 @@ void inject_mouse_packet_to_decoder(uint8_t status, uint8_t delta_x, uint8_t del
     mouse_byte(delta_y);
 }
 
+int32_t mouse_screen_from_logical_x(int32_t logical_x) {
+    return graphics::viewport_x + static_cast<int32_t>((static_cast<uint32_t>(logical_x) * static_cast<uint32_t>(graphics::viewport_width)) / graphics::width);
+}
+
+int32_t mouse_screen_from_logical_y(int32_t logical_y) {
+    return graphics::viewport_y + static_cast<int32_t>((static_cast<uint32_t>(logical_y) * static_cast<uint32_t>(graphics::viewport_height)) / graphics::height);
+}
+
 bool mouse_decoder_regression() {
     if (!mouse_online || !graphics::active) return false;
 
     disable_interrupts();
     mouse_packet_index = 0U;
-    graphics::mouse_x = static_cast<int32_t>(graphics::width / 2U);
-    graphics::mouse_y = static_cast<int32_t>(graphics::height / 2U);
+    graphics::mouse_screen_x = mouse_screen_from_logical_x(static_cast<int32_t>(graphics::width / 2U));
+    graphics::mouse_screen_y = mouse_screen_from_logical_y(static_cast<int32_t>(graphics::height / 2U));
+    graphics::update_logical_mouse();
     graphics::window_x = 150;
     graphics::window_y = 88;
     graphics::mouse_buttons = 0U;
@@ -33,14 +42,19 @@ bool mouse_decoder_regression() {
     inject_mouse_packet_to_decoder(0x08U, 1U, 1U);
     const bool packet_ok = !graphics::first_mouse_packet && mouse_packet_index == 0U;
 
-    inject_mouse_packet_to_decoder(0x08U, 0U, 95U);
-    inject_mouse_packet_to_decoder(0x08U, 0U, 95U);
+    graphics::mouse_screen_x = mouse_screen_from_logical_x(200);
+    graphics::mouse_screen_y = mouse_screen_from_logical_y(104);
+    graphics::update_logical_mouse();
     inject_mouse_packet_to_decoder(0x09U, 0U, 0U);
+    const int32_t press_x = graphics::mouse_x;
+    const int32_t press_y = graphics::mouse_y;
     inject_mouse_packet_to_decoder(0x29U, 80U, 226U);
+    const int32_t expected_x = 150 + graphics::mouse_x - press_x;
+    const int32_t expected_y = 88 + graphics::mouse_y - press_y;
     inject_mouse_packet_to_decoder(0x08U, 0U, 0U);
 
     const bool drag_ok = graphics::drag_reported && mouse_packet_index == 0U &&
-        graphics::window_x == 230 && graphics::window_y == 118;
+        graphics::window_x == expected_x && graphics::window_y == expected_y;
     enable_interrupts();
     return packet_ok && drag_ok;
 }

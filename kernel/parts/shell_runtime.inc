@@ -29,8 +29,11 @@ void shell_run() {
     char line[zenov_generated::kShellLineCapacity];
     for (;;) {
         console::prompt(zenov_generated::kPrompt);
+        graphics::sync_terminal_from_console();
         read_line(line, sizeof(line));
+        graphics::sync_terminal_from_console();
         if (!dispatch_security_command(line)) execute(line);
+        graphics::sync_terminal_from_console();
     }
 }
 } // namespace

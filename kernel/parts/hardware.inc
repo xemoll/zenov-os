@@ -13,7 +13,7 @@ const volatile E820Entry* e820_entries() { return physical<E820Entry>(0x0600); }
 constexpr uint32_t boot_magic = 0x5A4F5331;
 
 struct [[gnu::packed]] IdtEntry { uint16_t low; uint16_t selector; uint8_t zero; uint8_t flags; uint16_t high; };
-struct [[gnu::packed]] IdtPointer { uint16_t limit; uint32_t base; };
+struct IdtPointer { uint16_t limit; uint32_t base; } __attribute__((packed));
 IdtEntry idt[256];
 void idt_set(uint8_t vector, uintptr_t address, uint8_t flags = 0x8E) {
     idt[vector].low = static_cast<uint16_t>(address & 0xFFFF); idt[vector].selector = 0x08; idt[vector].zero = 0;
@@ -37,7 +37,8 @@ volatile uint32_t timer_ticks = 0;
 void pit_init(uint32_t hz) { const uint16_t divisor = static_cast<uint16_t>(1193182U / hz); out8(0x43, 0x36); out8(0x40, static_cast<uint8_t>(divisor)); out8(0x40, static_cast<uint8_t>(divisor >> 8)); }
 
 constexpr uint16_t key_up = 0x100, key_down = 0x101, key_left = 0x102, key_right = 0x103, key_home = 0x104, key_end = 0x105, key_delete = 0x106;
-constexpr uint16_t key_f1 = 0x110, key_f2 = 0x111, key_f3 = 0x112, key_f4 = 0x113, key_escape = 0x114;
+constexpr uint16_t key_f1 = 0x110, key_f2 = 0x111, key_f3 = 0x112, key_f4 = 0x113;
+constexpr uint16_t key_f5 = 0x115, key_f6 = 0x116, key_f7 = 0x117, key_f8 = 0x118, key_f9 = 0x119, key_escape = 0x114;
 constexpr uint32_t key_queue_capacity = 1024;
 volatile uint16_t key_queue[key_queue_capacity]; volatile uint32_t key_head = 0, key_tail = 0;
 bool shift_pressed = false, caps_lock = false, extended_scancode = false;
@@ -75,8 +76,13 @@ void keyboard_scancode(uint8_t code) {
         extended_scancode = false;
         return;
     }
-    if (code == 0x01) { key_push(key_escape); return; } if (code == 0x3B) { key_push(key_f1); return; } if (code == 0x3C) { key_push(key_f2); return; }
-    if (code == 0x3D) { key_push(key_f3); return; } if (code == 0x3E) { key_push(key_f4); return; } if (code == 0x3A) { caps_lock = !caps_lock; return; }
+    if (code == 0x01) { key_push(key_escape); return; }
+    if (code == 0x3B) { key_push(key_f1); return; } if (code == 0x3C) { key_push(key_f2); return; }
+    if (code == 0x3D) { key_push(key_f3); return; } if (code == 0x3E) { key_push(key_f4); return; }
+    if (code == 0x3F) { key_push(key_f5); return; } if (code == 0x40) { key_push(key_f6); return; }
+    if (code == 0x41) { key_push(key_f7); return; } if (code == 0x42) { key_push(key_f8); return; }
+    if (code == 0x43) { key_push(key_f9); return; }
+    if (code == 0x3A) { caps_lock = !caps_lock; return; }
     if (code == 0x1C) { key_push('\n'); return; } if (code == 0x0E) { key_push('\b'); return; } if (code == 0x0F) { key_push('\t'); return; }
     char value = key_ascii(code, shift_pressed); if (value >= 'a' && value <= 'z' && (shift_pressed != caps_lock)) value = static_cast<char>(value - ('a' - 'A'));
     if (value) key_push(static_cast<uint8_t>(value));

@@ -1,0 +1,63 @@
+name: ZenovOS 0.1.1 Adaptive Display
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  adaptive-display:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verify tested source revision
+        run: |
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+
+      - name: Install native toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
+
+      - name: Build strict native image
+        run: make clean check
+
+      - name: Exercise five VBE display modes
+        run: bash tests/qemu_display_ui.sh build/zenov-os.img build/zenov-data.img build/qemu-display-ui
+
+      - name: Inspect adaptive display evidence
+        run: |
+          grep -q UI_ADAPTIVE_DISPLAY_OK build/qemu-display-ui/serial.log
+          grep -q UI_DISPLAY_CYCLE_OK build/qemu-display-ui/serial.log
+          grep -q UI_DISPLAY_PERSIST_OK build/qemu-display-ui/serial.log
+          grep -q 'UI_DISPLAY_MODE_OK 640x480' build/qemu-display-ui/serial.log
+          grep -q 'UI_DISPLAY_MODE_OK 800x600' build/qemu-display-ui/serial.log
+          grep -q 'UI_DISPLAY_MODE_OK 1024x600' build/qemu-display-ui/serial.log
+          grep -q 'UI_DISPLAY_MODE_OK 1024x768' build/qemu-display-ui/serial.log
+          grep -q 'UI_DISPLAY_MODE_OK 1280x720' build/qemu-display-ui/serial.log
+          test "$(sed -n '2p' build/qemu-display-ui/desktop-640x480.ppm | tr -d '\r')" = '640 480'
+          test "$(sed -n '2p' build/qemu-display-ui/desktop-800x600.ppm | tr -d '\r')" = '800 600'
+          test "$(sed -n '2p' build/qemu-display-ui/desktop-1024x600.ppm | tr -d '\r')" = '1024 600'
+          test "$(sed -n '2p' build/qemu-display-ui/desktop-1024x768.ppm | tr -d '\r')" = '1024 768'
+          test "$(sed -n '2p' build/qemu-display-ui/desktop-1280x720.ppm | tr -d '\r')" = '1280 720'
+
+      - name: Upload adaptive display evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-0.1.1-adaptive-display-ci
+          if-no-files-found: error
+          path: |
+            build/zenov-os.img
+            build/zenov-data.img
+            build/qemu-display-ui/*.log
+            build/qemu-display-ui/*.stderr
+            build/qemu-display-ui/*.ppm
