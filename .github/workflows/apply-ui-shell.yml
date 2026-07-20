@@ -60,6 +60,7 @@ jobs:
           token = os.environ["GH_TOKEN"]
           repository = os.environ["GH_REPOSITORY"]
           parent = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
           status = subprocess.check_output(["git", "status", "--porcelain=v1"], text=True).splitlines()
 
           def api(path, payload):
@@ -92,7 +93,7 @@ jobs:
               mode = "100755" if os.access(path, os.X_OK) else "100644"
               entries.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
 
-          tree = api("/git/trees", {"base_tree": parent, "tree": entries})
+          tree = api("/git/trees", {"base_tree": base_tree, "tree": entries})
           commit = api("/git/commits", {
               "message": "ui: add Windows-simple customizable ZenovOS 0.1.1 shell [ui-shell-applied]",
               "tree": tree["sha"],
