@@ -43,15 +43,6 @@ bool activate_capabilities(const char* path, const uint8_t* data, uint32_t size)
         path, digest, trusted->syscall_mask, trusted->read_scope, trusted->write_scope);
 }
 
-bool target_package_path(const package_repository::Target& target, char output[48]) {
-    const char* basename = target.path;
-    for (const char* cursor = target.path; *cursor; ++cursor) {
-        if (*cursor == '/') basename = cursor + 1;
-    }
-    if (!*basename || !copy_text_exact(output, 48U, "/data/packages/")) return false;
-    return native_package::append_text(output, 48U, basename);
-}
-
 bool install_latest(const char* name) {
     const package_repository::Target* target = package_repository::latest_target(name);
     if (!target) {
@@ -60,8 +51,8 @@ bool install_latest(const char* name) {
         return false;
     }
     char path[48]{};
-    if (!target_package_path(*target, path)) {
-        serial::line("ZENPKG_REPOSITORY_TARGET_PATH_INVALID");
+    if (!cache_install_path(*target, path)) {
+        serial::line("ZENPKG_REPOSITORY_TARGET_CACHE_REJECTED");
         return false;
     }
     serial::write("ZENPKG_REPOSITORY_TARGET_RESOLVED name=");
@@ -90,8 +81,7 @@ bool upgrade_one(const char* name) {
         serial::line(order == 0 ? "ZENPKG_UPGRADE_CURRENT" : "ZENPKG_UPGRADE_REPOSITORY_BEHIND");
         return order == 0;
     }
-    char path[48]{};
-    return target_package_path(*latest, path) && install(path);
+    return install_latest(name);
 }
 
 bool upgrade(char* name) {
