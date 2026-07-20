@@ -44,11 +44,69 @@ jobs:
         if: steps.staged.outputs.present == 'true'
         run: make clean check
 
-      - name: Commit verified shell source
+      - name: Create verified commit object
         if: steps.staged.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "ui: add Windows-simple customizable ZenovOS 0.1.1 shell [ui-shell-applied]"
-          git push origin HEAD:agent/zenov-os-0.1.1-windows-simple-shell
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import subprocess
+          import urllib.request
+
+          token = os.environ["GH_TOKEN"]
+          repository = os.environ["GH_REPOSITORY"]
+          parent = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          status = subprocess.check_output(["git", "status", "--porcelain=v1"], text=True).splitlines()
+
+          def api(path, payload):
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{repository}{path}",
+                  data=json.dumps(payload).encode(),
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "Content-Type": "application/json",
+                  },
+                  method="POST",
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          entries = []
+          for line in status:
+              state = line[:2]
+              path = line[3:]
+              if " -> " in path:
+                  path = path.split(" -> ", 1)[1]
+              if "D" in state:
+                  entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+                  continue
+              with open(path, "rb") as handle:
+                  encoded = base64.b64encode(handle.read()).decode()
+              blob = api("/git/blobs", {"content": encoded, "encoding": "base64"})
+              mode = "100755" if os.access(path, os.X_OK) else "100644"
+              entries.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
+
+          tree = api("/git/trees", {"base_tree": parent, "tree": entries})
+          commit = api("/git/commits", {
+              "message": "ui: add Windows-simple customizable ZenovOS 0.1.1 shell [ui-shell-applied]",
+              "tree": tree["sha"],
+              "parents": [parent],
+          })
+          with open("generated-commit.txt", "w", encoding="utf-8") as handle:
+              handle.write(commit["sha"] + "\n")
+          print(f"generated-commit={commit['sha']}")
+          PY
+
+      - name: Upload verified commit SHA
+        if: steps.staged.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-0.1.1-ui-shell-commit
+          if-no-files-found: error
+          path: generated-commit.txt
