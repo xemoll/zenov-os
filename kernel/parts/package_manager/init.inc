@@ -20,8 +20,8 @@ void init() {
         package_buffer = nullptr;
         return;
     }
-    if (!ensure_directory("/packages") || !ensure_directory("/var") ||
-        !ensure_directory("/var/lib") || !ensure_directory("/var/lib/zenpkg")) {
+    if (!ensure_directory("/packages") || !ensure_directory("/var") || !ensure_directory("/var/lib") ||
+        !ensure_directory("/var/lib/zenpkg") || !ensure_directory("/var/cache") || !ensure_directory(cache_directory)) {
         serial::line("ZENPKG_DIRECTORY_INIT_FAILED");
         return;
     }
@@ -47,9 +47,14 @@ void init() {
         serial::line("ZENPKG_ACTIVE_PAYLOAD_INVALID");
         return;
     }
+    if (!cache_verify()) {
+        serial::line("ZENPKG_CACHE_INIT_REJECTED");
+        return;
+    }
     initialized = true;
     serial::write("ZENPKG_CATALOG_READY entries=");
     process::serial_u32(authorized_package_count());
     serial::write("\r\n");
+    serial::line("ZENPKG_CACHE_READY");
     serial::line("ZENPKG_MANAGER_READY");
 }
