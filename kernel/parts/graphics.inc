@@ -23,17 +23,6 @@ const char* configured_terminal_cursor = terminal_cursor;
 #include "ui_apps.inc"
 #include "ui_files.inc"
 
-void render_scene() {
-    if (!backbuffer) return;
-    draw_wallpaper();
-    draw_topbar();
-    if (active_view == View::terminal) render_terminal();
-    else if (active_view == View::files) render_files();
-    else if (active_view == View::settings) render_settings();
-    else render_launcher();
-    draw_dock();
-}
-
 #define init init_base
 #define handle_navigation_key handle_navigation_key_base
 #define on_mouse_packet on_mouse_packet_base
