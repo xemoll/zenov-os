@@ -63,6 +63,7 @@ bool files_handle_click_at(int32_t x, int32_t y) {
 bool init() {
     const bool initialized = init_base();
     if (!initialized) return false;
+    serial::line("GRAPHICS_MODE_OK 800x600x32 LOGICAL_CANVAS");
     files_reload();
     storage::BrowserEntry app_probe[4]{};
     const bool browser_ok = storage::browser_mounted() && files_entry_count > 0U && storage::list_directory("/apps", app_probe, 4U) > 0U;
