@@ -1,5 +1,8 @@
 extern "C" uint64_t __udivdi3(uint64_t numerator, uint64_t denominator) {
     if (!denominator) return 0;
+    if ((numerator >> 32U) == 0U && (denominator >> 32U) == 0U) {
+        return static_cast<uint32_t>(numerator) / static_cast<uint32_t>(denominator);
+    }
     uint64_t quotient = 0;
     uint64_t remainder = 0;
     for (int32_t bit = 63; bit >= 0; --bit) {
