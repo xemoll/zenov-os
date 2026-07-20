@@ -85,6 +85,7 @@ controller() {
   sleep 0.2
   capture_mode start-search-1024x768
   echo "sendkey esc 10"
+  sleep 0.15
 
   echo "sendkey f10 10"
   sleep 0.3
@@ -92,6 +93,7 @@ controller() {
   echo "sendkey ret 10"
   wait_for_serial "UI_SETTINGS_PERSIST_OK" || { echo quit; return 1; }
   echo "sendkey esc 10"
+  sleep 0.15
 
   echo "sendkey f7 10"
   wait_for_serial "UI_KEYBOARD_NAV_OK" || { echo quit; return 1; }
