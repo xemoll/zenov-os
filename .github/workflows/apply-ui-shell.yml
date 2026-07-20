@@ -40,10 +40,6 @@ jobs:
           git apply /tmp/ui-shell.patch
           rm -f .ci/ui-shell.patch.part.*
 
-      - name: Verify strict native source before publishing branch
-        if: steps.staged.outputs.present == 'true'
-        run: make clean check
-
       - name: Create verified commit object
         if: steps.staged.outputs.present == 'true'
         env:
@@ -55,6 +51,7 @@ jobs:
           import json
           import os
           import subprocess
+          import urllib.error
           import urllib.request
 
           token = os.environ["GH_TOKEN"]
@@ -62,6 +59,9 @@ jobs:
           parent = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
           base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
           status = subprocess.check_output(["git", "status", "--porcelain=v1"], text=True).splitlines()
+          print("changed paths:")
+          for line in status:
+              print(line)
 
           def api(path, payload):
               request = urllib.request.Request(
@@ -75,8 +75,13 @@ jobs:
                   },
                   method="POST",
               )
-              with urllib.request.urlopen(request) as response:
-                  return json.load(response)
+              try:
+                  with urllib.request.urlopen(request) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as error:
+                  print(f"API ERROR {path}: {error.code}")
+                  print(error.read().decode(errors="replace"))
+                  raise
 
           entries = []
           for line in status:
@@ -85,7 +90,7 @@ jobs:
               if " -> " in path:
                   path = path.split(" -> ", 1)[1]
               if "D" in state:
-                  entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+                  entries.append({"path": path, "sha": None})
                   continue
               with open(path, "rb") as handle:
                   encoded = base64.b64encode(handle.read()).decode()
@@ -103,6 +108,10 @@ jobs:
               handle.write(commit["sha"] + "\n")
           print(f"generated-commit={commit['sha']}")
           PY
+
+      - name: Verify strict native source before publishing branch
+        if: steps.staged.outputs.present == 'true'
+        run: make clean check
 
       - name: Upload verified commit SHA
         if: steps.staged.outputs.present == 'true'
