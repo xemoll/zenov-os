@@ -27,6 +27,7 @@ on:
       - 'docs/ZENPKG_FORMAT_1.md'
       - 'docs/ZENREPO_OFFLINE_0.1.1.md'
       - 'docs/ZENPKG_CACHE_0.1.1.md'
+      - 'docs/ZENPKG_TRANSPORT_0.1.1.md'
       - 'docs/NATIVE_PACKAGE_MANAGER_0.1.1.md'
       - 'docs/PACKAGE_COMPATIBILITY_ARCHITECTURE.md'
       - '.github/workflows/zenpkg.yml'
@@ -57,6 +58,7 @@ on:
       - 'docs/ZENPKG_FORMAT_1.md'
       - 'docs/ZENREPO_OFFLINE_0.1.1.md'
       - 'docs/ZENPKG_CACHE_0.1.1.md'
+      - 'docs/ZENPKG_TRANSPORT_0.1.1.md'
       - 'docs/NATIVE_PACKAGE_MANAGER_0.1.1.md'
       - 'docs/PACKAGE_COMPATIBILITY_ARCHITECTURE.md'
       - '.github/workflows/zenpkg.yml'
@@ -132,6 +134,15 @@ jobs:
             exit 1
           fi
           tail -n 120 /tmp/zenpkg-qemu.log
+      - name: Verify resumable transport evidence
+        run: |
+          serial=build/qemu/zenpkg/serial.log
+          grep -Fq 'ZENPKG_TRANSPORT_BEGIN name=hello-native version=0.2.0 offset=0' "$serial"
+          grep -Fq 'ZENPKG_TRANSPORT_CHUNK_COMMIT name=hello-native version=0.2.0' "$serial"
+          grep -Fq 'ZENPKG_TRANSPORT_COMPLETE name=hello-native version=0.2.0' "$serial"
+          test "$(grep -Fc 'ZENPKG_TRANSPORT_CHUNK_COMMIT name=hello-native version=0.2.0' "$serial")" -ge 1
+          ! grep -Fq 'ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$serial"
+          grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK name=hello-native version=0.2.0' "$serial"
       - name: Upload ZenPkg QEMU evidence
         if: always()
         uses: actions/upload-artifact@v4
