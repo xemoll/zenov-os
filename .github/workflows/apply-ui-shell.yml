@@ -40,7 +40,7 @@ jobs:
           git apply /tmp/ui-shell.patch
           rm -f .ci/ui-shell.patch.part.*
 
-      - name: Create verified commit object
+      - name: Export verified Git tree entries
         if: steps.staged.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -54,16 +54,9 @@ jobs:
           import urllib.error
           import urllib.request
 
-          result_path = "generated-commit.txt"
           token = os.environ["GH_TOKEN"]
           repository = os.environ["GH_REPOSITORY"]
-          parent = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-          base_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
           status = subprocess.check_output(["git", "status", "--porcelain=v1"], text=True).splitlines()
-
-          def fail(text):
-              with open(result_path, "w", encoding="utf-8") as handle:
-                  handle.write("ERROR\n" + text + "\n")
 
           def api(path, payload):
               request = urllib.request.Request(
@@ -77,53 +70,43 @@ jobs:
                   },
                   method="POST",
               )
-              try:
-                  with urllib.request.urlopen(request) as response:
-                      return json.load(response)
-              except urllib.error.HTTPError as error:
-                  body = error.read().decode(errors="replace")
-                  fail(f"{path} HTTP {error.code}\n{body}")
-                  raise
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
 
           entries = []
-          try:
-              for line in status:
-                  state = line[:2]
-                  path = line[3:]
-                  if " -> " in path:
-                      path = path.split(" -> ", 1)[1]
-                  if "D" in state:
-                      entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
-                      continue
-                  with open(path, "rb") as handle:
-                      encoded = base64.b64encode(handle.read()).decode()
-                  blob = api("/git/blobs", {"content": encoded, "encoding": "base64"})
-                  mode = "100755" if os.access(path, os.X_OK) else "100644"
-                  entries.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
+          for line in status:
+              state = line[:2]
+              path = line[3:]
+              if " -> " in path:
+                  path = path.split(" -> ", 1)[1]
+              if "D" in state:
+                  entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+                  continue
+              with open(path, "rb") as handle:
+                  encoded = base64.b64encode(handle.read()).decode()
+              blob = api("/git/blobs", {"content": encoded, "encoding": "base64"})
+              mode = "100755" if os.access(path, os.X_OK) else "100644"
+              entries.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
 
-              tree = api("/git/trees", {"base_tree": base_tree, "tree": entries})
-              commit = api("/git/commits", {
-                  "message": "ui: add Windows-simple customizable ZenovOS 0.1.1 shell [ui-shell-applied]",
-                  "tree": tree["sha"],
-                  "parents": [parent],
-              })
-              with open(result_path, "w", encoding="utf-8") as handle:
-                  handle.write(commit["sha"] + "\n")
-              print(f"generated-commit={commit['sha']}")
-          except Exception as error:
-              if not os.path.exists(result_path):
-                  fail(repr(error))
-              raise
+          payload = {
+              "parent_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "base_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+              "entries": entries,
+          }
+          with open("git-tree-entries.json", "w", encoding="utf-8") as handle:
+              json.dump(payload, handle, indent=2, sort_keys=True)
+              handle.write("\n")
+          print(json.dumps(payload, indent=2, sort_keys=True))
           PY
 
       - name: Verify strict native source before publishing branch
-        if: steps.staged.outputs.present == 'true' && success()
+        if: steps.staged.outputs.present == 'true'
         run: make clean check
 
-      - name: Upload commit or API diagnostic
+      - name: Upload verified tree entries
         if: always() && steps.staged.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: zenov-os-0.1.1-ui-shell-commit
+          name: zenov-os-0.1.1-ui-shell-tree
           if-no-files-found: error
-          path: generated-commit.txt
+          path: git-tree-entries.json
