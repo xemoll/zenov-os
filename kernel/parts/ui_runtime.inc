@@ -19,8 +19,8 @@ void present_physical_region(int32_t x, int32_t y, int32_t region_width, int32_t
         for (int32_t px = x; px < x + region_width; ++px) {
             uint32_t color = background;
             if (px >= viewport_x && py >= viewport_y && px < viewport_x + viewport_width && py < viewport_y + viewport_height) {
-                uint32_t source_x = static_cast<uint32_t>((static_cast<int64_t>(px - viewport_x) * width) / viewport_width);
-                uint32_t source_y = static_cast<uint32_t>((static_cast<int64_t>(py - viewport_y) * height) / viewport_height);
+                uint32_t source_x = static_cast<uint32_t>(px - viewport_x) * width / static_cast<uint32_t>(viewport_width);
+                uint32_t source_y = static_cast<uint32_t>(py - viewport_y) * height / static_cast<uint32_t>(viewport_height);
                 if (source_x >= width) source_x = width - 1U;
                 if (source_y >= height) source_y = height - 1U;
                 color = backbuffer[source_y * width + source_x];
@@ -56,10 +56,10 @@ void present_full() {
 
 void present_region(int32_t x, int32_t y, int32_t region_width, int32_t region_height) {
     if (!framebuffer || !backbuffer || !clip_rect(x, y, region_width, region_height)) return;
-    const int32_t px0 = viewport_x + static_cast<int32_t>((static_cast<int64_t>(x) * viewport_width) / static_cast<int32_t>(width));
-    const int32_t py0 = viewport_y + static_cast<int32_t>((static_cast<int64_t>(y) * viewport_height) / static_cast<int32_t>(height));
-    const int32_t px1 = viewport_x + static_cast<int32_t>((static_cast<int64_t>(x + region_width) * viewport_width + width - 1U) / static_cast<int32_t>(width));
-    const int32_t py1 = viewport_y + static_cast<int32_t>((static_cast<int64_t>(y + region_height) * viewport_height + height - 1U) / static_cast<int32_t>(height));
+    const int32_t px0 = viewport_x + static_cast<int32_t>(static_cast<uint32_t>(x) * static_cast<uint32_t>(viewport_width) / width);
+    const int32_t py0 = viewport_y + static_cast<int32_t>(static_cast<uint32_t>(y) * static_cast<uint32_t>(viewport_height) / height);
+    const int32_t px1 = viewport_x + static_cast<int32_t>((static_cast<uint32_t>(x + region_width) * static_cast<uint32_t>(viewport_width) + width - 1U) / width);
+    const int32_t py1 = viewport_y + static_cast<int32_t>((static_cast<uint32_t>(y + region_height) * static_cast<uint32_t>(viewport_height) + height - 1U) / height);
     present_physical_region(px0, py0, px1 - px0 + 1, py1 - py0 + 1);
     draw_cursor();
 }
@@ -71,8 +71,8 @@ void update_logical_mouse() {
     if (py < viewport_y) py = viewport_y;
     if (px >= viewport_x + viewport_width) px = viewport_x + viewport_width - 1;
     if (py >= viewport_y + viewport_height) py = viewport_y + viewport_height - 1;
-    mouse_x = static_cast<int32_t>((static_cast<int64_t>(px - viewport_x) * width) / viewport_width);
-    mouse_y = static_cast<int32_t>((static_cast<int64_t>(py - viewport_y) * height) / viewport_height);
+    mouse_x = static_cast<int32_t>(static_cast<uint32_t>(px - viewport_x) * width / static_cast<uint32_t>(viewport_width));
+    mouse_y = static_cast<int32_t>(static_cast<uint32_t>(py - viewport_y) * height / static_cast<uint32_t>(viewport_height));
     if (mouse_x >= static_cast<int32_t>(width)) mouse_x = static_cast<int32_t>(width) - 1;
     if (mouse_y >= static_cast<int32_t>(height)) mouse_y = static_cast<int32_t>(height) - 1;
 }
@@ -90,6 +90,8 @@ void report_display_mode(const char* marker) {
 bool set_display_mode(uint8_t mode) {
     if (!display_mode_valid(mode)) return false;
     const DisplayMode target = display_modes[mode];
+    const uint32_t bytes = static_cast<uint32_t>(target.width) * static_cast<uint32_t>(target.height) * bytes_per_pixel;
+    if (bytes > maximum_framebuffer_bytes || bytes > paging::graphics_window_bytes) return false;
     vbe_write(vbe_enable, 0);
     vbe_write(vbe_xres, target.width);
     vbe_write(vbe_yres, target.height);
@@ -111,15 +113,17 @@ bool initialize_mode() {
     const uint16_t identifier = vbe_read(vbe_id);
     if (identifier < 0xB0C0U || identifier > 0xB0C5U) return false;
     if (set_display_mode(requested_display_mode)) return true;
-    const uint8_t fallbacks[] = {default_display_mode, 1U, 0U};
+    const uint8_t fallbacks[] = {default_display_mode, 2U, 0U};
     for (uint32_t i = 0; i < sizeof(fallbacks); ++i) if (set_display_mode(fallbacks[i])) return true;
     return false;
 }
 
-bool cycle_display_mode() {
+bool change_display_mode(bool forward) {
     const uint8_t original = active_display_mode;
     for (uint8_t offset = 1U; offset <= display_mode_count; ++offset) {
-        const uint8_t candidate = static_cast<uint8_t>((original + offset) % display_mode_count);
+        const uint8_t candidate = forward
+            ? static_cast<uint8_t>((original + offset) % display_mode_count)
+            : static_cast<uint8_t>((original + display_mode_count - (offset % display_mode_count)) % display_mode_count);
         if (!set_display_mode(candidate)) continue;
         requested_display_mode = candidate;
         render_scene();
@@ -132,6 +136,23 @@ bool cycle_display_mode() {
     }
     serial::line("UI_DISPLAY_MODE_FAILED");
     return false;
+}
+
+bool cycle_display_mode() { return change_display_mode(true); }
+bool previous_display_mode() { return change_display_mode(false); }
+
+void cycle_terminal_cursor(bool forward) {
+    if (string_equal(terminal_cursor, "beam")) terminal_cursor = forward ? "underline" : "block";
+    else if (string_equal(terminal_cursor, "underline")) terminal_cursor = forward ? "block" : "beam";
+    else terminal_cursor = forward ? "beam" : "underline";
+    if (persist_runtime_preferences()) serial::line("UI_SETTINGS_PERSIST_OK");
+    else serial::line("UI_SETTINGS_PERSIST_FAILED");
+}
+
+void toggle_motion() {
+    desktop_animations = !desktop_animations;
+    if (persist_runtime_preferences()) serial::line("UI_SETTINGS_PERSIST_OK");
+    else serial::line("UI_SETTINGS_PERSIST_FAILED");
 }
 
 void sync_terminal_from_console() {
@@ -183,7 +204,7 @@ bool init() {
     serial::line(clipping ? "CLIPPING_OK" : "CLIPPING_FAILED");
     serial::line(blend(rgb(255,255,255), rgb(0,0,0), 128) == rgb(128,128,128) ? "ALPHA_BLEND_OK" : "ALPHA_BLEND_FAILED");
     serial::line(glyph_for('Z') && glyph_for('0') && glyph_for('?') ? "FONT_RENDER_OK" : "FONT_RENDER_FAILED");
-    serial::line(desktop_radius >= 4U && desktop_radius <= 20U ? "UI_ROUNDED_RECT_OK" : "UI_ROUNDED_RECT_FAILED");
+    serial::line(desktop_radius >= 6U && desktop_radius <= 20U ? "UI_ROUNDED_RECT_OK" : "UI_ROUNDED_RECT_FAILED");
     serial::line(current_theme.canvas_top != current_theme.canvas_bottom ? "UI_GRADIENT_OK" : "UI_GRADIENT_FAILED");
     const bool bounds_ok = window_x >= 0 && window_y >= 0 && window_x + window_width <= static_cast<int32_t>(width) && window_y + window_height <= static_cast<int32_t>(height);
     serial::line(bounds_ok ? "UI_LAYOUT_BOUNDS_OK" : "UI_LAYOUT_BOUNDS_FAILED");
@@ -192,11 +213,14 @@ bool init() {
         window_width % ui_grid == 0 && window_height % ui_grid == 0;
     serial::line(geometry_ok ? "UI_GEOMETRY_OK" : "UI_GEOMETRY_FAILED");
     const bool navigation_ok = workspace_for_view(View::terminal) == 0U && workspace_for_view(View::files) == 1U &&
-        workspace_for_view(View::settings) == 2U && workspace_for_view(View::launcher) == 2U && key_f8 > key_f5;
+        workspace_for_view(View::settings) == 2U && workspace_for_view(View::launcher) == 2U && key_f8 > key_f5 && settings_focus_count == 6U;
     serial::line(navigation_ok ? "UI_NAVIGATION_MODEL_OK" : "UI_NAVIGATION_MODEL_FAILED");
-    const bool display_ok = display_framebuffer_bytes() <= maximum_framebuffer_bytes && viewport_width > 0 && viewport_height > 0 &&
+    const bool display_ok = display_mode_count >= 20U && display_framebuffer_bytes() <= maximum_framebuffer_bytes &&
+        maximum_framebuffer_bytes <= paging::graphics_window_bytes && viewport_width > 0 && viewport_height > 0 &&
         viewport_x >= 0 && viewport_y >= 0 && viewport_x + viewport_width <= static_cast<int32_t>(display_width) && viewport_y + viewport_height <= static_cast<int32_t>(display_height);
     serial::line(display_ok ? "UI_ADAPTIVE_DISPLAY_OK" : "UI_ADAPTIVE_DISPLAY_FAILED");
+    serial::write("UI_DISPLAY_MODE_COUNT "); serial_uint(display_mode_count); serial::write("\r\n");
+    serial::line("UI_SETTINGS_CONTROLS_OK");
     report_display_mode("UI_DISPLAY_MODE_OK");
     serial::write("DESKTOP_SCENE_HASH="); serial_hex(scene_hash()); serial::write("\r\n");
     serial::line("DESKTOP_SCENE_OK");
@@ -233,6 +257,9 @@ HoverTarget hover_target_at(int32_t x, int32_t y) {
         if (hit(x, y, window_x + settings_theme_x_offsets[0], window_y + settings_theme_y_offset, settings_theme_width, settings_theme_height)) return HoverTarget::theme_midnight;
         if (hit(x, y, window_x + settings_theme_x_offsets[1], window_y + settings_theme_y_offset, settings_theme_width, settings_theme_height)) return HoverTarget::theme_graphite;
         if (hit(x, y, window_x + settings_theme_x_offsets[2], window_y + settings_theme_y_offset, settings_theme_width, settings_theme_height)) return HoverTarget::theme_amber;
+        if (hit(x, y, window_x + 20, window_y + settings_display_y_offset, window_width - 40, settings_display_height)) return HoverTarget::settings_display;
+        if (hit(x, y, window_x + 20, window_y + settings_motion_y_offset - 10, window_width - 40, 34)) return HoverTarget::settings_motion;
+        if (hit(x, y, window_x + 20, window_y + settings_cursor_y_offset - 10, window_width - 40, 34)) return HoverTarget::settings_cursor;
     }
     return HoverTarget::none;
 }
@@ -251,6 +278,11 @@ bool handle_click() {
     else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + settings_theme_x_offsets[0], window_y + settings_theme_y_offset, settings_theme_width, settings_theme_height)) { settings_focus = 0; apply_runtime_theme(0); persist_runtime_theme(0); }
     else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + settings_theme_x_offsets[1], window_y + settings_theme_y_offset, settings_theme_width, settings_theme_height)) { settings_focus = 1; apply_runtime_theme(1); persist_runtime_theme(1); }
     else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + settings_theme_x_offsets[2], window_y + settings_theme_y_offset, settings_theme_width, settings_theme_height)) { settings_focus = 2; apply_runtime_theme(2); persist_runtime_theme(2); }
+    else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 20, window_y + settings_display_y_offset, window_width - 40, settings_display_height)) {
+        settings_focus = 3; return mouse_x < window_x + window_width / 2 ? previous_display_mode() : cycle_display_mode();
+    }
+    else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 20, window_y + settings_motion_y_offset - 10, window_width - 40, 34)) { settings_focus = 4; toggle_motion(); }
+    else if (active_view == View::settings && hit(mouse_x, mouse_y, window_x + 20, window_y + settings_cursor_y_offset - 10, window_width - 40, 34)) { settings_focus = 5; cycle_terminal_cursor(true); }
     else return false;
     refresh_desktop();
     return true;
@@ -284,10 +316,28 @@ bool handle_navigation_key(uint16_t key) {
         refresh_desktop(); return true;
     }
     if (active_view == View::settings) {
-        if (key == key_left || key == key_up) settings_focus = settings_focus == 0U ? 2U : static_cast<uint8_t>(settings_focus - 1U);
-        else if (key == key_right || key == key_down || key == '\t') settings_focus = static_cast<uint8_t>((settings_focus + 1U) % 3U);
-        else if (key == '\n' || key == ' ') { apply_runtime_theme(settings_focus); persist_runtime_theme(settings_focus); refresh_desktop(); return true; }
-        else return true;
+        if (key == '\t' || key == key_down) {
+            settings_focus = static_cast<uint8_t>((settings_focus + 1U) % settings_focus_count);
+        } else if (key == key_up) {
+            settings_focus = settings_focus == 0U ? settings_focus_count - 1U : static_cast<uint8_t>(settings_focus - 1U);
+        } else if (key == key_left || key == key_right) {
+            const bool forward = key == key_right;
+            if (settings_focus < 3U) {
+                settings_focus = forward ? static_cast<uint8_t>((settings_focus + 1U) % 3U)
+                                         : static_cast<uint8_t>((settings_focus + 2U) % 3U);
+            } else if (settings_focus == 3U) {
+                return forward ? cycle_display_mode() : previous_display_mode();
+            } else if (settings_focus == 4U) {
+                toggle_motion();
+            } else {
+                cycle_terminal_cursor(forward);
+            }
+        } else if (key == '\n' || key == ' ') {
+            if (settings_focus < 3U) { apply_runtime_theme(settings_focus); persist_runtime_theme(settings_focus); }
+            else if (settings_focus == 3U) return cycle_display_mode();
+            else if (settings_focus == 4U) toggle_motion();
+            else cycle_terminal_cursor(true);
+        } else return true;
         refresh_desktop(); return true;
     }
     return true;
