@@ -36,12 +36,6 @@ bool repository_metadata_path(const char* input) {
     return normalize_for_policy(input, normalized) && string_starts_with(normalized, "/repo/");
 }
 
-bool package_cache_path(const char* input) {
-    char normalized[48]{};
-    if (!normalize_for_policy(input, normalized)) return false;
-    return string_equal(normalized, "/var/cache/zp") || string_starts_with(normalized, "/var/cache/zp/");
-}
-
 bool package_cache_object_path(const char* input) {
     char normalized[48]{};
     return normalize_for_policy(input, normalized) && string_starts_with(normalized, "/var/cache/zp/") &&
