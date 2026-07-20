@@ -1,0 +1,33 @@
+name: ZCAP Main Source Snapshot c9f
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Verify exact main parent
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "c9f48ef3fcaf744aeae26ce9249a85bcbb924331"
+      - name: Create source archive
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=build --exclude=dist \
+            --exclude=.github/workflows/zcap-main-source-snapshot-e77.yml \
+            -czf /tmp/zenov-os-main-c9f48e-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-main-c9f48e-source
+          path: /tmp/zenov-os-main-c9f48e-source.tar.gz
+          if-no-files-found: error
