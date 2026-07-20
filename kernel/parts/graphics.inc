@@ -20,15 +20,19 @@ const char* configured_terminal_cursor = terminal_cursor;
 #define terminal_cursor configured_terminal_cursor
 
 #include "ui_theme.inc"
-
-#define render_files render_files_legacy
-#define render_scene render_scene_legacy
 #include "ui_apps.inc"
-#undef render_scene
-#undef render_files
-[[maybe_unused]] auto* const render_scene_legacy_reference = &render_scene_legacy;
-
 #include "ui_files.inc"
+
+void render_scene() {
+    if (!backbuffer) return;
+    draw_wallpaper();
+    draw_topbar();
+    if (active_view == View::terminal) render_terminal();
+    else if (active_view == View::files) render_files();
+    else if (active_view == View::settings) render_settings();
+    else render_launcher();
+    draw_dock();
+}
 
 #define init init_base
 #define handle_navigation_key handle_navigation_key_base
@@ -48,4 +52,4 @@ const char* configured_terminal_cursor = terminal_cursor;
 #undef desktop_accent
 #undef desktop_surface
 #undef desktop_canvas
-}
+} // namespace graphics
