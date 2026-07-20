@@ -1,5 +1,5 @@
 constexpr uint32_t width = 800U, height = 600U, bytes_per_pixel = 4U;
-constexpr uint32_t framebuffer_bytes = width * height * bytes_per_pixel;
+constexpr uint32_t backbuffer_bytes = width * height * bytes_per_pixel;
 constexpr uint16_t vbe_index_port = 0x01CE, vbe_data_port = 0x01CF;
 constexpr uint16_t vbe_id = 0, vbe_xres = 1, vbe_yres = 2, vbe_bpp = 3, vbe_enable = 4, vbe_virtual_width = 6;
 constexpr uint16_t vbe_enabled = 0x01, vbe_linear_framebuffer = 0x40;
@@ -8,11 +8,43 @@ constexpr int32_t ui_grid = 8;
 constexpr int32_t window_width = 512, window_height = 400, titlebar_height = 40;
 constexpr int32_t topbar_x = 24, topbar_y = 16, topbar_width = 752, topbar_height = 36;
 constexpr int32_t dock_x = 284, dock_y = 540, dock_width = 232, dock_height = 52;
-constexpr uint32_t desktop_canvas = 0x0B1020U, desktop_surface = 0x141A2BU, desktop_accent = 0x8B7CF6U;
-constexpr uint8_t desktop_radius = 12U, desktop_opacity = 236U;
+constexpr uint32_t desktop_canvas = 0x11131AU, desktop_surface = 0x1B1E27U, desktop_accent = 0x7C89E8U;
+constexpr uint8_t desktop_radius = 10U, desktop_opacity = 244U;
 constexpr bool desktop_animations = true;
-constexpr const char* desktop_theme = "zen-dark";
+constexpr const char* desktop_theme = "midnight";
 constexpr const char* terminal_cursor = "beam";
+
+struct DisplayMode { uint16_t width, height; };
+constexpr DisplayMode display_modes[] = {
+    {640, 480}, {800, 600}, {1024, 600}, {1024, 768}, {1280, 720}
+};
+constexpr uint8_t display_mode_count = static_cast<uint8_t>(sizeof(display_modes) / sizeof(display_modes[0]));
+constexpr uint8_t default_display_mode = 3U;
+constexpr uint32_t maximum_framebuffer_bytes = 1280U * 768U * bytes_per_pixel;
+uint8_t requested_display_mode = default_display_mode;
+uint8_t active_display_mode = default_display_mode;
+uint32_t display_width = display_modes[default_display_mode].width;
+uint32_t display_height = display_modes[default_display_mode].height;
+int32_t viewport_x = 0, viewport_y = 0, viewport_width = static_cast<int32_t>(display_width), viewport_height = static_cast<int32_t>(display_height);
+
+bool display_mode_valid(uint8_t mode) { return mode < display_mode_count; }
+uint32_t display_framebuffer_bytes() { return display_width * display_height * bytes_per_pixel; }
+
+void configure_viewport() {
+    const uint64_t wide = static_cast<uint64_t>(display_width) * height;
+    const uint64_t tall = static_cast<uint64_t>(display_height) * width;
+    if (wide >= tall) {
+        viewport_height = static_cast<int32_t>(display_height);
+        viewport_width = static_cast<int32_t>((static_cast<uint64_t>(display_height) * width) / height);
+        viewport_x = (static_cast<int32_t>(display_width) - viewport_width) / 2;
+        viewport_y = 0;
+    } else {
+        viewport_width = static_cast<int32_t>(display_width);
+        viewport_height = static_cast<int32_t>((static_cast<uint64_t>(display_width) * height) / width);
+        viewport_x = 0;
+        viewport_y = (static_cast<int32_t>(display_height) - viewport_height) / 2;
+    }
+}
 
 enum class View : uint8_t { terminal, files, settings, launcher };
 
@@ -54,6 +86,7 @@ uintptr_t physical_framebuffer = 0;
 bool active = false, first_mouse_packet = true, dragging = false, drag_reported = false;
 bool terminal_sync_started = false, runtime_preferences_loaded = false;
 int32_t mouse_x = static_cast<int32_t>(width / 2U), mouse_y = static_cast<int32_t>(height / 2U);
+int32_t mouse_screen_x = static_cast<int32_t>(display_width / 2U), mouse_screen_y = static_cast<int32_t>(display_height / 2U);
 int32_t window_x = 144, window_y = 76, drag_offset_x = 0, drag_offset_y = 0;
 uint8_t mouse_buttons = 0, runtime_theme = 0;
 View active_view = View::terminal;
@@ -195,8 +228,7 @@ void draw_round_border(int32_t x, int32_t y, int32_t rect_width, int32_t rect_he
 }
 
 void draw_shadow(int32_t x, int32_t y, int32_t rect_width, int32_t rect_height, int32_t radius) {
-    fill_round_rect_alpha(x + 8, y + 10, rect_width, rect_height, radius + 3, rgb(0, 0, 0), 48);
-    fill_round_rect_alpha(x + 4, y + 5, rect_width, rect_height, radius + 1, rgb(0, 0, 0), 36);
+    fill_round_rect_alpha(x + 5, y + 7, rect_width, rect_height, radius + 2, rgb(0, 0, 0), 42);
 }
 
 const Glyph* glyph_for(char value) {
@@ -220,17 +252,9 @@ void draw_text(int32_t x, int32_t y, const char* text, uint32_t color, uint32_t 
     while (text && *text) { draw_char(x, y, *text++, color, scale); x += static_cast<int32_t>(6U * scale); }
 }
 
-int32_t text_width(const char* text, uint32_t scale = 1U) {
-    return static_cast<int32_t>(string_length(text) * 6U * scale);
-}
-
-void draw_text_right(int32_t right, int32_t y, const char* text, uint32_t color, uint32_t scale = 1U) {
-    draw_text(right - text_width(text, scale), y, text, color, scale);
-}
-
-void draw_text_center(int32_t center, int32_t y, const char* text, uint32_t color, uint32_t scale = 1U) {
-    draw_text(center - text_width(text, scale) / 2, y, text, color, scale);
-}
+int32_t text_width(const char* text, uint32_t scale = 1U) { return static_cast<int32_t>(string_length(text) * 6U * scale); }
+void draw_text_right(int32_t right, int32_t y, const char* text, uint32_t color, uint32_t scale = 1U) { draw_text(right - text_width(text, scale), y, text, color, scale); }
+void draw_text_center(int32_t center, int32_t y, const char* text, uint32_t color, uint32_t scale = 1U) { draw_text(center - text_width(text, scale) / 2, y, text, color, scale); }
 
 void draw_uint(int32_t x, int32_t y, uint32_t value, uint32_t color) {
     char buffer[11]; uint32_t count = 0;
@@ -240,20 +264,20 @@ void draw_uint(int32_t x, int32_t y, uint32_t value, uint32_t color) {
 
 Theme theme_for(uint8_t id) {
     if (id == 1U) return Theme{
-        rgb(15,17,22), rgb(27,30,38), rgb(94,104,128), rgb(45,54,70),
-        rgb(27,30,38), rgb(39,44,55), rgb(20,22,28), rgb(72,79,94),
-        rgb(239,242,248), rgb(154,163,181), rgb(126,142,177), rgb(55,65,84),
-        rgb(111,211,160), rgb(235,190,91), rgb(235,105,126), rgb(12,14,19)};
+        rgb(18,19,23), rgb(27,29,35), rgb(92,99,118), rgb(51,57,70),
+        rgb(29,31,38), rgb(38,41,50), rgb(22,24,29), rgb(62,67,79),
+        rgb(235,237,242), rgb(148,154,168), rgb(126,142,177), rgb(52,59,73),
+        rgb(111,201,156), rgb(224,181,91), rgb(224,105,126), rgb(13,14,17)};
     if (id == 2U) return Theme{
-        rgb(25,13,17), rgb(51,27,26), rgb(244,166,73), rgb(166,77,52),
-        rgb(44,27,29), rgb(61,37,38), rgb(29,19,22), rgb(103,61,58),
-        rgb(255,239,218), rgb(205,166,141), rgb(245,174,82), rgb(90,53,42),
-        rgb(132,213,154), rgb(246,199,91), rgb(240,104,113), rgb(20,13,16)};
+        rgb(25,19,18), rgb(38,28,25), rgb(169,111,61), rgb(105,72,53),
+        rgb(39,29,27), rgb(50,36,33), rgb(28,21,20), rgb(78,55,49),
+        rgb(244,233,222), rgb(180,157,140), rgb(216,151,83), rgb(75,51,42),
+        rgb(126,192,145), rgb(227,186,96), rgb(222,102,110), rgb(17,13,12)};
     return Theme{
-        desktop_canvas, rgb(20,17,43), rgb(139,124,246), rgb(72,170,219),
-        desktop_surface, rgb(35,39,67), rgb(13,15,29), rgb(73,77,110),
-        rgb(239,241,255), rgb(164,169,199), desktop_accent, rgb(57,52,104),
-        rgb(113,217,168), rgb(242,198,109), rgb(239,125,146), rgb(9,10,20)};
+        desktop_canvas, rgb(20,23,31), rgb(91,105,190), rgb(55,67,96),
+        desktop_surface, rgb(35,39,50), rgb(16,18,24), rgb(61,66,82),
+        rgb(237,239,246), rgb(151,157,175), desktop_accent, rgb(51,57,91),
+        rgb(108,199,156), rgb(225,184,97), rgb(222,105,126), rgb(12,13,17)};
 }
 
 void apply_runtime_theme(uint8_t id) {
