@@ -26,6 +26,7 @@ on:
       - 'kernel/kernel.cpp'
       - 'docs/ZENPKG_FORMAT_1.md'
       - 'docs/ZENREPO_OFFLINE_0.1.1.md'
+      - 'docs/ZENPKG_CACHE_0.1.1.md'
       - 'docs/NATIVE_PACKAGE_MANAGER_0.1.1.md'
       - 'docs/PACKAGE_COMPATIBILITY_ARCHITECTURE.md'
       - '.github/workflows/zenpkg.yml'
@@ -55,6 +56,7 @@ on:
       - 'kernel/kernel.cpp'
       - 'docs/ZENPKG_FORMAT_1.md'
       - 'docs/ZENREPO_OFFLINE_0.1.1.md'
+      - 'docs/ZENPKG_CACHE_0.1.1.md'
       - 'docs/NATIVE_PACKAGE_MANAGER_0.1.1.md'
       - 'docs/PACKAGE_COMPATIBILITY_ARCHITECTURE.md'
       - '.github/workflows/zenpkg.yml'
@@ -123,7 +125,13 @@ jobs:
           test "$(wc -l < build/zenrepo-metadata.sha256)" -ge 14
           ! grep -R -E 'metadata_versions|root v[0-9]+|timestamp v[0-9]+' build/zenpkg-manifest.json docs/ZENREPO_OFFLINE_0.1.1.md
       - name: Boot ZenovOS and verify real package lifecycle
-        run: make zenpkg-qemu
+        run: |
+          rm -f /tmp/zenpkg-qemu.log
+          if ! make zenpkg-qemu > /tmp/zenpkg-qemu.log 2>&1; then
+            tail -n 240 /tmp/zenpkg-qemu.log
+            exit 1
+          fi
+          tail -n 120 /tmp/zenpkg-qemu.log
       - name: Upload ZenPkg QEMU evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -141,5 +149,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zenpkg-diagnostics-${{ github.run_id }}
-          path: /tmp/zenpkg-check.log
+          path: |
+            /tmp/zenpkg-check.log
+            /tmp/zenpkg-qemu.log
           if-no-files-found: ignore
