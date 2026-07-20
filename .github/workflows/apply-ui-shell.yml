@@ -1,21 +1,25 @@
 name: Apply verified native shell patch
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/zenov-os-0.1.1-windows-simple-shell
+      - main
 
 permissions:
   contents: write
 
+concurrency:
+  group: zenov-os-ui-shell-apply
+  cancel-in-progress: false
+
 jobs:
   apply:
-    if: ${{ !contains(github.event.head_commit.message, '[ui-shell-applied]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: agent/zenov-os-0.1.1-windows-simple-shell
           fetch-depth: 2
 
       - name: Decode and apply locally verified patch
