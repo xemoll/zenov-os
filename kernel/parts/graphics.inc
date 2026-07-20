@@ -1,3 +1,5 @@
+#include "div64_runtime.inc"
+
 namespace graphics {
 #include "ui_graphics_base.inc"
 
