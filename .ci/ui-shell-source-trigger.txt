@@ -1,0 +1,1 @@
+Export the exact ZenovOS 0.1.1 source tree for the Windows-simple / Quickshell-capable native shell pass.
