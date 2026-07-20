@@ -14,6 +14,16 @@ constexpr int32_t settings_theme_height = 58;
 constexpr int32_t settings_theme_x_offsets[3] = {32, 188, 344};
 constexpr int32_t settings_theme_y_offset = 88;
 
+char terminal_cell_char(uint32_t row, uint32_t column) {
+    if (row >= console::height || column >= console::width) return 0;
+    return static_cast<char>(console::vga[row * console::width + column] & 0xFFU);
+}
+
+bool terminal_home_visible() {
+    return terminal_cell_char(4, 4) == 'S' && terminal_cell_char(4, 5) == 'Y' &&
+           terminal_cell_char(13, 4) == 'W' && terminal_cell_char(13, 5) == 'O';
+}
+
 void draw_console_content_row(uint32_t source_row, uint32_t visual_row, int32_t origin_x, int32_t origin_y) {
     if (source_row >= console::height) return;
     for (uint32_t column = 0; column < console::width; ++column) {
@@ -38,7 +48,25 @@ void draw_terminal_caret(int32_t origin_x, int32_t origin_y, uint32_t first_row)
     else fill_rect_alpha(caret_x, caret_y, 1, 7, current_theme.accent, 230);
 }
 
+void render_terminal_home() {
+    const int32_t panel_x = window_x + terminal_panel_x_offset;
+    const int32_t panel_y = window_y + terminal_panel_y_offset;
+    fill_round_rect(panel_x, panel_y, terminal_panel_width, terminal_panel_height, 7, current_theme.terminal);
+    draw_text(window_x + 24, window_y + 84, "ZENOVOS 0.1.1", current_theme.text, 2);
+    draw_text(window_x + 24, window_y + 114, "LOCAL SHELL", current_theme.text_muted, 1);
+    fill_rect(window_x + 24, window_y + 140, 448, 1, current_theme.border);
+    draw_text(window_x + 24, window_y + 158, "TYPE HELP TO LIST COMMANDS", current_theme.text_muted, 1);
+    draw_text(window_x + 24, window_y + 180, "F5 TERMINAL  F6 FILES  F7 SETTINGS  F8 APPS  F9 DISPLAY", current_theme.text_muted, 1);
+    fill_rect(window_x + 24, window_y + 212, 448, 1, current_theme.border);
+    draw_console_content_row(console::row, 0, window_x + 16, window_y + 232);
+    draw_terminal_caret(window_x + 16, window_y + 232, console::row);
+}
+
 void render_terminal_cells() {
+    if (terminal_home_visible()) {
+        render_terminal_home();
+        return;
+    }
     const int32_t panel_x = window_x + terminal_panel_x_offset;
     const int32_t panel_y = window_y + terminal_panel_y_offset;
     fill_round_rect(panel_x, panel_y, terminal_panel_width, terminal_panel_height, 7, current_theme.terminal);
