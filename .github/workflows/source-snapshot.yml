@@ -1,0 +1,27 @@
+name: UI shell source snapshot
+
+on:
+  push:
+    branches:
+      - verify/ui-shell-source-snapshot
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pack exact source tree
+        run: |
+          git rev-parse HEAD > SOURCE-SNAPSHOT-REVISION.txt
+          tar --exclude=.git --exclude=zenov-os-source.tar.gz -czf zenov-os-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-ui-shell-source
+          if-no-files-found: error
+          path: |
+            zenov-os-source.tar.gz
+            SOURCE-SNAPSHOT-REVISION.txt
