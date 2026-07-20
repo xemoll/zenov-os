@@ -1,10 +1,12 @@
 using uint8_t = unsigned char;
 using uint16_t = unsigned short;
 using uint32_t = unsigned int;
+using uint64_t = unsigned long long;
 using int32_t = int;
+using int64_t = long long;
 using uintptr_t = unsigned int;
 using size_t = unsigned int;
-static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) == 4);
+static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) == 4 && sizeof(uint64_t) == 8);
 
 #include "generated/zenov_config.hpp"
 
