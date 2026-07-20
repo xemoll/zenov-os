@@ -59,11 +59,32 @@ void repository_command(char* input) {
     }
 }
 
+void cache_command(char* input) {
+    char* action = nullptr;
+    char* arguments = nullptr;
+    if (!split_subcommand(input, action, arguments)) {
+        console::line("Usage: pkg cache status|verify|clean");
+        return;
+    }
+    (void)arguments;
+    if (string_equal(action, "status")) {
+        cache_status();
+    } else if (string_equal(action, "verify")) {
+        if (cache_verify()) console::success("PKG_CACHE_VERIFY_OK");
+        else console::warning("Package cache verification failed.");
+    } else if (string_equal(action, "clean")) {
+        if (cache_clean()) console::success("PKG_CACHE_CLEAN_OK");
+        else console::warning("Package cache cleanup failed.");
+    } else {
+        console::warning("Unknown pkg cache action.");
+    }
+}
+
 void command(char* input) {
     char* action = nullptr;
     char* arguments = nullptr;
     if (!split_subcommand(input, action, arguments)) {
-        console::line("Usage: pkg status|list|search|plan|verify|install|upgrade|repair|policy|info|rollback|remove|run|repo");
+        console::line("Usage: pkg status|list|search|plan|verify|fetch|install|upgrade|repair|policy|info|rollback|remove|run|cache|repo");
         return;
     }
     if (string_equal(action, "status")) {
@@ -78,6 +99,10 @@ void command(char* input) {
     } else if (string_equal(action, "verify")) {
         if (*arguments) verify(arguments);
         else console::warning("Usage: pkg verify <package.zpk>");
+    } else if (string_equal(action, "fetch")) {
+        lower_in_place(arguments);
+        if (*arguments) fetch_latest(arguments);
+        else console::warning("Usage: pkg fetch <name>");
     } else if (string_equal(action, "install")) {
         if (!*arguments) {
             console::warning("Usage: pkg install <name|package.zpk>");
@@ -109,6 +134,8 @@ void command(char* input) {
         else console::warning("Usage: pkg remove <name>");
     } else if (string_equal(action, "run")) {
         run_package(arguments);
+    } else if (string_equal(action, "cache")) {
+        cache_command(arguments);
     } else if (string_equal(action, "repo")) {
         repository_command(arguments);
     } else {
