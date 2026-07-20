@@ -50,7 +50,8 @@ jobs:
           /tmp/package-repository-kernel-test build/zenrepo-test/fixtures
       - name: Ensure no private key material is committed
         run: |
-          if git grep -nE 'BEGIN (RSA )?PRIVATE KEY|BEGIN PRIVATE KEY' -- . ':!tests/**' ':!.github/workflows/zenrepo.yml'; then
+          if git grep -nE 'BEGIN (RSA )?PRIVATE KEY|BEGIN PRIVATE KEY' -- . \
+            ':(exclude)tests/**' ':(exclude).github/workflows/**'; then
             echo 'private signing key material must not be committed' >&2
             exit 1
           fi
