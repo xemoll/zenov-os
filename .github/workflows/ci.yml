@@ -57,8 +57,8 @@ jobs:
           cmp dist/ZenovOS-0.1.1-x86.zip dist-rebuild/ZenovOS-0.1.1-x86.zip
           cmp dist/SHA256SUMS.txt dist-rebuild/SHA256SUMS.txt
           cmp dist/SOURCE-REVISION.txt dist-rebuild/SOURCE-REVISION.txt
-          grep -qx "ZenovOS source commit: $ZENOV_SOURCE_REVISION" dist/SOURCE-REVISION.txt
-          unzip -p dist/ZenovOS-0.1.1-x86.zip SOURCE-REVISION.txt | grep -qx "ZenovOS source commit: $ZENOV_SOURCE_REVISION"
+          grep -qx "$ZENOV_SOURCE_REVISION" dist/SOURCE-REVISION.txt
+          unzip -p dist/ZenovOS-0.1.1-x86.zip SOURCE-REVISION.txt | grep -qx "$ZENOV_SOURCE_REVISION"
           unzip -p dist/ZenovOS-0.1.1-x86.zip ZenovOS-0.1.1-data.img | cmp - build/zenov-data.img
 
       - name: Verify deterministic system rebuild
@@ -179,7 +179,7 @@ jobs:
           grep -q '"audit_journal_bytes": 8288' build/build-manifest.json
           grep -q '"audit_fault_model":' build/build-manifest.json
           grep -q '"zenov_app_contract_sha256": "9e1733af56a53ae31055b448f762815ba7a5e1a72be543aef325bd4ea36e0ad5"' build/build-manifest.json
-          grep -qx "ZenovOS source commit: $ZENOV_SOURCE_REVISION" dist/SOURCE-REVISION.txt
+          grep -qx "$ZENOV_SOURCE_REVISION" dist/SOURCE-REVISION.txt
 
       - name: Upload verified 0.1.1 audit-fault evidence
         if: always()
