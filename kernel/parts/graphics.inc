@@ -24,6 +24,7 @@ const char* configured_terminal_cursor = terminal_cursor;
 #include "ui_theme.inc"
 #include "ui_apps.inc"
 #include "ui_files.inc"
+#include "ui_scaler.inc"
 
 #define init init_base
 #define handle_navigation_key handle_navigation_key_base
