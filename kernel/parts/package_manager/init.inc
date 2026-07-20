@@ -1,11 +1,25 @@
 void init() {
     initialized = false;
-    if (!storage::ready()) { serial::line("ZENPKG_STORAGE_UNAVAILABLE"); return; }
-    if (!package_repository::ready) { serial::line("ZENPKG_REPOSITORY_UNAVAILABLE"); return; }
-    if (!crypto::sha256_self_test()) { serial::line("ZENPKG_SHA256_SELF_TEST_FAILED"); return; }
+    if (!storage::ready()) {
+        serial::line("ZENPKG_STORAGE_UNAVAILABLE");
+        return;
+    }
+    if (!package_repository::ready) {
+        serial::line("ZENPKG_REPOSITORY_UNAVAILABLE");
+        return;
+    }
+    if (!crypto::sha256_self_test()) {
+        serial::line("ZENPKG_SHA256_SELF_TEST_FAILED");
+        return;
+    }
     serial::line("ZENPKG_SHA256_OK");
-    package_buffer = static_cast<uint8_t*>(heap::allocate(storage::file_capacity(), 16U));
-    if (!package_buffer) { serial::line("ZENPKG_BUFFER_ALLOCATION_FAILED"); return; }
+    package_buffer = package_storage;
+    memset(package_buffer, 0, maximum_package_bytes);
+    if (storage::file_capacity() > maximum_package_bytes) {
+        serial::line("ZENPKG_STORAGE_SLOT_LIMIT_UNSUPPORTED");
+        package_buffer = nullptr;
+        return;
+    }
     if (!ensure_directory("/packages") || !ensure_directory("/var") ||
         !ensure_directory("/var/lib") || !ensure_directory("/var/lib/zenpkg")) {
         serial::line("ZENPKG_DIRECTORY_INIT_FAILED");

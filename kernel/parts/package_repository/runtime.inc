@@ -17,7 +17,9 @@ bool check() {
     uint32_t candidate_count = 0;
     State next{};
     if (!verify_candidate(candidate, candidate_count, next, false)) return false;
-    serial::write("ZENREPO_CHECK_OK packages="); process::serial_u32(candidate_count); serial::write("\r\n");
+    serial::write("ZENREPO_CHECK_OK packages=");
+    process::serial_u32(candidate_count);
+    serial::write("\r\n");
     return true;
 }
 
@@ -40,8 +42,8 @@ bool init() {
     ready = false;
     active_target_count = 0;
     if (!storage::ready()) return false;
-    metadata_buffer = static_cast<uint8_t*>(heap::allocate(maximum_metadata_bytes, 16U));
-    if (!metadata_buffer) return false;
+    metadata_buffer = metadata_storage;
+    memset(metadata_buffer, 0, maximum_metadata_bytes);
     const Validation state_validation = load_state();
     if (state_validation != Validation::okay) {
         serial::write("ZENREPO_STATE_INVALID reason=");
@@ -61,13 +63,20 @@ const Target* find_target(const char* name, const char* version, const char* ent
     return nullptr;
 }
 
-char folded_char(char value) { return value >= 'A' && value <= 'Z' ? static_cast<char>(value + 32) : value; }
+char folded_char(char value) {
+    return value >= 'A' && value <= 'Z' ? static_cast<char>(value + 32) : value;
+}
+
 int lexical_compare(const char* left, const char* right) {
     if (!left) left = "";
     if (!right) right = "";
-    while (*left && *right && *left == *right) { ++left; ++right; }
-    return static_cast<unsigned char>(*left) < static_cast<unsigned char>(*right) ? -1 :
-        (static_cast<unsigned char>(*left) > static_cast<unsigned char>(*right) ? 1 : 0);
+    while (*left && *right && *left == *right) {
+        ++left;
+        ++right;
+    }
+    const uint8_t a = static_cast<uint8_t>(*left);
+    const uint8_t b = static_cast<uint8_t>(*right);
+    return a < b ? -1 : (a > b ? 1 : 0);
 }
 
 int compare_release(const char* left, const char* right) {
@@ -83,14 +92,21 @@ int compare_release(const char* left, const char* right) {
             while (*cursor >= '0' && *cursor <= '9') {
                 const uint32_t digit = static_cast<uint32_t>(*cursor - '0');
                 if (value > (0xFFFFFFFFU - digit) / 10U) return lexical_compare(left, right);
-                value = value * 10U + digit; ++cursor;
+                value = value * 10U + digit;
+                ++cursor;
             }
             outputs[side][part] = value;
-            if (part < 2U) { if (*cursor != '.') return lexical_compare(left, right); ++cursor; }
+            if (part < 2U) {
+                if (*cursor != '.') return lexical_compare(left, right);
+                ++cursor;
+            }
         }
         if (*cursor && *cursor != '-' && *cursor != '+') return lexical_compare(left, right);
     }
-    for (uint32_t i = 0; i < 3U; ++i) { if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; }
+    for (uint32_t i = 0; i < 3U; ++i) {
+        if (a[i] < b[i]) return -1;
+        if (a[i] > b[i]) return 1;
+    }
     return 0;
 }
 
@@ -108,33 +124,46 @@ const Target* latest_target(const char* name) {
 const Target* target_at(uint32_t index) {
     return ready && index < active_target_count ? &active_targets[index] : nullptr;
 }
-uint32_t target_count() { return ready ? active_target_count : 0U; }
+
+uint32_t target_count() {
+    return ready ? active_target_count : 0U;
+}
 
 bool contains_folded(const char* text, const char* query) {
     if (!text || !query || !*query) return false;
     for (const char* start = text; *start; ++start) {
         const char* left = start;
         const char* right = query;
-        while (*left && *right && folded_char(*left) == folded_char(*right)) { ++left; ++right; }
+        while (*left && *right && folded_char(*left) == folded_char(*right)) {
+            ++left;
+            ++right;
+        }
         if (!*right) return true;
     }
     return false;
 }
 
 void print_status() {
-    console::write("  State         "); console::line(ready ? "ready" : "unavailable");
+    console::write("  State         ");
+    console::line(ready ? "ready" : "unavailable");
     console::line("  Trust chain   verified signatures, delegations, expiry and anti-rollback");
-    console::write("  Packages      "); console::unsigned_dec(active_target_count); console::put('\n');
+    console::write("  Packages      ");
+    console::unsigned_dec(active_target_count);
+    console::put('\n');
     console::line("  Transport     offline ZenovFS repository only");
     console::line("  Freshness     compiled release floor; secure RTC not available");
-    console::line("  Revisions     internal and intentionally hidden from normal UI");
+    console::line("  Revisions     internal and hidden from normal UI");
     serial::line("ZENREPO_STATUS_OK");
 }
 
 void print_targets() {
     for (uint32_t i = 0; i < active_target_count; ++i) {
-        console::write("  "); console::write(active_targets[i].name); console::put('@');
-        console::write(active_targets[i].version); console::write("  "); console::line(active_targets[i].path);
+        console::write("  ");
+        console::write(active_targets[i].name);
+        console::put('@');
+        console::write(active_targets[i].version);
+        console::write("  ");
+        console::line(active_targets[i].path);
     }
     if (!active_target_count) console::line("  <no authorized repository targets>");
     serial::line("ZENREPO_TARGETS_OK");
@@ -145,21 +174,39 @@ void print_search(const char* query) {
     for (uint32_t i = 0; i < active_target_count; ++i) {
         const Target& target = active_targets[i];
         if (!contains_folded(target.name, query) && !contains_folded(target.path, query)) continue;
-        console::write("  "); console::write(target.name); console::put('@');
-        console::write(target.version); console::write("  "); console::line(target.path);
+        console::write("  ");
+        console::write(target.name);
+        console::put('@');
+        console::write(target.version);
+        console::write("  ");
+        console::line(target.path);
         ++matches;
     }
     if (!matches) console::line("  <no matching packages>");
-    serial::write("ZENREPO_SEARCH_OK matches="); process::serial_u32(matches); serial::write("\r\n");
+    serial::write("ZENREPO_SEARCH_OK matches=");
+    process::serial_u32(matches);
+    serial::write("\r\n");
 }
 
 void print_policy(const char* name) {
     const Target* target = latest_target(name);
-    if (!target) { console::line("Package is not present in signed repository metadata."); serial::line("ZENREPO_POLICY_NOT_FOUND"); return; }
-    console::write("  Package       "); console::write(target->name); console::put('@'); console::line(target->version);
-    console::write("  Syscall mask  "); console::unsigned_dec(target->syscall_mask); console::put('\n');
-    console::write("  Read scope    "); console::line(target->read_scope[0] ? target->read_scope : "<none>");
-    console::write("  Write scope   "); console::line(target->write_scope[0] ? target->write_scope : "<none>");
-    console::write("  Entrypoint    "); console::line(target->entrypoint);
+    if (!target) {
+        console::line("Package is not present in signed repository metadata.");
+        serial::line("ZENREPO_POLICY_NOT_FOUND");
+        return;
+    }
+    console::write("  Package       ");
+    console::write(target->name);
+    console::put('@');
+    console::line(target->version);
+    console::write("  Syscall mask  ");
+    console::unsigned_dec(target->syscall_mask);
+    console::put('\n');
+    console::write("  Read scope    ");
+    console::line(target->read_scope[0] ? target->read_scope : "<none>");
+    console::write("  Write scope   ");
+    console::line(target->write_scope[0] ? target->write_scope : "<none>");
+    console::write("  Entrypoint    ");
+    console::line(target->entrypoint);
     serial::line("ZENREPO_POLICY_OK");
 }
