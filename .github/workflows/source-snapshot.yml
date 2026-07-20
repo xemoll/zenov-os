@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - verify/ui-shell-source-snapshot
+  pull_request:
+    branches:
+      - verify/ui-shell-source-snapshot
 
 permissions:
   contents: read
