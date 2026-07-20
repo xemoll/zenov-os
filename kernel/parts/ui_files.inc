@@ -268,4 +268,5 @@ void render_scene() {
     window_y = saved_window_y;
     draw_taskbar();
     draw_quick_settings();
+    draw_status_center();
 }

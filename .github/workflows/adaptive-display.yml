@@ -44,6 +44,13 @@ jobs:
           grep -q UI_PERSONALIZATION_OK build/qemu-display-ui/serial.log
           grep -q UI_TASKBAR_OK build/qemu-display-ui/serial.log
           grep -q UI_ANIMATION_MODEL_OK build/qemu-display-ui/serial.log
+          grep -q UI_SYSTEM_CENTER_OK build/qemu-display-ui/serial.log
+          grep -q UI_ACCESSIBILITY_OK build/qemu-display-ui/serial.log
+          grep -q UI_START_SYSTEM_TOOLS_OK build/qemu-display-ui/serial.log
+          grep -q UI_HIGH_CONTRAST_ON build/qemu-display-ui/serial.log
+          grep -q UI_LARGE_POINTER_ON build/qemu-display-ui/serial.log
+          grep -q UI_START_PACKAGES_OPEN_OK build/qemu-display-ui/serial.log
+          grep -q UI_START_SECURITY_OPEN_OK build/qemu-display-ui/serial.log
           grep -q UI_DISPLAY_CYCLE_OK build/qemu-display-ui/serial.log
           grep -q UI_DISPLAY_PERSIST_OK build/qemu-display-ui/serial.log
           for mode in \
@@ -60,6 +67,11 @@ jobs:
           test "$(sed -n '2p' build/qemu-display-ui/desktop-1440x900.ppm | tr -d '\r')" = '1440 900'
           test "$(sed -n '2p' build/qemu-display-ui/desktop-1600x1200.ppm | tr -d '\r')" = '1600 1200'
           test "$(sed -n '2p' build/qemu-display-ui/settings-1024x768.ppm | tr -d '\r')" = '1024 768'
+          test "$(sed -n '2p' build/qemu-display-ui/system-center-1024x768.ppm | tr -d '\r')" = '1024 768'
+          test "$(sed -n '2p' build/qemu-display-ui/settings-accessibility-1024x768.ppm | tr -d '\r')" = '1024 768'
+          test "$(sed -n '2p' build/qemu-display-ui/high-contrast-1024x768.ppm | tr -d '\r')" = '1024 768'
+          test "$(sed -n '2p' build/qemu-display-ui/packages-status-1024x768.ppm | tr -d '\r')" = '1024 768'
+          test "$(sed -n '2p' build/qemu-display-ui/security-status-1024x768.ppm | tr -d '\r')" = '1024 768'
 
       - name: Upload adaptive display evidence
         if: always()

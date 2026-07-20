@@ -54,6 +54,9 @@ controller() {
   wait_for_serial "UI_PERSONALIZATION_OK" || { echo quit; return 1; }
   wait_for_serial "UI_TASKBAR_OK" || { echo quit; return 1; }
   wait_for_serial "UI_ANIMATION_MODEL_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_SYSTEM_CENTER_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_ACCESSIBILITY_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_START_SYSTEM_TOOLS_OK" || { echo quit; return 1; }
   wait_for_serial "UI_DISPLAY_MODE_OK 1024x768" || { echo quit; return 1; }
   capture_mode desktop-1024x768
 
@@ -95,6 +98,12 @@ controller() {
   echo "sendkey esc 10"
   sleep 0.15
 
+  echo "sendkey f11 10"
+  sleep 0.3
+  capture_mode system-center-1024x768
+  echo "sendkey esc 10"
+  sleep 0.15
+
   echo "sendkey f7 10"
   wait_for_serial "UI_KEYBOARD_NAV_OK" || { echo quit; return 1; }
   echo "sendkey tab 10"
@@ -112,12 +121,49 @@ controller() {
   capture_mode settings-style-1024x768
   echo "sendkey ret 10"
   wait_for_count "UI_SETTINGS_PERSIST_OK" 2 || { echo quit; return 1; }
-  sleep 0.2
+
+  echo "sendkey end 10"
+  sleep 0.3
+  capture_mode settings-accessibility-1024x768
+  echo "sendkey ret 10"
+  wait_for_serial "UI_HIGH_CONTRAST_ON" || { echo quit; return 1; }
+  sleep 0.25
+  capture_mode high-contrast-1024x768
+  echo "sendkey tab 10"
+  echo "sendkey ret 10"
+  wait_for_serial "UI_LARGE_POINTER_ON" || { echo quit; return 1; }
+  echo "mouse_move 40 -40"
+  sleep 0.25
+  capture_mode large-pointer-1024x768
+
+  echo "sendkey f8 10"
+  echo "sendkey backspace 10"
+  echo "sendkey backspace 10"
+  echo "sendkey backspace 10"
+  echo "sendkey p 10"
+  echo "sendkey a 10"
+  echo "sendkey c 10"
+  echo "sendkey ret 10"
+  wait_for_serial "UI_START_PACKAGES_OPEN_OK" || { echo quit; return 1; }
+  sleep 0.25
+  capture_mode packages-status-1024x768
+
+  echo "sendkey f8 10"
+  echo "sendkey backspace 10"
+  echo "sendkey backspace 10"
+  echo "sendkey backspace 10"
+  echo "sendkey s 10"
+  echo "sendkey e 10"
+  echo "sendkey c 10"
+  echo "sendkey ret 10"
+  wait_for_serial "UI_START_SECURITY_OPEN_OK" || { echo quit; return 1; }
+  sleep 0.25
+  capture_mode security-status-1024x768
   echo quit
 }
 
 set +e
-controller | timeout 150s "$QEMU" \
+controller | timeout 190s "$QEMU" \
   -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
   -drive "file=$RUNTIME_DATA,format=raw,if=ide,index=0,media=disk" \
   -boot a -m 32M -machine pc,vmport=off -vga std -display none \
@@ -159,6 +205,12 @@ check_ppm "$OUT/settings-style-1024x768.ppm" "1024 768"
 check_ppm "$OUT/start-1024x768.ppm" "1024 768"
 check_ppm "$OUT/start-search-1024x768.ppm" "1024 768"
 check_ppm "$OUT/quick-settings-1024x768.ppm" "1024 768"
+check_ppm "$OUT/system-center-1024x768.ppm" "1024 768"
+check_ppm "$OUT/settings-accessibility-1024x768.ppm" "1024 768"
+check_ppm "$OUT/high-contrast-1024x768.ppm" "1024 768"
+check_ppm "$OUT/large-pointer-1024x768.ppm" "1024 768"
+check_ppm "$OUT/packages-status-1024x768.ppm" "1024 768"
+check_ppm "$OUT/security-status-1024x768.ppm" "1024 768"
 
 for mode in \
   640x480 720x480 800x600 960x540 960x600 1024x576 1024x600 1024x768 \
@@ -170,8 +222,8 @@ for mode in \
   }
 done
 
-for marker in UI_ADAPTIVE_DISPLAY_OK UI_HYBRID_SCALER_OK "UI_DISPLAY_MODE_COUNT 22" UI_SETTINGS_CONTROLS_OK UI_START_MENU_OK UI_QUICK_SETTINGS_OK UI_PERSONALIZATION_OK UI_TASKBAR_OK UI_ANIMATION_MODEL_OK UI_DISPLAY_CYCLE_OK UI_DISPLAY_PERSIST_OK; do
+for marker in UI_ADAPTIVE_DISPLAY_OK UI_HYBRID_SCALER_OK "UI_DISPLAY_MODE_COUNT 22" UI_SETTINGS_CONTROLS_OK UI_START_MENU_OK UI_QUICK_SETTINGS_OK UI_PERSONALIZATION_OK UI_TASKBAR_OK UI_ANIMATION_MODEL_OK UI_SYSTEM_CENTER_OK UI_ACCESSIBILITY_OK UI_START_SYSTEM_TOOLS_OK UI_HIGH_CONTRAST_ON UI_LARGE_POINTER_ON UI_START_PACKAGES_OPEN_OK UI_START_SECURITY_OPEN_OK UI_DISPLAY_CYCLE_OK UI_DISPLAY_PERSIST_OK; do
   grep -q "$marker" "$SERIAL" || { echo "qemu-display-ui: missing marker: $marker" >&2; exit 1; }
 done
 
-printf 'qemu-display-ui: OK modes=22 shell=start+quick+settings serial=%s screenshots=%s\n' "$SERIAL" "$OUT/*.ppm"
+printf 'qemu-display-ui: OK modes=22 shell=start+quick+system-center+accessibility+packages+security serial=%s screenshots=%s\n' "$SERIAL" "$OUT/*.ppm"
