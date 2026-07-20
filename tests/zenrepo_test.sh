@@ -2,7 +2,13 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CXX="${CXX:-g++}"
-BUILD="${BUILD:-$ROOT/build/zenrepo-test}"
+DEFAULT_BUILD="$ROOT/build/zenrepo-test"
+if [[ "${MAKELEVEL:-0}" -gt 0 && -n "${BUILD:-}" ]]; then
+  TEST_BUILD="${BUILD%/}/zenrepo-test"
+else
+  TEST_BUILD="${BUILD:-$DEFAULT_BUILD}"
+fi
+BUILD="$TEST_BUILD"
 MATERIALIZER="$ROOT/tools/zenrepo/materialize_fixtures.sh"
 rm -rf "$BUILD"
 mkdir -p "$BUILD/current" "$BUILD/fixtures"
@@ -25,6 +31,7 @@ negative() {
     exit 1
   fi
 }
+
 negative expired cp "$BUILD/fixtures/expired.timestamp.zrm" "$BUILD/expired/timestamp.zrm"
 negative mixmatch bash -c "cp '$BUILD/fixtures/mixmatch.snapshot.zrm' '$BUILD/mixmatch/snapshot.zrm'; cp '$BUILD/fixtures/mixmatch.timestamp.zrm' '$BUILD/mixmatch/timestamp.zrm'"
 negative badsig bash -c "cp '$BUILD/fixtures/bad-signature.native-apps.zrm' '$BUILD/badsig/native-apps.zrm'; cp '$BUILD/fixtures/bad-signature.snapshot.zrm' '$BUILD/badsig/snapshot.zrm'; cp '$BUILD/fixtures/bad-signature.timestamp.zrm' '$BUILD/badsig/timestamp.zrm'"
