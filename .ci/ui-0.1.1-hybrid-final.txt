@@ -1,0 +1,3 @@
+ZenovOS 0.1.1 final hybrid-scaled desktop verification.
+Source baseline: main@5119cb881dd930a722b03ba85b5e186b09a492fc
+Scope: strict build, security/recovery, deterministic rebuild, 22 VBE modes, fixed-point hybrid scaler, Settings controls and real framebuffer evidence.
