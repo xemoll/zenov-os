@@ -76,7 +76,11 @@ controller_install_upgrade_rollback() {
   send_command "pkg install /data/packages/hello-native-0.1.0.zpk"; wait_for_serial "$serial" "ZENPKG_INSTALL_COMMIT_OK" || { echo quit; return 1; }
   send_command "pkg install /data/packages/hello-native-0.1.0.zpk"; wait_for_serial "$serial" "ZENPKG_INSTALL_IDEMPOTENT_OK" || { echo quit; return 1; }
   send_command "pkg plan hello-native"; wait_for_serial "$serial" "ZENPKG_PLAN_UPGRADE" || { echo quit; return 1; }
-  send_command "pkg upgrade hello-native"; wait_for_serial "$serial" "ZENPKG_UPGRADE_COMMIT_OK" || { echo quit; return 1; }
+  send_command "pkg upgrade hello-native"; \
+    wait_for_serial "$serial" "ZENPKG_CACHE_FETCH_COMMIT_OK name=hello-native version=0.2.0" || { echo quit; return 1; }; \
+    wait_for_serial "$serial" "ZENPKG_CACHE_SELECTED name=hello-native version=0.2.0" || { echo quit; return 1; }; \
+    wait_for_serial "$serial" "ZENPKG_UPGRADE_COMMIT_OK" || { echo quit; return 1; }
+  send_command "pkg cache status"; wait_for_serial "$serial" "ZENPKG_CACHE_STATUS_OK valid=1 invalid=0" || { echo quit; return 1; }
   send_command "pkg install /data/packages/hello-native-0.1.0.zpk"; wait_for_serial "$serial" "ZENPKG_DOWNGRADE_REJECTED" || { echo quit; return 1; }
   send_command "pkg info hello-native"; wait_for_serial "$serial" "ZENPKG_INFO name=hello-native version=0.2.0" || { echo quit; return 1; }
   send_command "pkg rollback hello-native"; wait_for_serial "$serial" "ZENPKG_ROLLBACK_COMMIT_OK" || { echo quit; return 1; }
@@ -99,7 +103,7 @@ controller_persist_and_remove() {
   send_command "pkg info hello-native"; wait_for_serial "$serial" "ZENPKG_INFO name=hello-native version=0.1.0" || { echo quit; return 1; }
   send_command "pkg run hello-native"; wait_for_serial "$serial" "HELLO_ZEX_0_1_1_OK" || { echo quit; return 1; }
   send_command "pkg remove hello-native"; wait_for_serial "$serial" "ZENPKG_REMOVE_COMMIT_OK" || { echo quit; return 1; }
-  send_command "pkg cache status"; wait_for_serial "$serial" "ZENPKG_CACHE_STATUS_OK valid=0 invalid=0" || { echo quit; return 1; }
+  send_command "pkg cache status"; wait_for_serial "$serial" "ZENPKG_CACHE_STATUS_OK valid=1 invalid=0" || { echo quit; return 1; }
   send_command "fsck"; wait_for_serial "$serial" "ZENOVFS_FSCK_OK" || { echo quit; return 1; }
   sleep 0.2; echo quit
 }
@@ -110,11 +114,10 @@ controller_removed_then_repository_install() {
   wait_for_serial "$serial" "ZENPKG_DB_RECOVERED" || { echo quit; return 1; }
   send_command "pkg info hello-native"; wait_for_serial "$serial" "ZENPKG_NOT_INSTALLED" || { echo quit; return 1; }
   send_command "pkg fetch hello-native"; \
-    wait_for_serial "$serial" "ZENPKG_CACHE_FETCH_COMMIT_OK name=hello-native version=0.2.0" || { echo quit; return 1; }
+    wait_for_serial "$serial" "ZENPKG_CACHE_HIT name=hello-native version=0.2.0" || { echo quit; return 1; }
   send_command "pkg cache status"; wait_for_serial "$serial" "ZENPKG_CACHE_STATUS_OK valid=1 invalid=0" || { echo quit; return 1; }
   send_command "pkg cache verify"; wait_for_serial "$serial" "ZENPKG_CACHE_VERIFY_OK objects=1" || { echo quit; return 1; }
   send_command "pkg install hello-native"; \
-    wait_for_serial "$serial" "ZENPKG_CACHE_HIT name=hello-native version=0.2.0" || { echo quit; return 1; }; \
     wait_for_serial "$serial" "ZENPKG_CACHE_SELECTED name=hello-native version=0.2.0" || { echo quit; return 1; }; \
     wait_for_serial "$serial" "ZENPKG_REPOSITORY_TARGET_RESOLVED name=hello-native version=0.2.0 path=/var/cache/zp/" || { echo quit; return 1; }; \
     wait_for_serial "$serial" "ZENPKG_REPOSITORY_INSTALL_OK name=hello-native version=0.2.0" || { echo quit; return 1; }
@@ -207,5 +210,6 @@ done
 [[ "$(grep -c ZENPKG_DB_RECOVERED "$OUT/serial.log")" -ge 4 ]] || { echo "qemu-zenpkg: database did not persist across reboots" >&2; exit 1; }
 [[ "$(grep -c HELLO_ZEX_0_1_1_OK "$OUT/serial.log")" -ge 4 ]] || { echo "qemu-zenpkg: installed app did not run across local and cached repository installs" >&2; exit 1; }
 [[ "$(grep -c 'ZENPKG_CACHE_FETCH_COMMIT_OK name=hello-native version=0.2.0' "$OUT/serial.log")" -eq 1 ]] || { echo "qemu-zenpkg: cache fetch did not commit exactly once" >&2; exit 1; }
-[[ "$(grep -c 'ZENPKG_REPOSITORY_INSTALL_OK name=hello-native version=0.2.0' "$OUT/serial.log")" -eq 1 ]] || { echo "qemu-zenpkg: repository install did not complete exactly once" >&2; exit 1; }
-printf 'qemu-zenpkg: OK signed-offline-repo+verified-cache+atomic-fetch+local-install+upgrade+downgrade-block+rollback+repository-install+least-privilege+audit+persistence+cache-clean+remove serial=%s\n' "$OUT/serial.log"
+[[ "$(grep -c 'ZENPKG_CACHE_HIT name=hello-native version=0.2.0' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-zenpkg: persistent cache was not reused" >&2; exit 1; }
+[[ "$(grep -c 'ZENPKG_REPOSITORY_INSTALL_OK name=hello-native version=0.2.0' "$OUT/serial.log")" -ge 2 ]] || { echo "qemu-zenpkg: cached upgrade and repository install were not both committed" >&2; exit 1; }
+printf 'qemu-zenpkg: OK signed-offline-repo+verified-cache+atomic-fetch+cached-upgrade+rollback+repository-install+least-privilege+audit+persistence+cache-clean+remove serial=%s\n' "$OUT/serial.log"
