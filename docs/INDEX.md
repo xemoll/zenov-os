@@ -12,6 +12,7 @@
 - [`ZENREPO_OFFLINE_0.1.1.md`](ZENREPO_OFFLINE_0.1.1.md) — signed offline repository roles, root rotation, delegation, expiry and anti-rollback state.
 - [`NATIVE_PACKAGE_MANAGER_0.1.1.md`](NATIVE_PACKAGE_MANAGER_0.1.1.md) — transactional lifecycle, planning, repair, rollback, signed authorization and least-privilege execution.
 - [`PACKAGE_COMPATIBILITY_ARCHITECTURE.md`](PACKAGE_COMPATIBILITY_ARCHITECTURE.md) — provider boundaries and staged foreign-runtime roadmap.
+- [`ZENUNIVERSE_REPOSITORY_0.1.1.md`](ZENUNIVERSE_REPOSITORY_0.1.1.md) — platform-neutral artifact catalog, HTTPS delivery contract and runtime-provider resolution.
 - [`ZENOVFS1_TRANSACTIONS.md`](ZENOVFS1_TRANSACTIONS.md) — interrupted-write ordering and recovery.
 - [`POST_MERGE_HARDENING.md`](POST_MERGE_HARDENING.md) — process-window scrub and W^X audit delta.
 - [`RELEASE_CHECKLIST_0.1.1.md`](RELEASE_CHECKLIST_0.1.1.md) — final-main verification and publication gate.
