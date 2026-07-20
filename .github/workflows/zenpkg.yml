@@ -122,3 +122,10 @@ jobs:
           sha256sum /tmp/zenrepo-inventory/*.zrm | sort > build/zenrepo-metadata.sha256
           test "$(wc -l < build/zenrepo-metadata.sha256)" -ge 14
           ! grep -R -E 'metadata_versions|root v[0-9]+|timestamp v[0-9]+' build/zenpkg-manifest.json docs/ZENREPO_OFFLINE_0.1.1.md
+      - name: Upload ZenPkg diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenpkg-diagnostics-${{ github.run_id }}
+          path: /tmp/zenpkg-check.log
+          if-no-files-found: ignore
