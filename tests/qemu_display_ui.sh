@@ -31,7 +31,8 @@ wait_for_count() {
 }
 
 capture_mode() {
-  local name="$1" width="$2" height="$3" file="$(cd "$OUT" && pwd)/$name.ppm"
+  local name="$1"
+  local file="$(cd "$OUT" && pwd)/${name}.ppm"
   echo "screendump $file"
   sleep 0.35
 }
@@ -40,23 +41,23 @@ controller() {
   wait_for_serial "ZENOVOS_UI_READY" || { echo quit; return 1; }
   wait_for_serial "UI_ADAPTIVE_DISPLAY_OK" || { echo quit; return 1; }
   wait_for_serial "UI_DISPLAY_MODE_OK 1024x768" || { echo quit; return 1; }
-  capture_mode desktop-1024x768 1024 768
+  capture_mode desktop-1024x768
 
   echo "sendkey f9 10"
   wait_for_serial "UI_DISPLAY_MODE_OK 1280x720" || { echo quit; return 1; }
-  capture_mode desktop-1280x720 1280 720
+  capture_mode desktop-1280x720
 
   echo "sendkey f9 10"
   wait_for_serial "UI_DISPLAY_MODE_OK 640x480" || { echo quit; return 1; }
-  capture_mode desktop-640x480 640 480
+  capture_mode desktop-640x480
 
   echo "sendkey f9 10"
   wait_for_serial "UI_DISPLAY_MODE_OK 800x600" || { echo quit; return 1; }
-  capture_mode desktop-800x600 800 600
+  capture_mode desktop-800x600
 
   echo "sendkey f9 10"
   wait_for_serial "UI_DISPLAY_MODE_OK 1024x600" || { echo quit; return 1; }
-  capture_mode desktop-1024x600 1024 600
+  capture_mode desktop-1024x600
 
   echo "sendkey f9 10"
   wait_for_count "UI_DISPLAY_MODE_OK 1024x768" 2 || { echo quit; return 1; }
