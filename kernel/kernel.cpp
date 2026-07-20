@@ -89,7 +89,7 @@ void execute(char* line) {
     const bool help = package_manager::command_token_equal(line, "help");
     if (package_manager::dispatch_line(line)) return;
     execute_without_packages(line);
-    if (help) console::line("  Packages     pkg status|list|search|plan|verify|install|upgrade|repair|policy|info|rollback|remove|run|repo");
+    if (help) console::line("  Packages     pkg status|list|search|plan|verify|fetch|install|upgrade|repair|policy|info|rollback|remove|run|cache|repo");
 }
 
 #include "parts/shell_runtime.inc"
@@ -124,10 +124,12 @@ extern "C" void kernel_main() {
     if (storage::guarded_write_file("/apps/pkg-security-probe.zex", &mutation_probe, 1U, false)) panic("Managed package payload mutation guard failed.");
     if (storage::guarded_write_file("/var/lib/zenpkg/state.v1", &mutation_probe, 1U, false)) panic("Package database mutation guard failed.");
     if (storage::guarded_write_file("/var/lib/zenpkg/repo.v1", &mutation_probe, 1U, false)) panic("Repository anti-rollback state mutation guard failed.");
+    if (storage::guarded_write_file("/var/cache/zp/security-probe.part", &mutation_probe, 1U, false)) panic("Package cache mutation guard failed.");
     if (!security_audit::verify_active()) panic("Persistent security audit final-read verification failed.");
     serial::line("ZENOV_GUARD_PROTECTED_PATH_TEST_OK");
     serial::line("ZENREPO_PROTECTED_PATH_TEST_OK");
     serial::line("ZENPKG_PROTECTED_PATH_TEST_OK");
+    serial::line("ZENPKG_CACHE_PROTECTED_PATH_TEST_OK");
     const bool graphical = graphics::init();
     if (graphical) { console::activate_shadow(); serial::line("CONSOLE_SHADOW_OK"); }
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
