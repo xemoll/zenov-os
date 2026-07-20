@@ -133,5 +133,5 @@ void render_launcher() {
     draw_launcher_row(0, ShellIcon::terminal, "TERMINAL", "SHELL AND SYSTEM TOOLS", "F5", current_theme.accent, HoverTarget::launcher_terminal);
     draw_launcher_row(1, ShellIcon::files, "FILES", "ZENOVFS BROWSER", "F6", rgb(91,146,199), HoverTarget::launcher_files);
     draw_launcher_row(2, ShellIcon::settings, "SETTINGS", "DISPLAY AND THEME", "F7", rgb(105,181,145), HoverTarget::launcher_settings);
-    draw_text(window_x + 48, window_y + 326, "ARROWS SELECT   ENTER OPEN   ESC CLOSE", current_theme.text_muted, 1);
+    draw_text_center(window_x + window_width / 2, window_y + 326, "ARROWS SELECT   ENTER OPEN   ESC CLOSE", current_theme.text_muted, 1);
 }
