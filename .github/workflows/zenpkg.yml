@@ -9,6 +9,7 @@ on:
       - 'tools/zenrepo/**'
       - 'tools/zenovfs_package_seed.cpp'
       - 'tools/zenpkg_transport_fault_test.cpp'
+      - 'tools/zenpkg_blkdebug_seed.cpp'
       - 'tests/zenpkg_test.sh'
       - 'tests/zenrepo_test.sh'
       - 'tests/package_repository_kernel_test.cpp'
@@ -16,6 +17,7 @@ on:
       - 'tests/qemu_zenpkg.sh'
       - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'tests/qemu_zenpkg_transport_faults.sh'
+      - 'tests/qemu_zenpkg_blkdebug_faults.py'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
@@ -44,6 +46,7 @@ on:
       - 'tools/zenrepo/**'
       - 'tools/zenovfs_package_seed.cpp'
       - 'tools/zenpkg_transport_fault_test.cpp'
+      - 'tools/zenpkg_blkdebug_seed.cpp'
       - 'tests/zenpkg_test.sh'
       - 'tests/zenrepo_test.sh'
       - 'tests/package_repository_kernel_test.cpp'
@@ -51,6 +54,7 @@ on:
       - 'tests/qemu_zenpkg.sh'
       - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'tests/qemu_zenpkg_transport_faults.sh'
+      - 'tests/qemu_zenpkg_blkdebug_faults.py'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
@@ -82,7 +86,7 @@ env:
 jobs:
   package-manager:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 70
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -100,10 +104,10 @@ jobs:
         run: |
           rm -f /tmp/zenpkg-check.log
           if ! make clean zenpkg-check > /tmp/zenpkg-check.log 2>&1; then
-            tail -n 260 /tmp/zenpkg-check.log
+            tail -n 280 /tmp/zenpkg-check.log
             exit 1
           fi
-          tail -n 140 /tmp/zenpkg-check.log
+          tail -n 160 /tmp/zenpkg-check.log
       - name: Run standalone ZenPkg format suite
         run: bash tests/zenpkg_test.sh
       - name: Run standalone signed repository suite
@@ -123,15 +127,25 @@ jobs:
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             tools/zenpkg_transport_fault_test.cpp -o build/sanitized/zenpkg-transport-fault-test
           build/sanitized/zenpkg-transport-fault-test build/zenov-data.img
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tools/zenpkg_blkdebug_seed.cpp -o build/sanitized/zenpkg-blkdebug-seed
+          rm -rf /tmp/zenpkg-blkdebug-sanitized
+          build/sanitized/zenpkg-blkdebug-seed build/zenov-data.img build/hello-native-0.2.0.zpk /tmp/zenpkg-blkdebug-sanitized
+          python3 -m py_compile tests/qemu_zenpkg_blkdebug_faults.py
       - name: Compile release host tools
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg/main.cpp -o build/zenpkg-release
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenrepo/main.cpp -o build/zenrepo-release
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg_transport_fault_test.cpp -o build/zenpkg-transport-fault-release
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg_blkdebug_seed.cpp -o build/zenpkg-blkdebug-seed-release
           build/zenpkg-release --help
           bash tools/zenrepo/materialize_fixtures.sh /tmp/zenrepo-fixtures >/dev/null
           build/zenrepo-release inspect /tmp/zenrepo-fixtures/timestamp.zrm
           build/zenpkg-transport-fault-release build/zenov-data.img
+          rm -rf /tmp/zenpkg-blkdebug-release
+          build/zenpkg-blkdebug-seed-release build/zenov-data.img build/hello-native-0.2.0.zpk /tmp/zenpkg-blkdebug-release
+          cmp /tmp/zenpkg-blkdebug-sanitized/sectors.env /tmp/zenpkg-blkdebug-release/sectors.env
       - name: Verify deterministic package and repository bytes
         run: |
           rm -rf /tmp/zenpkg-rebuild
@@ -148,31 +162,40 @@ jobs:
         run: |
           rm -f /tmp/zenpkg-qemu.log
           if ! make zenpkg-qemu > /tmp/zenpkg-qemu.log 2>&1; then
-            tail -n 280 /tmp/zenpkg-qemu.log
+            tail -n 300 /tmp/zenpkg-qemu.log
             exit 1
           fi
-          tail -n 140 /tmp/zenpkg-qemu.log
+          tail -n 160 /tmp/zenpkg-qemu.log
       - name: Boot three phases and prove journal recovery across reboot
         run: |
           rm -f /tmp/zenpkg-transport-qemu.log
           if ! make zenpkg-transport-qemu > /tmp/zenpkg-transport-qemu.log 2>&1; then
-            tail -n 320 /tmp/zenpkg-transport-qemu.log
+            tail -n 340 /tmp/zenpkg-transport-qemu.log
             exit 1
           fi
-          tail -n 180 /tmp/zenpkg-transport-qemu.log
+          tail -n 200 /tmp/zenpkg-transport-qemu.log
       - name: Boot sector-fault recovery images
         run: |
           rm -f /tmp/zenpkg-transport-fault-qemu.log
           if ! make zenpkg-transport-fault-qemu > /tmp/zenpkg-transport-fault-qemu.log 2>&1; then
-            tail -n 360 /tmp/zenpkg-transport-fault-qemu.log
+            tail -n 380 /tmp/zenpkg-transport-fault-qemu.log
             exit 1
           fi
-          tail -n 220 /tmp/zenpkg-transport-fault-qemu.log
+          tail -n 240 /tmp/zenpkg-transport-fault-qemu.log
+      - name: Inject live block I/O faults and reboot the same disks
+        run: |
+          rm -f /tmp/zenpkg-blkdebug-qemu.log
+          if ! make zenpkg-blkdebug-qemu > /tmp/zenpkg-blkdebug-qemu.log 2>&1; then
+            tail -n 420 /tmp/zenpkg-blkdebug-qemu.log
+            exit 1
+          fi
+          tail -n 260 /tmp/zenpkg-blkdebug-qemu.log
       - name: Verify crash-consistency evidence
         run: |
           lifecycle=build/qemu/zenpkg/serial.log
           recovery=build/qemu/zenpkg-transport/serial.log
           faults=build/qemu/zenpkg-faults/serial.log
+          blkdebug=build/qemu/zenpkg-blkdebug
           grep -Fq 'ZENPKG_TRANSPORT_COW_FAULT_MATRIX_OK cases=3173 writes=167' /tmp/zenpkg-check.log
           grep -Fq 'ZENPKG_TRANSPORT_OLD_OR_RESUMABLE_OR_NEW_OR_FAIL_CLOSED_ONLY' /tmp/zenpkg-check.log
           grep -Fq 'ZENPKG_TRANSPORT_BEGIN name=hello-native version=0.2.0 offset=0' "$lifecycle"
@@ -188,7 +211,12 @@ jobs:
           grep -Fq 'ZENPKG_CACHE_VERIFY_REJECTED' "$faults"
           grep -Fq 'ZENPKG_CACHE_INIT_REJECTED' "$faults"
           test "$(grep -Fc 'ZENPKG_TRANSPORT_CHUNK_COMMIT name=hello-native version=0.2.0' "$recovery")" -eq 2
-          ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$lifecycle" "$recovery" "$faults"
+          test "$(grep -Fc 'ZENPKG_BLKDEBUG_SCENARIO_OK' "$blkdebug/summary.log")" -eq 4
+          test "$(find "$blkdebug" -name 'qmp-*-events.json' -type f | wc -l)" -eq 4
+          grep -R -Fq '"event": "BLOCK_IO_ERROR"' "$blkdebug"/qmp-*-events.json
+          test "$(find "$blkdebug" -name 'qemu-*-recovery.stderr' -type f -size +0c | wc -l)" -eq 0
+          grep -R -Fq 'ZENPKG_CACHE_VERIFY_OK objects=1 partials=0' "$blkdebug"/serial-*-recovery.log
+          ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$lifecycle" "$recovery" "$faults" "$blkdebug"/serial-*.log
       - name: Upload ZenPkg QEMU evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -209,7 +237,10 @@ jobs:
             build/qemu/zenpkg-faults/monitor-*.log
             build/qemu/zenpkg-faults/qemu-*.stderr
             build/qemu/zenpkg-fault-*.img
+            build/qemu/zenpkg-blkdebug/**
+            build/qemu/zenpkg-blkdebug-fixtures/**
             /tmp/zenpkg-check.log
+            /tmp/zenpkg-blkdebug-qemu.log
           if-no-files-found: warn
           retention-days: 14
       - name: Upload ZenPkg diagnostics
@@ -222,8 +253,11 @@ jobs:
             /tmp/zenpkg-qemu.log
             /tmp/zenpkg-transport-qemu.log
             /tmp/zenpkg-transport-fault-qemu.log
+            /tmp/zenpkg-blkdebug-qemu.log
             build/qemu/zenpkg/**
             build/qemu/zenpkg-transport/**
             build/qemu/zenpkg-faults/**
             build/qemu/zenpkg-fault-*.img
+            build/qemu/zenpkg-blkdebug/**
+            build/qemu/zenpkg-blkdebug-fixtures/**
           if-no-files-found: ignore
