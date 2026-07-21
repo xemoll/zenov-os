@@ -82,8 +82,20 @@ private:
     std::chrono::seconds timeout_;
 
     static bool response_has_id(const std::string& line, std::uint64_t expected) {
-        const std::string needle = "\"id\":" + std::to_string(expected);
-        return line.find(needle) != std::string::npos;
+        std::size_t position = line.find("\"id\"");
+        if (position == std::string::npos) return false;
+        position = line.find(':', position + 4U);
+        if (position == std::string::npos) return false;
+        ++position;
+        while (position < line.size() && (line[position] == ' ' || line[position] == '\t')) ++position;
+        std::uint64_t actual = 0U;
+        bool saw_digit = false;
+        while (position < line.size() && line[position] >= '0' && line[position] <= '9') {
+            saw_digit = true;
+            actual = actual * 10U + static_cast<std::uint64_t>(line[position] - '0');
+            ++position;
+        }
+        return saw_digit && actual == expected;
     }
 
     void send_all(std::string_view bytes) {
