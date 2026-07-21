@@ -203,10 +203,8 @@ def arm_fault(qmp: QmpClient, sector: int, evidence: Path) -> None:
         "inject-error": [
             {
                 "event": "write_aio",
-                "iotype": "write",
                 "errno": 5,
                 "sector": sector,
-                "once": True,
             }
         ],
     }
