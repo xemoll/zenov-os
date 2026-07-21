@@ -56,7 +56,7 @@ $(BUILD)/zenrepo-metadata/.stamp: $(ZENREPO_FIXTURE_MATERIALIZER) $(wildcard too
 
 $(ZENREPO_METADATA): $(BUILD)/zenrepo-metadata/.stamp
 
-$(BUILD)/package-repository-kernel-test: tests/package_repository_kernel_test.cpp kernel/parts/package_repository.inc $(wildcard kernel/parts/package_repository/*.inc) kernel/parts/rsa_psss.inc security/zenrepo_crypto_material.hpp | $(BUILD)
+$(BUILD)/package-repository-kernel-test: tests/package_repository_kernel_test.cpp kernel/parts/package_repository.inc $(wildcard kernel/parts/package_repository/*.inc) kernel/parts/rsa_pss.inc security/zenrepo_crypto_material.hpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tests/package_repository_kernel_test.cpp -o $@
 
 $(BUILD)/hello-native-0.1.0.zpk: packages/examples/hello-native-0.1.0.zpkgmanifest $(BUILD)/HELLO.ZEX $(BUILD)/zenpkg
