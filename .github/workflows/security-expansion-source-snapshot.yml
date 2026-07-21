@@ -1,0 +1,36 @@
+name: ZenovOS Security Expansion Source Snapshot
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/security-expansion-source-snapshot.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Verify exact main parent
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "5a6e54dffcd470299b4bf5dee24cbd8dc2d01639"
+      - name: Create exact source archive
+        run: |
+          set -euo pipefail
+          git archive --format=zip --output=zenov-os-main-5a6e54-source.zip 5a6e54dffcd470299b4bf5dee24cbd8dc2d01639
+          sha256sum zenov-os-main-5a6e54-source.zip > zenov-os-main-5a6e54-source.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-main-5a6e54-source
+          path: |
+            zenov-os-main-5a6e54-source.zip
+            zenov-os-main-5a6e54-source.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
