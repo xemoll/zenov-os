@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
         if (!target || target->size < 128U) throw std::runtime_error("active ZRWP file missing or too small");
         const std::size_t offset = static_cast<std::size_t>(kDataStart + index * kSlotSectors) * kSectorSize;
         if (offset + target->size > image.size()) throw std::runtime_error("ZRWP slot outside image");
-        image[offset + 80U] ^= 0x01U;
+        image[offset + 120U] ^= 0x01U;
         target->checksum = fnv1a(image.data() + offset, target->size);
         write_all(argv[2], image);
         std::cout << "ZENOV_ZRWP_CORRUPT_IMAGE_OK path=/security/ransomware-policy.zrwp checksum-repaired=yes\n";
