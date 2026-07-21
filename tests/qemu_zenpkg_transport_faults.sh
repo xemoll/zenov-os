@@ -144,7 +144,7 @@ for marker in \
   grep -Fq "$marker" "$OUT/serial.log" || { echo "qemu-zenpkg-transport-faults: missing marker: $marker" >&2; exit 1; }
 done
 
-[[ "$(grep -Fxc 'ZENPKG_CACHE_INIT_REJECTED' "$OUT/serial-corrupt-final.log")" -eq 1 ]] || {
+[[ "$(grep -Fc 'ZENPKG_CACHE_INIT_REJECTED' "$OUT/serial-corrupt-final.log")" -eq 1 ]] || {
   echo "qemu-zenpkg-transport-faults: corrupt final did not fail closed exactly once" >&2; exit 1;
 }
 ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$OUT/serial.log"
