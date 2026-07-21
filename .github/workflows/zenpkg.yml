@@ -182,7 +182,7 @@ jobs:
             exit 1
           fi
           tail -n 240 /tmp/zenpkg-transport-fault-qemu.log
-      - name: Inject live block I/O faults and reboot the same disks
+      - name: Crash at live block I/O breakpoints and reboot the same disks
         run: |
           rm -f /tmp/zenpkg-blkdebug-qemu.log
           if ! make zenpkg-blkdebug-qemu > /tmp/zenpkg-blkdebug-qemu.log 2>&1; then
@@ -211,10 +211,13 @@ jobs:
           grep -Fq 'ZENPKG_CACHE_VERIFY_REJECTED' "$faults"
           grep -Fq 'ZENPKG_CACHE_INIT_REJECTED' "$faults"
           test "$(grep -Fc 'ZENPKG_TRANSPORT_CHUNK_COMMIT name=hello-native version=0.2.0' "$recovery")" -eq 2
-          test "$(grep -Fc 'ZENPKG_BLKDEBUG_SCENARIO_OK' "$blkdebug/summary.log")" -eq 4
-          test "$(find "$blkdebug" -name 'qmp-*-events.json' -type f | wc -l)" -eq 4
-          grep -R -Fq '"event": "BLOCK_IO_ERROR"' "$blkdebug"/qmp-*-events.json
-          test "$(find "$blkdebug" -name 'qemu-*-recovery.stderr' -type f -size +0c | wc -l)" -eq 0
+          test "$(grep -Fc 'ZENPKG_BLKDEBUG_BREAKPOINT_SCENARIO_OK' "$blkdebug/summary.log")" -eq 4
+          test "$(find "$blkdebug" -name 'qmp-*-break.json' -type f | wc -l)" -eq 4
+          grep -R -Fq '"event": "pwritev"' "$blkdebug"/qmp-*-break.json
+          grep -Fq 'ordinal=1' "$blkdebug/summary.log"
+          grep -Fq 'ordinal=2' "$blkdebug/summary.log"
+          grep -Fq 'ordinal=8' "$blkdebug/summary.log"
+          test "$(find "$blkdebug" -name 'qemu-*.stderr' -type f -size +0c | wc -l)" -eq 0
           grep -R -Fq 'ZENPKG_CACHE_VERIFY_OK objects=1 partials=0' "$blkdebug"/serial-*-recovery.log
           ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$lifecycle" "$recovery" "$faults" "$blkdebug"/serial-*.log
       - name: Upload ZenPkg QEMU evidence
