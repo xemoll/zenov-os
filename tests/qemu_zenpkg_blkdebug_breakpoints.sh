@@ -10,7 +10,7 @@ PROMPT='zenov> '
 GUEST_COMMAND='pkg transport resume hello-native'
 BLOCK_DEVICE='runtime-debug'
 SERIAL_POLL_SECONDS='0.005'
-BREAK_SETTLE_SECONDS='0.02'
+BREAK_SETTLE_SECONDS='0.05'
 
 mkdir -p "$OUT"
 rm -f "$OUT"/serial-*.log "$OUT"/qemu-*.stderr "$OUT"/qmp-*.sock \
@@ -123,15 +123,54 @@ crash_now() {
   local status=0
   wait "$VM_PID" || status=$?
   VM_PID=''
-  [[ "$status" -eq 137 ]] || { echo "zenpkg-blkdebug: expected SIGKILL status 137, got $status" >&2; return 1; }
+  [[ "$status" -eq 137 ]] || {
+    echo "zenpkg-blkdebug: expected SIGKILL status 137, got $status" >&2
+    return 1
+  }
 }
 
 assert_clean_logs() {
   local serial="$1" stderr="$2" phase="$3"
-  [[ ! -s "$stderr" ]] || { echo "zenpkg-blkdebug: non-empty QEMU stderr in $phase" >&2; cat "$stderr" >&2; return 1; }
-  ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$serial" || {
-    echo "zenpkg-blkdebug: forbidden marker in $phase" >&2; tail -n 160 "$serial" >&2; return 1;
+  [[ ! -s "$stderr" ]] || {
+    echo "zenpkg-blkdebug: non-empty QEMU stderr in $phase" >&2
+    cat "$stderr" >&2
+    return 1
   }
+  ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$serial" || {
+    echo "zenpkg-blkdebug: forbidden marker in $phase" >&2
+    tail -n 160 "$serial" >&2
+    return 1
+  }
+}
+
+transport_tail() {
+  local serial="$1"
+  awk '
+    /ZENPKG_TRANSPORT_RESUME name=hello-native version=0.2.0/ { seen=1; next }
+    seen { print }
+  ' "$serial"
+}
+
+assert_transport_suspended() {
+  local serial="$1" name="$2" hit="$3" tail_text
+  tail_text="$(transport_tail "$serial")"
+  if grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK' <<<"$tail_text"; then
+    echo "zenpkg-blkdebug: transport committed instead of suspending: $name hit=$hit" >&2
+    return 1
+  fi
+  if grep -Fq 'Transport resume failed.' <<<"$tail_text"; then
+    echo "zenpkg-blkdebug: ATA timeout expired before crash observation: $name hit=$hit" >&2
+    return 1
+  fi
+  if grep -Fq "$PROMPT" <<<"$tail_text"; then
+    echo "zenpkg-blkdebug: shell returned while block request should be suspended: $name hit=$hit" >&2
+    return 1
+  fi
+  kill -0 "$VM_PID" 2>/dev/null || {
+    echo "zenpkg-blkdebug: QEMU exited before requested crash: $name hit=$hit" >&2
+    return 1
+  }
+  printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=break-observed hit=%s\n' "$name" "$hit"
 }
 
 fault_boot() {
@@ -152,33 +191,24 @@ fault_boot() {
   wait_for_serial "$serial" 'ZENPKG_TRANSPORT_RESUME name=hello-native version=0.2.0' 20000
   printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=guest-command-running\n' "$name"
   sleep "$BREAK_SETTLE_SECONDS"
-  ! grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK' "$serial" || {
-    echo "zenpkg-blkdebug: armed breakpoint did not suspend the first write: $name" >&2
-    return 1
-  }
+  assert_transport_suspended "$serial" "$name" 1
 
-  for ((hit=1; hit<=ordinal; ++hit)); do
-    response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"wait_break $tag\"" 15)"
-    require_hmp_success "$response" 'wait_break'
-    printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=break-hit hit=%s\n' "$name" "$hit"
-    if ((hit < ordinal)); then
-      response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"resume $tag\"" 15)"
-      require_hmp_success "$response" 'resume'
-      sleep "$BREAK_SETTLE_SECONDS"
-      ! grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK' "$serial" || {
-        echo "zenpkg-blkdebug: scenario committed before requested breakpoint ordinal: $name hit=$hit" >&2
-        return 1
-      }
-    fi
+  for ((hit=1; hit<ordinal; ++hit)); do
+    response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"resume $tag\"" 15)"
+    require_hmp_success "$response" 'resume'
+    printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=break-resumed hit=%s\n' "$name" "$hit"
+    sleep "$BREAK_SETTLE_SECONDS"
+    assert_transport_suspended "$serial" "$name" "$((hit + 1))"
   done
 
   cat >"$evidence" <<EOF
 {
   "block_device": "$BLOCK_DEVICE",
+  "confirmation": "arm-stall-resume-chain",
   "crash": "SIGKILL",
   "event": "pwritev",
   "guest_command": "$GUEST_COMMAND",
-  "hit_count": $ordinal,
+  "observed_hit_count": $ordinal,
   "ordinal": $ordinal,
   "serial_poll_seconds": $SERIAL_POLL_SECONDS,
   "settle_seconds": $BREAK_SETTLE_SECONDS,
@@ -188,7 +218,8 @@ EOF
   crash_now
 
   ! grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK' "$serial" || {
-    echo "zenpkg-blkdebug: scenario committed before crash: $name" >&2; return 1;
+    echo "zenpkg-blkdebug: scenario committed before crash: $name" >&2
+    return 1
   }
   assert_clean_logs "$serial" "$stderr" "fault-$name"
 }
@@ -209,7 +240,10 @@ recovery_boot() {
     fi
     sleep "$SERIAL_POLL_SECONDS"
   done
-  ((elapsed < 60000)) || { echo "zenpkg-blkdebug: recovery did not produce verified cache object: $name" >&2; return 1; }
+  ((elapsed < 60000)) || {
+    echo "zenpkg-blkdebug: recovery did not produce verified cache object: $name" >&2
+    return 1
+  }
 
   send_command "$socket" 'pkg cache verify'
   wait_for_serial "$serial" 'ZENPKG_CACHE_VERIFY_OK objects=1 partials=0'
@@ -234,9 +268,15 @@ run_scenario() {
     "$name" "$ordinal" | tee -a "$OUT/summary.log"
 }
 
-[[ -f "$BOOT_IMAGE" && -x "$HMP_CLIENT" ]] || { echo 'zenpkg-blkdebug: boot image and HMP client are required' >&2; exit 2; }
+[[ -f "$BOOT_IMAGE" && -x "$HMP_CLIENT" ]] || {
+  echo 'zenpkg-blkdebug: boot image and HMP client are required' >&2
+  exit 2
+}
 for fixture in resume.img ready.img committed.img; do
-  [[ -f "$FIXTURES/$fixture" ]] || { echo "zenpkg-blkdebug: missing fixture $fixture" >&2; exit 2; }
+  [[ -f "$FIXTURES/$fixture" ]] || {
+    echo "zenpkg-blkdebug: missing fixture $fixture" >&2
+    exit 2
+  }
 done
 
 run_scenario chunk-first-write resume.img 1
