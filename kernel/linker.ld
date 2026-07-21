@@ -33,6 +33,7 @@ SECTIONS
     __stack_top = .;
   } :data
   __kernel_end = .;
+  ASSERT(__kernel_end <= 0x000A0000, "kernel low-memory image overlaps VGA aperture")
   /DISCARD/ : {
     *(.comment*)
     *(.note*)

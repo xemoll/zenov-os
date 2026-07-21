@@ -60,8 +60,11 @@ AuditRecord audit_log[audit_capacity]{};
 uint32_t audit_next = 0, audit_count = 0;
 uint32_t scans = 0, blocked = 0, quarantined = 0, trusted_launches = 0;
 uint32_t write_scans = 0, write_blocked = 0, audit_only_findings = 0;
-alignas(16) uint8_t write_scan_storage[process::application_buffer_bytes]{};
-uint8_t* write_scan_buffer = write_scan_storage;
+constexpr uintptr_t write_scan_workspace_address = 0x00300000U;
+constexpr uint32_t write_scan_workspace_bytes = process::application_buffer_bytes;
+static_assert(write_scan_workspace_address >= heap::limit_address);
+static_assert(write_scan_workspace_address + write_scan_workspace_bytes <= process::user_base);
+uint8_t* write_scan_buffer = reinterpret_cast<uint8_t*>(write_scan_workspace_address);
 bool self_test_passed = false, baseline_verified = false, enforcement_ready = false;
 
 uint32_t rotate_right(uint32_t value, uint32_t count) { return (value >> count) | (value << (32U - count)); }
@@ -400,6 +403,7 @@ bool init() {
     self_test_passed = self_test();
     if (!self_test_passed) { serial::line("ZENOV_GUARD_SELFTEST_FAILED"); return false; }
     serial::line("ZENOV_GUARD_SELFTEST_OK");
+    serial::line("ZENOV_GUARD_SCAN_WORKSPACE_OK address=0x00300000 bytes=65536");
     baseline_verified = verify_trusted_baseline();
     if (!baseline_verified) { serial::line("ZENOV_GUARD_TRUST_BASELINE_FAILED"); enforcement_ready = false; return true; }
     serial::line("ZENOV_GUARD_TRUST_BASELINE_OK");
