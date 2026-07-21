@@ -9,6 +9,7 @@ HMP_CLIENT="${4:-build/zenpkg-qmp-hmp-client}"
 PROMPT='zenov> '
 GUEST_COMMAND='pkg transport resume hello-native'
 BLOCK_DEVICE='runtime-debug'
+BREAK_SETTLE_SECONDS='0.75'
 
 mkdir -p "$OUT"
 rm -f "$OUT"/serial-*.log "$OUT"/qemu-*.stderr "$OUT"/qmp-*.sock \
@@ -149,15 +150,24 @@ fault_boot() {
   send_command "$socket" "$GUEST_COMMAND"
   wait_for_serial "$serial" 'ZENPKG_TRANSPORT_RESUME name=hello-native version=0.2.0' 200
   printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=guest-command-running\n' "$name"
+  sleep "$BREAK_SETTLE_SECONDS"
+  ! grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK' "$serial" || {
+    echo "zenpkg-blkdebug: armed breakpoint did not suspend the first write: $name" >&2
+    return 1
+  }
 
   for ((hit=1; hit<=ordinal; ++hit)); do
-    response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"wait_break $tag\"" 60)"
+    response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"wait_break $tag\"" 15)"
     require_hmp_success "$response" 'wait_break'
     printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=break-hit hit=%s\n' "$name" "$hit"
     if ((hit < ordinal)); then
       response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"resume $tag\"" 15)"
       require_hmp_success "$response" 'resume'
-      sleep 0.2
+      sleep "$BREAK_SETTLE_SECONDS"
+      ! grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK' "$serial" || {
+        echo "zenpkg-blkdebug: scenario committed before requested breakpoint ordinal: $name hit=$hit" >&2
+        return 1
+      }
     fi
   done
 
@@ -169,6 +179,7 @@ fault_boot() {
   "guest_command": "$GUEST_COMMAND",
   "hit_count": $ordinal,
   "ordinal": $ordinal,
+  "settle_seconds": $BREAK_SETTLE_SECONDS,
   "tag": "$tag"
 }
 EOF
