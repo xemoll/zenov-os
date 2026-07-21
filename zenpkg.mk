@@ -16,8 +16,9 @@ ZENPKG_DATA_STAMP := $(BUILD)/zenpkg-data.stamp
 ZENPKG_CHECK_STAMP := $(BUILD)/zenpkg-check.stamp
 ZENPKG_QEMU_STAMP := $(BUILD)/qemu/zenpkg-qemu.stamp
 ZENPKG_TRANSPORT_QEMU_STAMP := $(BUILD)/qemu/zenpkg-transport-qemu.stamp
+ZENPKG_TRANSPORT_FAULT_QEMU_STAMP := $(BUILD)/qemu/zenpkg-transport-fault-qemu.stamp
 
-.PHONY: zenpkg-check zenpkg-qemu zenpkg-transport-qemu zenrepo-check
+.PHONY: zenpkg-check zenpkg-qemu zenpkg-transport-qemu zenpkg-transport-fault-qemu zenrepo-check
 
 all: $(ZENPKG_DATA_STAMP) $(BUILD)/zenpkg-manifest.json
 check: zenpkg-check
@@ -37,6 +38,9 @@ $(BUILD)/zenovfs-package-seed: tools/zenovfs_package_seed.cpp | $(BUILD)
 
 $(BUILD)/package-transport-journal-test: tests/package_transport_journal_test.cpp kernel/parts/package_manager/transport_format.inc | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tests/package_transport_journal_test.cpp -o $@
+
+$(BUILD)/zenpkg-transport-fault-test: tools/zenpkg_transport_fault_test.cpp tools/zenov_audit_format.hpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tools/zenpkg_transport_fault_test.cpp -o $@
 
 $(BUILD)/zenrepo-metadata/.stamp: $(ZENREPO_FIXTURE_MATERIALIZER) $(wildcard tools/zenrepo/fixtures/*.inc) | $(BUILD)
 	bash $(ZENREPO_FIXTURE_MATERIALIZER) $(BUILD)/zenrepo-metadata
@@ -86,11 +90,12 @@ $(BUILD)/zenpkg-manifest.json: $(ZENPKG_PACKAGES) $(ZENREPO_METADATA) $(ZENPKG_D
 zenrepo-check: $(BUILD)/zenrepo
 	bash tests/zenrepo_test.sh
 
-$(ZENPKG_CHECK_STAMP): $(BUILD)/package-repository-kernel-test $(BUILD)/package-transport-journal-test $(BUILD)/zenovfs-package-seed $(BUILD)/zenpkg $(BUILD)/zenrepo $(ZENPKG_PACKAGES) $(ZENPKG_DATA_STAMP)
+$(ZENPKG_CHECK_STAMP): $(BUILD)/package-repository-kernel-test $(BUILD)/package-transport-journal-test $(BUILD)/zenpkg-transport-fault-test $(BUILD)/zenovfs-package-seed $(BUILD)/zenpkg $(BUILD)/zenrepo $(ZENPKG_PACKAGES) $(ZENPKG_DATA_STAMP)
 	$(BUILD)/zenovfs-package-seed --self-test
 	bash tests/zenrepo_test.sh
 	$(BUILD)/package-repository-kernel-test $(BUILD)/zenrepo-test/fixtures
 	$(BUILD)/package-transport-journal-test
+	$(BUILD)/zenpkg-transport-fault-test $(BUILD)/zenov-data.img
 	@for package in $(ZENPKG_PACKAGES); do $(BUILD)/zenpkg verify $$package; done
 	@grep -q '"version": "0.1.1"' $(BUILD)/zenpkg-manifest.json
 	@grep -q '"network_repositories": false' $(BUILD)/zenpkg-manifest.json
@@ -114,3 +119,18 @@ $(ZENPKG_TRANSPORT_QEMU_STAMP): all tests/qemu_zenpkg_transport_recovery.sh
 	@touch $@
 
 zenpkg-transport-qemu: $(ZENPKG_TRANSPORT_QEMU_STAMP)
+
+$(ZENPKG_TRANSPORT_FAULT_QEMU_STAMP): all $(BUILD)/zenpkg-transport-fault-test tests/qemu_zenpkg_transport_faults.sh
+	@mkdir -p $(BUILD)/qemu/zenpkg-faults
+	$(BUILD)/zenpkg-transport-fault-test $(BUILD)/zenov-data.img \
+	  --emit-invalid-journal $(BUILD)/qemu/zenpkg-fault-invalid-journal.img \
+	  --emit-commit-recovery $(BUILD)/qemu/zenpkg-fault-commit-recovery.img \
+	  --emit-corrupt-final $(BUILD)/qemu/zenpkg-fault-corrupt-final.img
+	bash tests/qemu_zenpkg_transport_faults.sh $(BUILD)/zenov-os.img \
+	  $(BUILD)/qemu/zenpkg-fault-invalid-journal.img \
+	  $(BUILD)/qemu/zenpkg-fault-commit-recovery.img \
+	  $(BUILD)/qemu/zenpkg-fault-corrupt-final.img \
+	  $(BUILD)/qemu/zenpkg-faults
+	@touch $@
+
+zenpkg-transport-fault-qemu: $(ZENPKG_TRANSPORT_FAULT_QEMU_STAMP)
