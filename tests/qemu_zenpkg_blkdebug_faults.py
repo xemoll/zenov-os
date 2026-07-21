@@ -134,17 +134,27 @@ def read_env(path: Path) -> dict[str, int]:
     return values
 
 
+def write_config(path: Path, sector: int) -> None:
+    path.write_text(
+        "[inject-error]\n"
+        'event = "write_aio"\n'
+        'errno = "5"\n'
+        f'sector = "{sector}"\n',
+        encoding="utf-8",
+    )
+
+
 def launch(qemu: str, boot: Path, runtime: Path, serial: Path, qmp_path: Path,
-           stderr: Path, debug_node: bool) -> tuple[subprocess.Popen[bytes], QmpClient, Any]:
+           stderr: Path, config: Path | None) -> tuple[subprocess.Popen[bytes], QmpClient, Any]:
     for path in (serial, qmp_path, stderr):
         path.unlink(missing_ok=True)
     stderr_handle = stderr.open("wb")
     command = [qemu, "-drive", f"file={boot},format=raw,if=floppy"]
-    if debug_node:
+    if config is not None:
         command += [
             "-blockdev", f"driver=file,node-name=runtime-file,filename={runtime},cache.direct=on,cache.no-flush=off",
             "-blockdev", "driver=raw,node-name=runtime-raw,file=runtime-file",
-            "-blockdev", "driver=blkdebug,node-name=runtime-debug,image=runtime-raw",
+            "-blockdev", f"driver=blkdebug,node-name=runtime-debug,image=runtime-raw,config={config}",
             "-device", "ide-hd,drive=runtime-debug,bus=ide.0,unit=0",
         ]
     else:
@@ -195,35 +205,19 @@ def wait_boot(serial: Path) -> None:
         wait_for_text(serial, marker)
 
 
-def arm_fault(qmp: QmpClient, sector: int, evidence: Path) -> None:
-    options: dict[str, Any] = {
-        "driver": "blkdebug",
-        "node-name": "runtime-debug",
-        "image": "runtime-raw",
-        "inject-error": [
-            {
-                "event": "write_aio",
-                "errno": 5,
-                "sector": sector,
-            }
-        ],
-    }
-    request = {"options": [options]}
-    evidence.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    qmp.command("blockdev-reopen", request, timeout=15.0)
-
-
 def fault_boot(qemu: str, boot: Path, runtime: Path, out: Path, name: str,
                sector: int, guest_command: str) -> None:
+    config = out / f"blkdebug-{name}.conf"
     serial = out / f"serial-{name}-fault.log"
     qmp_path = out / f"qmp-{name}-fault.sock"
     stderr = out / f"qemu-{name}-fault.stderr"
-    arm_evidence = out / f"qmp-{name}-arm.json"
     event_evidence = out / f"qmp-{name}-events.json"
-    process, qmp, stderr_handle = launch(qemu, boot, runtime, serial, qmp_path, stderr, True)
+    write_config(config, sector)
+    process, qmp, stderr_handle = launch(qemu, boot, runtime, serial, qmp_path, stderr, config)
     try:
         wait_boot(serial)
-        arm_fault(qmp, sector, arm_evidence)
+        if any(event.get("event") == "BLOCK_IO_ERROR" for event in qmp.events):
+            raise RuntimeError(f"fault triggered before explicit package command: {name}")
         send_command(qmp, guest_command)
         event = qmp.wait_event("BLOCK_IO_ERROR")
         data = event.get("data", {})
@@ -240,7 +234,7 @@ def recovery_boot(qemu: str, boot: Path, runtime: Path, out: Path, name: str) ->
     serial = out / f"serial-{name}-recovery.log"
     qmp_path = out / f"qmp-{name}-recovery.sock"
     stderr = out / f"qemu-{name}-recovery.stderr"
-    process, qmp, stderr_handle = launch(qemu, boot, runtime, serial, qmp_path, stderr, False)
+    process, qmp, stderr_handle = launch(qemu, boot, runtime, serial, qmp_path, stderr, None)
     try:
         wait_boot(serial)
         send_command(qmp, "pkg transport resume hello-native")
@@ -267,7 +261,7 @@ def recovery_boot(qemu: str, boot: Path, runtime: Path, out: Path, name: str) ->
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Arm live QEMU blkdebug EIO after ZenPkg reaches readiness")
+    parser = argparse.ArgumentParser(description="Inject exact-sector EIO through a structured QEMU blkdebug node")
     parser.add_argument("--boot", type=Path, required=True)
     parser.add_argument("--fixtures", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
