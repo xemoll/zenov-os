@@ -11,7 +11,7 @@ permissions:
 jobs:
   native-build-and-boot:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -43,7 +43,7 @@ jobs:
           set -o pipefail
           make clean check 2>&1 | tee ci-logs/native-build.log
 
-      - name: Boot desktop and six recovery/fail-closed phases
+      - name: Boot desktop and eight recovery/fail-closed phases
         run: make qemu
 
       - name: Verify Files browser navigation and preview
@@ -81,7 +81,9 @@ jobs:
             build/qemu/zenov-data-audit-tampered.img \
             build/qemu/zenov-data-audit-old-recovery.img \
             build/qemu/zenov-data-audit-new-recovery.img \
-            build/qemu/zenov-data-audit-corrupt.img; do test -s "$image"; done
+            build/qemu/zenov-data-audit-corrupt.img \
+            build/qemu/zenov-data-zcap-corrupt.img \
+            build/qemu/zenov-data-zmid-corrupt.img; do test -s "$image"; done
           awk '
             /ZENOV_AUDIT_COW_FAULT_MATRIX_OK/ {
               scenario=""; cases=0; old=0; new=0; fail_closed=0;
@@ -155,6 +157,25 @@ jobs:
           grep -q 'ZGDB_ATOMIC_UPDATE_OK version=4' build/qemu/serial.log
           grep -q ZGDB_ROLLBACK_REJECTED build/qemu/serial.log
           test "$(grep -c ZGDB_REVOCATION_BLOCKED build/qemu/serial.log)" -ge 2
+          grep -q 'ZMID_ROOT_KEY_OK id=6ca6a5275544c533' build/qemu/serial.log
+          test "$(grep -c ZMID_PSS_SIGNATURE_OK build/qemu/serial.log)" -ge 5
+          grep -q 'ZMID_DATABASE_VERSION_OK version=1' build/qemu/serial-phase1.log
+          grep -q 'ZMID_DATABASE_VERSION_OK version=2' build/qemu/serial-phase2.log
+          grep -q 'ZMID_KEY_REJECTED reason=unknown-key' build/qemu/serial-phase1.log
+          grep -q 'ZMID_TAMPER_REJECTED reason=payload-digest' build/qemu/serial-phase1.log
+          grep -q 'ZMID_ATOMIC_UPDATE_OK version=2' build/qemu/serial-phase1.log
+          grep -q 'ZMID_ROLLBACK_REJECTED reason=rollback' build/qemu/serial-phase1.log
+          grep -q 'ZENOV_GUARD_WRITE_BLOCKED path=/ransomware-write.bin' build/qemu/serial-phase1.log
+          grep -q 'ZENOV_GUARD_WRITE_AUDIT path=/pua-audit.bin' build/qemu/serial-phase1.log
+          grep -q 'ZENOV_GUARD_WRITE_BLOCKED path=/split.bin' build/qemu/serial-phase1.log
+          grep -q 'ZENOV_GUARD_QUARANTINE_OK path=/samples/ransomware-test.bin' build/qemu/serial-phase1.log
+          grep -q 'ZENOV_GUARD_QUARANTINE_LIST_OK entries=2' build/qemu/serial-phase2.log
+          grep -q 'ZMID_INIT_FAILED reason=payload-digest' build/qemu/serial-zmid-corrupt.log
+          grep -q 'Signed malware intelligence validation failed.' build/qemu/serial-zmid-corrupt.log
+          ! grep -q ZENOVOS_UI_READY build/qemu/serial-zmid-corrupt.log
+          test -x build/zenovfs-antimalware-verify
+          build/zenovfs-antimalware-verify build/qemu/zenov-data-runtime.img
+          grep -Fqx 'status=PASS' build/qemu/antimalware-evidence.txt
           grep -q GRAPHICS_PCI_OK build/qemu/serial.log
           grep -q FRAMEBUFFER_MAPPED_OK build/qemu/serial.log
           grep -q 'GRAPHICS_MODE_OK 800x600x32' build/qemu/serial.log
@@ -183,7 +204,7 @@ jobs:
           test "$(grep -c PERSISTENCE_0_1_1_OK build/qemu/serial.log)" -ge 2
           test "$(grep -c FILE_SYSCALL_PERSIST_OK build/qemu/serial.log)" -ge 2
           grep -q 'zenov> ' build/qemu/serial.log
-          grep -q '"format": "zenov-os-build-v12"' build/build-manifest.json
+          grep -q '"format": "zenov-os-build-v13"' build/build-manifest.json
           grep -q '"zgdb_schema": 2' build/build-manifest.json
           grep -q '"zgdb_compiled_floor": 3' build/build-manifest.json
           grep -q '"zgdb_root_key_id": "6f788074c018f5aa"' build/build-manifest.json
@@ -194,6 +215,11 @@ jobs:
           grep -q '"zcap_root_key_id": "9202c73fad96ad66"' build/build-manifest.json
           grep -q '"zcap_v1_sha256": "029f784f01afede5d38da066ba239213ace2279eac9381876c70574e2eb89bf1"' build/build-manifest.json
           grep -q '"zcap_v2_sha256": "f325310b94d443fb58df94b56f012ea0b6533fe0cbb453bef2c5d82551a9e51b"' build/build-manifest.json
+          grep -q '"zmid_schema": 1' build/build-manifest.json
+          grep -q '"zmid_compiled_floor": 1' build/build-manifest.json
+          grep -q '"zmid_root_key_id": "6ca6a5275544c533"' build/build-manifest.json
+          grep -q '"zmid_v1_sha256": "32fc3531be108d946cb8bcae451ec5a83dbb290abc077ff41eb7f24090655a14"' build/build-manifest.json
+          grep -q '"zmid_v2_sha256": "9ba792e8ee0d3a647e784bc0a55727e7d42d6d6e205f5681fdd809fa90727d4e"' build/build-manifest.json
           grep -q '"audit_schema": 1' build/build-manifest.json
           grep -q '"audit_capacity": 64' build/build-manifest.json
           grep -q '"audit_record_bytes": 128' build/build-manifest.json
@@ -226,7 +252,12 @@ jobs:
             build/zenovguard-v4.zgdb
             build/zenovguard-tampered.zgdb
             build/zenovguard-wrong-key.zgdb
+            build/zenovguard-intelligence-v1.zmid
+            build/zenovguard-intelligence-v2.zmid
+            build/zenovguard-intelligence-tampered.zmid
+            build/zenovguard-intelligence-wrong-key.zmid
             build/zenovfs-audit-verify
+            build/zenovfs-antimalware-verify
             build/zenovfs-audit-fault-test
             build/build-manifest.json
             build/qemu/serial*.log
@@ -238,5 +269,7 @@ jobs:
             build/qemu-files-ui/*.stderr
             build/qemu-files-ui/*.ppm
             security/zenovguard-root-public.pem
+            security/zmid-root-public.pem
+            build/qemu/antimalware-evidence.txt
             dist/
             ci-logs/native-build.log

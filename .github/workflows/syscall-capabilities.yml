@@ -11,7 +11,7 @@ permissions:
 jobs:
   least-privilege-ring3:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -80,7 +80,7 @@ jobs:
           grep -Fq '"/security/syscall-capabilities.version"' kernel/parts/security_paths.inc
           grep -Fq 'const bool result = input && run_unchecked(input);' kernel/parts/process_policy.inc
           test "$(grep -Fc 'clear_capability_profile();' kernel/parts/process_policy.inc)" -eq 2
-          grep -Fq '"format": "zenov-os-build-v12"' build/build-manifest.json
+          grep -Fq '"format": "zenov-os-build-v13"' build/build-manifest.json
           grep -Fq '"zcap_root_key_id": "9202c73fad96ad66"' build/build-manifest.json
           echo 'ZENOV_SIGNED_SYSCALL_CAPABILITY_SOURCE_CONTRACT_OK'
 
@@ -102,7 +102,9 @@ jobs:
             build/qemu/serial-phase1.log
             build/qemu/serial-phase2.log
             build/qemu/serial-zcap-corrupt.log
+            build/qemu/serial-zmid-corrupt.log
             build/qemu/zenov-data-zcap-corrupt.img
+            build/qemu/zenov-data-zmid-corrupt.img
             build/syscall-capabilities-v1.zcap
             build/syscall-capabilities-v2.zcap
             security/zcap-root-public.pem

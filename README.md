@@ -2,7 +2,7 @@
 
 ZenovOS is a compact 32-bit x86 operating system built with Zenov, assembler and freestanding C++17. Version 0.1.1 boots into an adaptive graphical desktop on QEMU Standard VGA. The default physical mode is 1024×768; the same kernel-rendered desktop is verified across 22 VBE modes from 640×480 through 1600×1200 while retaining the text shell and COM1 serial console as diagnostic fallbacks.
 
-The current engineering focus is a small, auditable security foundation combined with a usable native desktop rather than compatibility with foreign executable formats. ZenovOS supports native ZEX1 and validated static ELF32/i386 applications. ZenovGuard adds final-read SHA-256 appraisal, fail-closed execution, ZGDB2 RSA-PSS threat/revocation policy, quarantine and a persistent bounded hash-chained audit journal around that execution boundary.
+The current engineering focus is a small, auditable security foundation combined with a usable native desktop rather than compatibility with foreign executable formats. ZenovOS supports native ZEX1 and validated static ELF32/i386 applications. ZenovGuard adds final-read SHA-256 appraisal, fail-closed execution, ZGDB2 RSA-PSS trust/revocation policy, independently signed ZMID1 malware intelligence, prevention before persistent writes, protected quarantine and a bounded hash-chained audit journal.
 
 ![ZenovOS 0.1.1 graphical desktop](./docs/screenshots/zenov-os-0.1.1-graphical-desktop.png)
 
@@ -24,18 +24,18 @@ Executable regression coverage includes:
 - guarded syscalls, stable error codes, console input and `argc/argv`;
 - transactional ZenovFS1 replacement with crash-boundary fault injection;
 - deterministic Zenov source to ZEX1 compilation and ring-3 execution;
-- ZenovGuard integrity appraisal, detection and quarantine;
+- ZenovGuard integrity appraisal, signed ZMID1 hash/pattern detection, prevention before persistent writes and protected quarantine;
 - ZGAL1 persistent SHA-256 audit chaining, boot replay and fail-closed append;
 - 1,662-case audit COW fault matrix covering ordered crashes, torn sectors, garbage, dropped/duplicated/reordered writes and ring rotation;
 - kernel boot verification of old-state recovery, new-state recovery and invalid-journal fail-closed behavior;
 - rotated-root ZGDB2 RSA-PSS validation, key-ID enforcement, tamper rejection, sequential update, rollback rejection and revocation;
 - deterministic rebuilds and release-package provenance.
 
-Documentation starts at [`docs/INDEX.md`](docs/INDEX.md). Desktop behavior is documented in [`docs/DESKTOP_0.1.1.md`](docs/DESKTOP_0.1.1.md). Security contracts are defined in [`docs/ZENOVGUARD_0.1.1.md`](docs/ZENOVGUARD_0.1.1.md), [`docs/ZGDB_0.1.1.md`](docs/ZGDB_0.1.1.md) and [`docs/AUDIT_JOURNAL_0.1.1.md`](docs/AUDIT_JOURNAL_0.1.1.md).
+Documentation starts at [`docs/INDEX.md`](docs/INDEX.md). Desktop behavior is documented in [`docs/DESKTOP_0.1.1.md`](docs/DESKTOP_0.1.1.md). Security contracts are defined in [`docs/ZENOVGUARD_0.1.1.md`](docs/ZENOVGUARD_0.1.1.md), [`docs/ZGDB_0.1.1.md`](docs/ZGDB_0.1.1.md), [`docs/ZCAP_0.1.1.md`](docs/ZCAP_0.1.1.md), [`docs/ANTIMALWARE_0.1.1.md`](docs/ANTIMALWARE_0.1.1.md) and [`docs/AUDIT_JOURNAL_0.1.1.md`](docs/AUDIT_JOURNAL_0.1.1.md).
 
-## ZenovGuard, ZGDB2 and persistent audit
+## ZenovGuard, signed policy domains and persistent audit
 
-ZenovGuard is the local integrity and malware-prevention layer for ZenovOS 0.1.1. It is not a claim of broad commercial antivirus coverage.
+ZenovGuard is the local integrity and bounded malware-prevention layer for ZenovOS 0.1.1. It is not a claim of broad commercial antivirus or EDR coverage. ZGDB2 controls executable trust/revocation, ZCAP1 controls syscall authority, and ZMID1 supplies independently signed malware hash/pattern rules with block, quarantine and audit actions.
 
 Before a persistent application may enter ring 3, the final loader read is checked through this pipeline:
 
@@ -45,7 +45,8 @@ ZenovFS checksum-valid final read
         ▼
 kernel SHA-256
         │
-        ├── ZGDB2 key ID + RSA-PSS threat/revocation records
+        ├── ZGDB2 key ID + RSA-PSS trust/revocation records
+        ├── ZMID1 key ID + RSA-PSS hash/pattern intelligence
         ├── ZEX1 or ELF32 structural validation
         ├── W+X executable-policy rejection
         └── exact normalized path + compiled trusted SHA-256
@@ -57,13 +58,13 @@ persistent ZGAL1 EXEC record committed by ZenovFS COW
 ALLOW only when trusted, not revoked and audit commit succeeded
 ```
 
-The appraisal is performed on the same bytes consumed by the loader, immediately before user-page mapping. Unknown files, valid applications copied to another path, malformed containers, quarantined files, known signatures and revoked digests are denied by default.
+The appraisal is performed on the same bytes consumed by the loader, immediately before user-page mapping. Unknown files, valid applications copied to another path, malformed containers, quarantined files, ZMID matches and revoked digests are denied by default. The ZMID classifier is also called before ordinary write, append, copy, rename and package-cache commits; append scans the complete proposed final file so a pattern split across operations is still blocked before persistence.
 
-At boot, ZenovGuard re-reads all seven bundled applications and verifies their immutable path-and-SHA-256 baseline. It validates `/security/zenovguard.zgdb`, including schema 2, root key ID `6f788074c018f5aa`, payload SHA-256 and RSA-2048 PSS/SHA-256 signature with MGF1-SHA-256 and a fixed 32-byte salt. It also replays the complete retained ZGAL1 audit chain. If persistent storage, audit state, trust baseline or signed policy is unavailable, execution stays locked.
+At boot, ZenovGuard re-reads all seven bundled applications and verifies their immutable path-and-SHA-256 baseline. It validates `/security/zenovguard.zgdb` under root `6f788074c018f5aa`, `/security/syscall-capabilities.zcap` under root `9202c73fad96ad66`, and `/security/zenovguard-intelligence.zmid` under root `6ca6a5275544c533`. Each domain uses RSA-2048 PSS/SHA-256 with MGF1-SHA-256 and a fixed 32-byte salt. It also replays the complete retained ZGAL1 audit chain. If persistent storage, audit state, trust baseline or a required signed policy is unavailable, the corresponding operation remains fail-closed.
 
 The previous PKCS#1 v1.5 root has been removed from kernel trust. This build accepts policy version 3 or later under the rotated root and compiled floor 3. Policies 1 and 2 cannot be reintroduced merely by replacing the data image.
 
-The database uses deterministic fixed-size records. Every signed `TRUSTED` record must correspond to one compiled trusted path and digest, exactly once. A signed policy can add threat digests or revoke an existing application, but cannot authorize a new executable path on writable storage.
+ZGDB2 uses deterministic fixed-size executable-policy records. Every signed `TRUSTED` record must correspond to one compiled trusted path and digest exactly once; a signed ZGDB cannot authorize a new writable executable path. ZMID1 is a separate canonical database with at most 32 SHA-256 or bounded byte-pattern records and explicit block, quarantine and audit actions. A ZMID update cannot add executable trust or syscall authority.
 
 The persistent audit file is `/security/zenovguard.audit`. It contains a 96-byte header and 64 fixed 128-byte records. Each record commits to the previous SHA-256 hash, monotonic sequence, action, verdict, canonical path and complete object digest. When the ring wraps, the hash of the removed oldest record becomes the anchor for the retained window.
 
@@ -75,17 +76,21 @@ guard database
 guard update <signed-zgdb-path>
 guard capability-policy
 guard capability-update <signed-zcap-path>
+guard intelligence
+guard intelligence-update <signed-zmid-path>
 guard selftest
 guard scan <path>
 guard scan all
 guard quarantine <path>
+guard quarantine list
+guard quarantine delete <quarantine-path>
 guard log
 guard log verify
 ```
 
 `antivirus` is an alias for `guard`.
 
-Signed ZGDB2 and ZCAP1 updates are verified twice before activation, must be exactly version `N+1`, and are stored through ZenovFS copy-on-write replacement. Each active policy object is committed before its corresponding version file. Boot reconciles a newer valid signed policy with older version state, while an active policy older than stored state is rejected.
+Signed ZGDB2, ZCAP1 and ZMID1 updates are verified twice before activation, must be exactly version `N+1`, and are stored through ZenovFS copy-on-write replacement. Each active policy object is committed before its corresponding version file. Boot reconciles a newer valid signed policy with older version state, while an active policy older than stored state is rejected.
 
 Every BOOT, SCAN, EXEC and QUARANTINE event replaces the complete 8,288-byte journal through the same copy-on-write mechanism. If an audit append fails, ZenovGuard restores the prior in-memory state, marks the journal unavailable and locks subsequent application execution.
 
@@ -93,15 +98,16 @@ The audit transaction is now exercised against two exact transitions: empty jour
 
 Three complete data images are booted by QEMU: a pre-commit interruption that recovers the old journal, a post-commit interruption that recovers the new journal, and a committed replacement with one missing payload sector that must panic before `ZENOVOS_UI_READY`.
 
-The trusted applications, active ZGDB2/ZCAP1 policies, their version state and the audit journal are protected from ordinary shell and userspace write, remove, rename and copy-over operations.
+The trusted applications, active ZGDB2/ZCAP1/ZMID1 policies, their version state, the audit journal and quarantine payload/metadata are protected from ordinary shell and userspace write, append, remove, rename and copy-over operations.
 
-Quarantine uses an atomic ZenovFS metadata rename into:
+Quarantine uses an atomic ZenovFS metadata rename plus a protected sidecar:
 
 ```text
 /data/quarantine/q-<sha256-prefix>.qtn
+/data/quarantine/q-<sha256-prefix>.qtn.meta
 ```
 
-Policy version 3 contains the SHA-256 of the official harmless EICAR anti-malware test file and a separate ZenovGuard-only safe CI vector. Policy version 4 also revokes the canonical `zenovapp.zex` digest. The EICAR payload itself is not embedded in the repository or kernel image.
+The sidecar begins with `ZQMD1` and records the normalized original path, verdict and matched rule. ZMID v1 contains two exact hash rules and three bounded patterns, including the official harmless EICAR digest without embedding its payload and safe CI-only ransomware/PUA markers. ZMID v2 adds one safe update-only marker. These fixtures verify the engine; they are not presented as a real-world signature corpus.
 
 Important security markers include:
 
@@ -138,6 +144,18 @@ ZCAP_TAMPER_REJECTED
 ZCAP_ATOMIC_UPDATE_OK version=2
 ZCAP_ROLLBACK_REJECTED
 ZCAP_POLICY_VERSION_OK version=2
+ZMID_ROOT_KEY_OK id=6ca6a5275544c533
+ZMID_PSS_SIGNATURE_OK
+ZMID_DATABASE_VERSION_OK version=1
+ZMID_KEY_REJECTED reason=unknown-key
+ZMID_TAMPER_REJECTED
+ZMID_ATOMIC_UPDATE_OK version=2
+ZMID_ROLLBACK_REJECTED
+ZMID_DATABASE_VERSION_OK version=2
+ZENOV_GUARD_WRITE_BLOCKED
+ZENOV_GUARD_WRITE_AUDIT
+ZENOV_ANTIMALWARE_RUNTIME_IMAGE_OK
+ZENOV_ANTIMALWARE_GATE_OK
 ```
 
 ## Memory and isolation
@@ -242,9 +260,9 @@ The primary workflow performs:
 12. generation of a payload-tampered image with a recomputed ZenovFS checksum and mandatory audit-chain rejection;
 13. a separate adaptive-display QEMU run that cycles all 22 VBE modes, verifies read-back, persistence, Settings keyboard control and actual framebuffer dimensions;
 14. representative desktop, compact, widescreen, 5:4, maximum-size and Settings framebuffer capture;
-15. deterministic system rebuilding, including both signed policy domains, package metadata fixtures and the empty journal seed;
+15. deterministic system rebuilding, including all three signed policy domains, package metadata fixtures and the empty journal seed;
 16. deterministic release ZIP generation and byte comparison;
-17. evidence upload with runtime, recovery, corrupt and tampered images, binaries, both signed policy domains, both public roots, package metadata, manifest and serial/monitor/framebuffer logs.
+17. evidence upload with runtime, recovery, corrupt and tampered images, binaries, all three signed policy domains, all three public roots, package metadata, manifest and serial/monitor/framebuffer logs.
 
 ## Build
 
@@ -259,9 +277,9 @@ bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist packa
 
 ## Explicit limitations
 
-ZenovGuard and ZGDB2 0.1.1 intentionally do not provide:
+ZenovGuard, ZGDB2 and ZMID1 0.1.1 intentionally do not provide:
 
-- a network signature updater;
+- a network intelligence updater, cloud reputation service or automatic sample submission;
 - an operational repository-hosted private signing key or signing service;
 - threshold root signing;
 - in-band root-metadata rotation independent of an OS build;
@@ -270,7 +288,8 @@ ZenovGuard and ZGDB2 0.1.1 intentionally do not provide:
 - secret-key authentication of the audit journal against complete offline image replacement;
 - authenticated ZenovFS metadata against an offline disk attacker;
 - archive, document, script, PE, Mach-O or other foreign-format scanning;
-- heuristic, behavioral or machine-learning malware classification.
+- statistical, machine-learning or general behavioral malware classification;
+- archive unpacking, sandbox detonation, memory scanning, URL reputation or network traffic inspection.
 
 The compiled policy floor is `3`. Normal operation and reboots on the same data image reject rollback below persistent state, but an offline attacker replacing both database and version state can roll policy back to version 3. Reintroducing schema-1 policies 1/2 would additionally require replacing the kernel image because their old root is no longer trusted.
 

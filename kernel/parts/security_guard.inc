@@ -5,7 +5,7 @@ constexpr uint32_t sha256_bytes = 32U;
 constexpr uint32_t audit_capacity = 32U;
 
 enum class Verdict : uint8_t { clean, trusted, untrusted, suspicious, infected, error };
-enum class AuditAction : uint8_t { boot, scan, execute, quarantine };
+enum class AuditAction : uint8_t { boot, scan, execute, quarantine, write_block, intelligence_update };
 
 struct ScanResult {
     Verdict verdict = Verdict::error;
@@ -13,6 +13,7 @@ struct ScanResult {
     char signature[48]{};
     uint8_t digest[sha256_bytes]{};
     uint32_t size = 0;
+    uint8_t policy_action = 0U;
     bool executable = false;
 };
 
@@ -25,8 +26,6 @@ struct AuditRecord {
 };
 
 struct TrustedExecutable { const char* path; uint8_t digest[sha256_bytes]; };
-struct ThreatSignature { const char* name; uint8_t digest[sha256_bytes]; };
-
 static constexpr TrustedExecutable trusted_executables[] = {
     {"/apps/hello.zex", {0x2b,0x7b,0xa0,0x11,0x4d,0x52,0x28,0x82,0x5b,0x30,0xac,0xa3,0x0e,0x0e,0x97,0x8f,0x2f,0xaf,0x9b,0x79,0x8c,0xf7,0xf5,0x49,0x47,0x42,0xd7,0xa1,0xd3,0x30,0x95,0x6a}},
     {"/apps/fileio.elf", {0x5a,0xcc,0x70,0xa7,0x8b,0xd8,0x30,0xcd,0x7b,0x04,0x79,0x9b,0xf3,0xc2,0xbc,0x22,0x90,0x5a,0xc5,0x30,0x70,0xdb,0x00,0xb5,0x35,0x68,0x7c,0x8b,0x70,0x3a,0x93,0x4e}},
@@ -37,10 +36,7 @@ static constexpr TrustedExecutable trusted_executables[] = {
     {"/apps/zenovapp.zex", {0x9e,0x17,0x33,0xaf,0x56,0xa5,0x3a,0xe3,0x10,0x55,0xb4,0x48,0xf7,0x62,0x81,0x5b,0xa7,0xa5,0xe1,0xa7,0x2b,0xe5,0x43,0xae,0xf3,0x25,0xbd,0x4e,0xa3,0x6e,0x0a,0xd5}},
 };
 
-static constexpr ThreatSignature threat_signatures[] = {
-    {"Eicar.Test.File", {0x27,0x5a,0x02,0x1b,0xbf,0xb6,0x48,0x9e,0x54,0xd4,0x71,0x89,0x9f,0x7d,0xb9,0xd1,0x66,0x3f,0xc6,0x95,0xec,0x2f,0xe2,0xa2,0xc4,0x53,0x8a,0xab,0xf6,0x51,0xfd,0x0f}},
-    {"Zenov.Guard.Test-Signature", {0x3e,0x98,0xe2,0xf4,0x8d,0x88,0x47,0x40,0x92,0xd6,0xf8,0x0e,0xb5,0xf9,0x04,0x1c,0x4a,0x77,0xc0,0xd9,0x20,0xd1,0x22,0x9e,0x6b,0xd1,0x08,0x88,0x88,0xb6,0x7c,0x82}},
-};
+
 
 struct Sha256Context {
     uint32_t state[8];
@@ -63,6 +59,9 @@ static constexpr uint32_t sha256_constants[64] = {
 AuditRecord audit_log[audit_capacity]{};
 uint32_t audit_next = 0, audit_count = 0;
 uint32_t scans = 0, blocked = 0, quarantined = 0, trusted_launches = 0;
+uint32_t write_scans = 0, write_blocked = 0, audit_only_findings = 0;
+alignas(16) uint8_t write_scan_storage[process::application_buffer_bytes]{};
+uint8_t* write_scan_buffer = write_scan_storage;
 bool self_test_passed = false, baseline_verified = false, enforcement_ready = false;
 
 uint32_t rotate_right(uint32_t value, uint32_t count) { return (value >> count) | (value << (32U - count)); }
@@ -141,7 +140,15 @@ const char* verdict_name(Verdict verdict) {
     }
 }
 const char* action_name(AuditAction action) {
-    switch (action) { case AuditAction::boot: return "BOOT"; case AuditAction::scan: return "SCAN"; case AuditAction::execute: return "EXEC"; default: return "QUARANTINE"; }
+    switch (action) {
+        case AuditAction::boot: return "BOOT";
+        case AuditAction::scan: return "SCAN";
+        case AuditAction::execute: return "EXEC";
+        case AuditAction::quarantine: return "QUARANTINE";
+        case AuditAction::write_block: return "WRITE-BLOCK";
+        case AuditAction::intelligence_update: return "INTELLIGENCE-UPDATE";
+        default: return "UNKNOWN";
+    }
 }
 bool record(AuditAction action, const ScanResult& result) {
     AuditRecord& entry = audit_log[audit_next];
@@ -157,10 +164,6 @@ bool record(AuditAction action, const ScanResult& result) {
     return true;
 }
 
-const ThreatSignature* find_threat(const uint8_t digest[sha256_bytes]) {
-    for (const auto& signature : threat_signatures) if (digest_equal(digest, signature.digest)) return &signature;
-    return nullptr;
-}
 bool trusted_digest(const char* normalized_path, const uint8_t digest[sha256_bytes]) {
     if (!normalized_path) return false;
     for (const auto& trusted : trusted_executables) if (string_equal(normalized_path, trusted.path) && digest_equal(digest, trusted.digest)) return true;
@@ -207,9 +210,7 @@ ScanResult scan_memory(const char* path, const uint8_t* data, uint32_t size, boo
     } else storage::path_copy(result.path, "<memory>", sizeof(result.path));
     if (!data && size) { result.verdict = Verdict::error; return result; }
     sha256(data, size, result.digest); ++scans;
-    if (const ThreatSignature* threat = find_threat(result.digest)) {
-        result.verdict = Verdict::infected; storage::path_copy(result.signature, threat->name, sizeof(result.signature)); return result;
-    }
+    if (zmid::classify(result.path, data, size, result.digest, result)) return result;
     const bool zex = size >= 4U && data[0] == 'Z' && data[1] == 'E' && data[2] == 'X' && data[3] == '1';
     const bool elf = size >= 4U && data[0] == 0x7FU && data[1] == 'E' && data[2] == 'L' && data[3] == 'F';
     result.executable = zex || elf;
@@ -222,10 +223,10 @@ ScanResult scan_memory(const char* path, const uint8_t* data, uint32_t size, boo
 }
 
 bool scan_path(const char* path, ScanResult& result) {
-    if (!path || !*path || !process::application_buffer) return false;
+    if (!path || !*path || !write_scan_buffer) return false;
     uint32_t size = 0;
-    if (!storage::read_file(path, process::application_buffer, 64U * 1024U, size)) return false;
-    result = scan_memory(path, process::application_buffer, size, true);
+    if (!storage::read_file(path, write_scan_buffer, process::application_buffer_bytes, size)) return false;
+    result = scan_memory(path, write_scan_buffer, size, true);
     return record(AuditAction::scan, result);
 }
 
@@ -256,10 +257,102 @@ bool quarantine_path(const char* path) {
     char normalized[48];
     if (!storage::normalize_path(path, normalized) || starts_with_quarantine(normalized) || !ensure_quarantine_directory()) return false;
     char destination[48]; build_quarantine_path(result.digest, destination);
-    if (!storage::rename_entry(normalized, destination)) return false;
+    char metadata_path[48]{};
+    storage::path_copy(metadata_path, destination, sizeof(metadata_path));
+    const uint32_t length = static_cast<uint32_t>(string_length(metadata_path));
+    if (length + 5U >= sizeof(metadata_path)) return false;
+    metadata_path[length] = '.'; metadata_path[length + 1U] = 'm'; metadata_path[length + 2U] = 'e'; metadata_path[length + 3U] = 't'; metadata_path[length + 4U] = 'a'; metadata_path[length + 5U] = 0;
+    if (!storage::quarantine_rename(normalized, destination)) return false;
+    char metadata[192]{};
+    uint32_t used = 0U;
+    auto append = [&](const char* text) {
+        while (*text && used + 1U < sizeof(metadata)) metadata[used++] = *text++;
+    };
+    append("ZQMD1\noriginal="); append(normalized); append("\nsignature="); append(result.signature[0] ? result.signature : "manual"); append("\nverdict="); append(verdict_name(result.verdict)); append("\n");
+    if (!storage::quarantine_write_metadata(metadata_path, reinterpret_cast<const uint8_t*>(metadata), used)) {
+        if (!storage::quarantine_restore(destination, normalized)) serial::line("ZENOV_GUARD_QUARANTINE_ROLLBACK_FAILED stage=metadata");
+        return false;
+    }
+    if (!record(AuditAction::quarantine, result)) {
+        const bool metadata_removed = storage::quarantine_remove(metadata_path);
+        const bool payload_restored = storage::quarantine_restore(destination, normalized);
+        if (!metadata_removed || !payload_restored) serial::line("ZENOV_GUARD_QUARANTINE_ROLLBACK_FAILED stage=audit");
+        return false;
+    }
     ++quarantined;
-    if (!record(AuditAction::quarantine, result)) return false;
     serial_decision("ZENOV_GUARD_QUARANTINE_OK", result); return true;
+}
+
+bool allow_persistent_write(const char* path, const uint8_t* data, uint32_t size, bool append) {
+    ++write_scans;
+    char normalized[48]{};
+    if (!path || !storage::normalize_path(path, normalized) || !enforcement_ready || !zmid::ready ||
+        !write_scan_buffer || starts_with_quarantine(normalized)) {
+        ++write_blocked;
+        serial::write("ZENOV_GUARD_WRITE_BLOCKED path="); serial::write(path ? path : "<null>");
+        serial::line(" reason=security-not-ready-or-invalid-path");
+        return false;
+    }
+    const uint8_t* candidate = data;
+    uint32_t candidate_size = size;
+    if (append) {
+        uint32_t existing_size = 0U;
+        const int32_t index = storage::find_entry(normalized);
+        if (index >= 0) {
+            if (storage::zfs_entries[index].type != storage::zfs_type_file ||
+                !storage::read_file(normalized, write_scan_buffer, process::application_buffer_bytes, existing_size)) {
+                ++write_blocked;
+                serial::write("ZENOV_GUARD_WRITE_BLOCKED path="); serial::write(normalized);
+                serial::line(" reason=append-read-failed");
+                return false;
+            }
+        }
+        if (size > process::application_buffer_bytes - existing_size) {
+            ++write_blocked;
+            serial::write("ZENOV_GUARD_WRITE_BLOCKED path="); serial::write(normalized);
+            serial::line(" reason=scan-limit");
+            return false;
+        }
+        if (size && !data) {
+            ++write_blocked;
+            serial::write("ZENOV_GUARD_WRITE_BLOCKED path="); serial::write(normalized);
+            serial::line(" reason=null-data");
+            return false;
+        }
+        if (size) memcpy(write_scan_buffer + existing_size, data, size);
+        candidate = write_scan_buffer;
+        candidate_size = existing_size + size;
+    }
+    ScanResult result = scan_memory(normalized, candidate, candidate_size, false);
+    if (result.verdict == Verdict::infected) {
+        ++write_blocked;
+        if (!record(AuditAction::write_block, result)) return false;
+        serial_decision("ZENOV_GUARD_WRITE_BLOCKED", result);
+        return false;
+    }
+    if (result.verdict == Verdict::suspicious) {
+        ++audit_only_findings;
+        if (!record(AuditAction::scan, result)) return false;
+        serial_decision("ZENOV_GUARD_WRITE_AUDIT", result);
+    }
+    return true;
+}
+
+bool allow_persistent_transfer(const char* source, const char* destination) {
+    if (!source || !destination || !write_scan_buffer) return false;
+    uint32_t size = 0U;
+    if (!storage::read_file(source, write_scan_buffer, process::application_buffer_bytes, size)) {
+        ++write_blocked;
+        serial::write("ZENOV_GUARD_TRANSFER_BLOCKED source="); serial::write(source);
+        serial::write(" destination="); serial::write(destination); serial::line(" reason=source-read-failed");
+        return false;
+    }
+    if (!allow_persistent_write(destination, write_scan_buffer, size, false)) {
+        serial::write("ZENOV_GUARD_TRANSFER_BLOCKED source="); serial::write(source);
+        serial::write(" destination="); serial::line(destination);
+        return false;
+    }
+    return true;
 }
 
 bool allow_execution(const char* path, const uint8_t* data, uint32_t size) {
@@ -286,7 +379,7 @@ bool sha256_self_test() {
 bool self_test() {
     static constexpr char test_vector[] = "ZENOV_GUARD_SAFE_TEST_VECTOR_V1";
     static constexpr char clean_vector[] = "ZENOV_GUARD_CLEAN_VECTOR_V1";
-    if (!sha256_self_test()) return false;
+    if (!sha256_self_test() || !zmid::ready || !zmid::self_test()) return false;
     const ScanResult detected = scan_memory("<selftest-threat>", reinterpret_cast<const uint8_t*>(test_vector), sizeof(test_vector) - 1U, false);
     const ScanResult clean = scan_memory("<selftest-clean>", reinterpret_cast<const uint8_t*>(clean_vector), sizeof(clean_vector) - 1U, false);
     return detected.verdict == Verdict::infected && clean.verdict == Verdict::clean && sizeof(trusted_executables) / sizeof(trusted_executables[0]) == 7U;
@@ -330,11 +423,14 @@ void print_status() {
     console::write("  Enforcement   "); console::line(enforcement_ready ? "fail-closed / trusted executables only" : "locked / security state unavailable");
     console::write("  SHA-256       "); console::line(self_test_passed ? "self-test passed" : "failed");
     console::write("  Trust base    "); console::line(baseline_verified ? "7 bundled applications verified" : "not verified");
-    console::write("  Signatures    "); console::unsigned_dec(static_cast<uint32_t>(sizeof(threat_signatures) / sizeof(threat_signatures[0]))); console::put('\n');
+    console::write("  Intelligence  "); console::unsigned_dec(zmid::active_record_count); console::line(" signed rules");
     console::write("  Scans         "); console::unsigned_dec(scans); console::put('\n');
     console::write("  Blocked       "); console::unsigned_dec(blocked); console::put('\n');
     console::write("  Quarantined   "); console::unsigned_dec(quarantined); console::put('\n');
     console::write("  Trusted runs  "); console::unsigned_dec(trusted_launches); console::put('\n');
+    console::write("  Write scans   "); console::unsigned_dec(write_scans); console::put('\n');
+    console::write("  Write blocks  "); console::unsigned_dec(write_blocked); console::put('\n');
+    console::write("  Audit-only    "); console::unsigned_dec(audit_only_findings); console::put('\n');
     serial::line("ZENOV_GUARD_STATUS_OK");
 }
 void print_audit() {
@@ -346,6 +442,41 @@ void print_audit() {
         console::write("  "); console::write(verdict_name(entry.verdict)); console::write("  "); console::line(entry.path);
     }
 }
+void print_quarantine() {
+    uint32_t files = 0U;
+    for (uint32_t i = 0U; i < storage::zfs_super.entry_count; ++i) {
+        const auto& entry = storage::zfs_entries[i];
+        if (!entry.used || entry.type != storage::zfs_type_file || !starts_with_quarantine(entry.path)) continue;
+        console::write("  "); console::write(entry.path); console::write("  "); console::unsigned_dec(entry.size); console::line(" bytes");
+        ++files;
+    }
+    if (!files) console::line("  <quarantine empty>");
+    console::write("  Entries       "); console::unsigned_dec(files); console::put('\n');
+    serial::write("ZENOV_GUARD_QUARANTINE_LIST_OK entries="); process::serial_u32(files); serial::write("\r\n");
+}
+
+bool delete_quarantine(const char* path) {
+    char normalized[48]{};
+    if (!path || !storage::normalize_path(path, normalized) || !starts_with_quarantine(normalized)) return false;
+    const uint32_t length = static_cast<uint32_t>(string_length(normalized));
+    const bool metadata = length > 5U && storage::bytes_equal(normalized + length - 5U, ".meta", 5U);
+    char sidecar[48]{};
+    if (!metadata) {
+        storage::path_copy(sidecar, normalized, sizeof(sidecar));
+        if (length + 5U < sizeof(sidecar)) {
+            sidecar[length] = '.'; sidecar[length + 1U] = 'm'; sidecar[length + 2U] = 'e';
+            sidecar[length + 3U] = 't'; sidecar[length + 4U] = 'a'; sidecar[length + 5U] = 0;
+        }
+    }
+    if (!storage::quarantine_remove(normalized)) return false;
+    if (sidecar[0] && storage::find_entry(sidecar) >= 0 && !storage::quarantine_remove(sidecar)) return false;
+    ScanResult event{}; event.verdict = Verdict::clean; storage::path_copy(event.path, normalized, sizeof(event.path));
+    storage::path_copy(event.signature, "Quarantine.Delete", sizeof(event.signature));
+    if (!record(AuditAction::quarantine, event)) return false;
+    serial::write("ZENOV_GUARD_QUARANTINE_DELETE_OK path="); serial::line(normalized);
+    return true;
+}
+
 void scan_all() {
     uint32_t files = 0, clean = 0, findings = 0;
     for (uint32_t i = 0; i < storage::zfs_super.entry_count; ++i) {

@@ -22,7 +22,7 @@ Header (96 bytes)
 Records (64 × 128 bytes)
 ├── monotonic sequence
 ├── PIT tick
-├── action: BOOT / SCAN / EXEC / QUARANTINE
+├── action: BOOT / SCAN / EXEC / QUARANTINE / WRITE-BLOCK / INTELLIGENCE-UPDATE
 ├── verdict
 ├── canonical path length and zero-padded path
 ├── full SHA-256 object digest
@@ -67,7 +67,7 @@ A factory image contains a canonical empty journal. ZenovGuard appends the boot-
 
 ## Append and crash behavior
 
-Each BOOT, SCAN, EXEC and QUARANTINE event updates the in-memory journal and writes the complete journal through ZenovFS1 copy-on-write replacement.
+Each BOOT, SCAN, EXEC, QUARANTINE, WRITE-BLOCK and INTELLIGENCE-UPDATE event updates the in-memory journal and writes the complete journal through ZenovFS1 copy-on-write replacement.
 
 The normal write order is:
 
@@ -152,7 +152,7 @@ This complements the host matrix with the actual ATA/ZenovFS mount recovery and 
 
 ## Protected path
 
-`/security/zenovguard.audit` cannot be modified through ordinary shell or userspace operations. Write, remove, rename and copy-over attempts are blocked by the same protected-path boundary used for trusted applications and active ZGDB state.
+`/security/zenovguard.audit`, active ZMID state and quarantine metadata cannot be modified through ordinary shell or userspace operations. Write, remove, rename and copy-over attempts are blocked by the same protected-path boundary used for trusted applications and active ZGDB state.
 
 Internal journal writes bypass those wrappers only inside the audit subsystem.
 
