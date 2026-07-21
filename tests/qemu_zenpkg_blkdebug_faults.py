@@ -207,7 +207,6 @@ def arm_fault(qmp: QmpClient, sector: int, evidence: Path) -> None:
                 "errno": 5,
                 "sector": sector,
                 "once": True,
-                "immediately": True,
             }
         ],
     }
