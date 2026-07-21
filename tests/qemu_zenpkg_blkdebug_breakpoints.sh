@@ -8,7 +8,7 @@ OUT="${3:-build/qemu/zenpkg-blkdebug}"
 HMP_CLIENT="${4:-build/zenpkg-qmp-hmp-client}"
 PROMPT='zenov> '
 GUEST_COMMAND='pkg transport resume hello-native'
-BLOCK_DEVICE='zenpkg-disk'
+BLOCK_DEVICE='runtime-debug'
 
 mkdir -p "$OUT"
 rm -f "$OUT"/serial-*.log "$OUT"/qemu-*.stderr "$OUT"/qmp-*.sock \
@@ -53,7 +53,7 @@ hmp() {
 
 require_hmp_success() {
   local response="$1" operation="$2"
-  if grep -Eiq 'Could not|not found|No medium|Invalid argument|Permission denied' <<<"$response"; then
+  if grep -Eiq 'Could not|Cannot find|not found|No medium|Invalid argument|Permission denied|Error:' <<<"$response"; then
     echo "zenpkg-blkdebug: HMP $operation failed: $response" >&2
     return 1
   fi
@@ -94,7 +94,7 @@ start_qemu() {
       -blockdev "driver=file,node-name=runtime-file,filename=$runtime,cache.direct=on,cache.no-flush=off" \
       -blockdev 'driver=raw,node-name=runtime-raw,file=runtime-file' \
       -blockdev 'driver=blkdebug,node-name=runtime-debug,image=runtime-raw' \
-      -device "ide-hd,id=$BLOCK_DEVICE,drive=runtime-debug,bus=ide.0,unit=0" \
+      -device 'ide-hd,id=zenpkg-disk,drive=runtime-debug,bus=ide.0,unit=0' \
       -boot a -m 32M -machine pc,vmport=off -vga std -display none \
       -serial "file:$serial" -qmp "unix:$socket,server=on,wait=off" -monitor none \
       -no-reboot -no-shutdown >/dev/null 2>"$stderr" &
