@@ -13,9 +13,12 @@
 
 namespace {
 constexpr std::uint32_t kSectorSize = 512U;
+constexpr std::uint32_t kCacheDirectoryIndex = 94U;
+constexpr std::uint32_t kCacheZpDirectoryIndex = 95U;
 constexpr std::uint32_t kPartialIndex = 96U;
 constexpr std::uint32_t kJournalIndex = 112U;
 constexpr std::uint8_t kFile = 1U;
+constexpr std::uint8_t kDirectory = 2U;
 constexpr std::uint32_t kMaximumPackageBytes = 64U * 1024U;
 constexpr std::uint32_t kProviderOffline = 1U;
 constexpr std::uint32_t kPhaseDownloading = 1U;
@@ -109,12 +112,16 @@ bool path_equal(const Entry& entry, const std::string& path) {
         entry.path[path.size()] == 0;
 }
 
-void require_path_absent(const std::vector<std::uint8_t>& image, const std::string& path) {
+int find_path(const std::vector<std::uint8_t>& image, const std::string& path) {
     const Entry* table = entries(image);
     for (std::uint32_t i = 0; i < super(image).entry_count; ++i) {
-        if (table[i].used && path_equal(table[i], path))
-            throw std::runtime_error("path already exists in seed image: " + path);
+        if (table[i].used && path_equal(table[i], path)) return static_cast<int>(i);
     }
+    return -1;
+}
+
+void require_path_absent(const std::vector<std::uint8_t>& image, const std::string& path) {
+    if (find_path(image, path) >= 0) throw std::runtime_error("path already exists in seed image: " + path);
 }
 
 void set_path(Entry& entry, const std::string& path) {
@@ -122,6 +129,23 @@ void set_path(Entry& entry, const std::string& path) {
         throw std::runtime_error("invalid ZenovFS path: " + path);
     std::memset(entry.path, 0, sizeof(entry.path));
     std::memcpy(entry.path, path.data(), path.size());
+}
+
+void ensure_directory(std::vector<std::uint8_t>& image, std::uint32_t index, const std::string& path) {
+    const int existing = find_path(image, path);
+    if (existing >= 0) {
+        if (entries(image)[static_cast<std::uint32_t>(existing)].type != kDirectory)
+            throw std::runtime_error("path exists and is not a directory: " + path);
+        return;
+    }
+    Entry* table = entries(image);
+    if (index >= super(image).entry_count || table[index].used)
+        throw std::runtime_error("reserved directory seed slot is not free");
+    Entry directory{};
+    directory.used = 1U;
+    directory.type = kDirectory;
+    set_path(directory, path);
+    table[index] = directory;
 }
 
 void put_file(std::vector<std::uint8_t>& image, std::uint32_t index, const std::string& path,
@@ -192,6 +216,8 @@ std::vector<std::uint8_t> make_state(const std::vector<std::uint8_t>& base,
                                      const std::vector<std::uint8_t>& package,
                                      bool committed, bool ready) {
     auto image = base;
+    ensure_directory(image, kCacheDirectoryIndex, "/var/cache");
+    ensure_directory(image, kCacheZpDirectoryIndex, "/var/cache/zp");
     const auto digest = zenov_audit_host::sha256(package.data(), package.size());
     const std::string key = hex_prefix(digest.data());
     const std::string partial_path = "/var/cache/zp/" + key + ".part";
@@ -221,8 +247,9 @@ int main(int argc, char** argv) {
             package.size() > static_cast<std::size_t>(super(base).slot_sectors) * kSectorSize ||
             package.size() < 8U || std::memcmp(package.data(), "ZENPKG1", 7U) != 0)
             throw std::runtime_error("invalid package fixture");
-        if (entries(base)[kPartialIndex].used || entries(base)[kJournalIndex].used)
-            throw std::runtime_error("deterministic high seed slots are occupied");
+        for (const std::uint32_t index : {kCacheDirectoryIndex, kCacheZpDirectoryIndex, kPartialIndex, kJournalIndex}) {
+            if (entries(base)[index].used) throw std::runtime_error("deterministic high seed slot is occupied");
+        }
 
         const std::filesystem::path output = argv[3];
         std::filesystem::create_directories(output);
