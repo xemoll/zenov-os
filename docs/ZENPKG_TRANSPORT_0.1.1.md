@@ -86,6 +86,42 @@ At boot ZenPkg:
 
 Only one transfer may be active because ZenovOS 0.1.1 still has one foreground process and a single package scratch buffer. A request for another target while a journal is active fails with `ZENPKG_TRANSPORT_BUSY`.
 
+## Bounded sector crash matrix
+
+`tools/zenpkg_transport_fault_test.cpp` reconstructs the complete current transport persistence protocol against the real seeded ZenovFS1 image. For the signed 647-byte `hello-native` target, the protocol contains 167 sector writes covering:
+
+- initial journal creation;
+- first 512-byte partial commit;
+- journal offset update;
+- second 135-byte append;
+- complete-prefix journal update;
+- `ready` journal update;
+- `.part` to `.zpk` rename and metadata synchronization;
+- final journal removal and synchronization.
+
+The bounded matrix executes 3,173 crash cases:
+
+- every ordered sector-write prefix;
+- torn prefix and suffix writes at 1, 64, 128, 255, 256, 384 and 511 bytes;
+- deterministic garbage-sector replacement;
+- one dropped write at every position;
+- one duplicated write at every position;
+- every adjacent write swap.
+
+Ordered write prefixes must recover to exactly one of three usable states: old, resumable or new. Destructive reorder/torn cases may additionally fail closed. No case may expose bytes other than the original source prefix or the complete source package as a usable cache object.
+
+This follows the bounded black-box crash-testing approach used by CrashMonkey/ACE: exhaustively explore a deliberately bounded persistence workload and classify each recovered state. The matrix is not a claim that arbitrary ATA firmware behavior has been exhaustively modeled. It covers full 512-byte sector writes, selected torn-sector cuts, dropped/duplicated writes and adjacent reordering for the exact ZenovFS1 protocol implemented by ZenovOS 0.1.1.
+
+## QEMU recovery and rejection images
+
+The fault tool emits three deterministic ZenovFS images that are booted by `tests/qemu_zenpkg_transport_faults.sh`:
+
+1. **Invalid journal with valid 512-byte partial** — boot must remove the damaged journal, retain the verified partial, adopt it into a new journal and complete the remaining 135 bytes.
+2. **Verified final object with stale ready journal** — boot must detect the already committed `.zpk`, remove the stale journal and expose a valid cache object.
+3. **FNV-valid but SHA-256-invalid final object** — ZenovFS integrity succeeds, but ZenPkg target verification must reject the cache and keep `ZENPKG_MANAGER_READY` unreachable.
+
+All QEMU stderr files must be empty. Successful recovery images must pass `fsck`. The corrupted final image must emit `ZENPKG_CACHE_VERIFY_REJECTED` and `ZENPKG_CACHE_INIT_REJECTED` exactly through the fail-closed initialization path.
+
 ## Evidence markers
 
 The serial log emits:
@@ -108,7 +144,7 @@ The dedicated QEMU recovery test uses one persistent data image across three boo
 2. recover `offset=512`, resume with the remaining 135 bytes, verify, rename and clear the journal;
 3. confirm that journal cleanup and cache cleanup survive another reboot.
 
-The workflow also compiles the journal-format regression under ASan and UBSan and rejects checksum corruption, illegal offsets, incomplete `ready` state, unknown providers, zero generation, oversized targets and unterminated fields.
+The workflow also compiles the journal-format and sector-matrix regressions under ASan and UBSan. Journal negative cases reject checksum corruption, illegal offsets, incomplete `ready` state, unknown providers, zero generation, oversized targets and unterminated fields.
 
 ## Security properties
 
@@ -119,7 +155,10 @@ The workflow also compiles the journal-format regression under ASan and UBSan an
 - Corrupt or mismatched partial prefixes are reset rather than continued.
 - Crash-window reconciliation can move the journal only to a prefix that is already durable and matches the verified source.
 - A short digest in the cache filename is only a storage key; full SHA-256 verification remains mandatory.
+- A filesystem-valid final object with the wrong package SHA-256 remains unusable and prevents package-manager initialization.
 
 ## Remaining work
 
 A network provider must implement the same bounded read contract and preserve all journal invariants. Before it can be marked available, ZenovOS still needs a real network stack, DNS resolution, TLS certificate and hostname validation, HTTP response framing, strict `Range`/`Content-Range` validation, timeout accounting, mirror identity and retry/backoff policy.
+
+The crash matrix still does not model electrical ATA failures, controller write-cache loss, arbitrary long-distance write permutation or simultaneous corruption of multiple independent sectors. Those require a lower-level block-I/O recorder/replayer or an explicit virtual block device fault injector.
