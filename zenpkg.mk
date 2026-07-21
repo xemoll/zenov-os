@@ -15,8 +15,9 @@ ZENREPO_METADATA := \
 ZENPKG_DATA_STAMP := $(BUILD)/zenpkg-data.stamp
 ZENPKG_CHECK_STAMP := $(BUILD)/zenpkg-check.stamp
 ZENPKG_QEMU_STAMP := $(BUILD)/qemu/zenpkg-qemu.stamp
+ZENPKG_TRANSPORT_QEMU_STAMP := $(BUILD)/qemu/zenpkg-transport-qemu.stamp
 
-.PHONY: zenpkg-check zenpkg-qemu zenrepo-check
+.PHONY: zenpkg-check zenpkg-qemu zenpkg-transport-qemu zenrepo-check
 
 all: $(ZENPKG_DATA_STAMP) $(BUILD)/zenpkg-manifest.json
 check: zenpkg-check
@@ -33,6 +34,9 @@ $(BUILD)/zenrepo: $(ZENREPO_SRC) | $(BUILD)
 
 $(BUILD)/zenovfs-package-seed: tools/zenovfs_package_seed.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+$(BUILD)/package-transport-journal-test: tests/package_transport_journal_test.cpp kernel/parts/package_manager/transport_format.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tests/package_transport_journal_test.cpp -o $@
 
 $(BUILD)/zenrepo-metadata/.stamp: $(ZENREPO_FIXTURE_MATERIALIZER) $(wildcard tools/zenrepo/fixtures/*.inc) | $(BUILD)
 	bash $(ZENREPO_FIXTURE_MATERIALIZER) $(BUILD)/zenrepo-metadata
@@ -82,10 +86,11 @@ $(BUILD)/zenpkg-manifest.json: $(ZENPKG_PACKAGES) $(ZENREPO_METADATA) $(ZENPKG_D
 zenrepo-check: $(BUILD)/zenrepo
 	bash tests/zenrepo_test.sh
 
-$(ZENPKG_CHECK_STAMP): $(BUILD)/package-repository-kernel-test $(BUILD)/zenovfs-package-seed $(BUILD)/zenpkg $(BUILD)/zenrepo $(ZENPKG_PACKAGES) $(ZENPKG_DATA_STAMP)
+$(ZENPKG_CHECK_STAMP): $(BUILD)/package-repository-kernel-test $(BUILD)/package-transport-journal-test $(BUILD)/zenovfs-package-seed $(BUILD)/zenpkg $(BUILD)/zenrepo $(ZENPKG_PACKAGES) $(ZENPKG_DATA_STAMP)
 	$(BUILD)/zenovfs-package-seed --self-test
 	bash tests/zenrepo_test.sh
 	$(BUILD)/package-repository-kernel-test $(BUILD)/zenrepo-test/fixtures
+	$(BUILD)/package-transport-journal-test
 	@for package in $(ZENPKG_PACKAGES); do $(BUILD)/zenpkg verify $$package; done
 	@grep -q '"version": "0.1.1"' $(BUILD)/zenpkg-manifest.json
 	@grep -q '"network_repositories": false' $(BUILD)/zenpkg-manifest.json
@@ -101,3 +106,11 @@ $(ZENPKG_QEMU_STAMP): all tests/qemu_zenpkg.sh
 	@touch $@
 
 zenpkg-qemu: $(ZENPKG_QEMU_STAMP)
+
+$(ZENPKG_TRANSPORT_QEMU_STAMP): all tests/qemu_zenpkg_transport_recovery.sh
+	@mkdir -p $(BUILD)/qemu/zenpkg-transport
+	@cp $(BUILD)/zenov-data.img $(BUILD)/qemu/zenpkg-transport-runtime.img
+	bash tests/qemu_zenpkg_transport_recovery.sh $(BUILD)/zenov-os.img $(BUILD)/qemu/zenpkg-transport-runtime.img $(BUILD)/qemu/zenpkg-transport
+	@touch $@
+
+zenpkg-transport-qemu: $(ZENPKG_TRANSPORT_QEMU_STAMP)
