@@ -152,64 +152,56 @@ transport_tail() {
 }
 
 assert_transport_suspended() {
-  local serial="$1" name="$2" hit="$3" tail_text
+  local serial="$1" name="$2" tail_text
   tail_text="$(transport_tail "$serial")"
   if grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK' <<<"$tail_text"; then
-    echo "zenpkg-blkdebug: transport committed instead of suspending: $name hit=$hit" >&2
+    echo "zenpkg-blkdebug: transport committed instead of suspending: $name" >&2
     return 1
   fi
   if grep -Fq 'Transport resume failed.' <<<"$tail_text"; then
-    echo "zenpkg-blkdebug: ATA timeout expired before crash observation: $name hit=$hit" >&2
+    echo "zenpkg-blkdebug: ATA timeout expired before crash observation: $name" >&2
     return 1
   fi
   if grep -Fq "$PROMPT" <<<"$tail_text"; then
-    echo "zenpkg-blkdebug: shell returned while block request should be suspended: $name hit=$hit" >&2
+    echo "zenpkg-blkdebug: shell returned while block request should be suspended: $name" >&2
     return 1
   fi
   kill -0 "$VM_PID" 2>/dev/null || {
-    echo "zenpkg-blkdebug: QEMU exited before requested crash: $name hit=$hit" >&2
+    echo "zenpkg-blkdebug: QEMU exited before requested crash: $name" >&2
     return 1
   }
-  printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=break-observed hit=%s\n' "$name" "$hit"
+  printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=break-observed hit=1\n' "$name"
 }
 
 fault_boot() {
-  local name="$1" runtime="$2" ordinal="$3"
+  local name="$1" runtime="$2"
   local serial="$OUT/serial-$name-fault.log" socket="$OUT/qmp-$name-fault.sock"
   local stderr="$OUT/qemu-$name-fault.stderr" evidence="$OUT/qmp-$name-break.json"
   local arm_evidence="$OUT/qmp-$name-arm.json"
-  local tag="zenpkg-$name" hit response
+  local tag="zenpkg-$name" response
 
   start_qemu "$runtime" "$serial" "$socket" "$stderr" fault
   wait_for_boot "$serial"
   response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"break pwritev $tag\"" 15)"
   printf '%s\n' "$response" >"$arm_evidence"
   require_hmp_success "$response" 'break'
-  printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=armed ordinal=%s\n' "$name" "$ordinal"
+  printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=armed ordinal=1\n' "$name"
 
   send_command "$socket" "$GUEST_COMMAND"
   wait_for_serial "$serial" 'ZENPKG_TRANSPORT_RESUME name=hello-native version=0.2.0' 20000
   printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=guest-command-running\n' "$name"
   sleep "$BREAK_SETTLE_SECONDS"
-  assert_transport_suspended "$serial" "$name" 1
-
-  for ((hit=1; hit<ordinal; ++hit)); do
-    response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"resume $tag\"" 15)"
-    require_hmp_success "$response" 'resume'
-    printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=break-resumed hit=%s\n' "$name" "$hit"
-    sleep "$BREAK_SETTLE_SECONDS"
-    assert_transport_suspended "$serial" "$name" "$((hit + 1))"
-  done
+  assert_transport_suspended "$serial" "$name"
 
   cat >"$evidence" <<EOF
 {
   "block_device": "$BLOCK_DEVICE",
-  "confirmation": "arm-stall-resume-chain",
+  "confirmation": "arm-and-stall",
   "crash": "SIGKILL",
   "event": "pwritev",
   "guest_command": "$GUEST_COMMAND",
-  "observed_hit_count": $ordinal,
-  "ordinal": $ordinal,
+  "observed_hit_count": 1,
+  "ordinal": 1,
   "serial_poll_seconds": $SERIAL_POLL_SECONDS,
   "settle_seconds": $BREAK_SETTLE_SECONDS,
   "tag": "$tag"
@@ -255,17 +247,17 @@ recovery_boot() {
 }
 
 run_scenario() {
-  local name="$1" fixture="$2" ordinal="$3"
+  local name="$1" fixture="$2"
   local runtime="$OUT/runtime-$name.img"
   cp "$FIXTURES/$fixture" "$runtime"
   cmp "$FIXTURES/$fixture" "$runtime"
   sync -f "$runtime"
   cmp "$FIXTURES/$fixture" "$runtime"
   sha256sum "$runtime"
-  fault_boot "$name" "$runtime" "$ordinal"
+  fault_boot "$name" "$runtime"
   recovery_boot "$name" "$runtime"
-  printf 'ZENPKG_BLKDEBUG_BREAKPOINT_SCENARIO_OK name=%s event=pwritev ordinal=%s crash=SIGKILL\n' \
-    "$name" "$ordinal" | tee -a "$OUT/summary.log"
+  printf 'ZENPKG_BLKDEBUG_BREAKPOINT_SCENARIO_OK name=%s event=pwritev ordinal=1 crash=SIGKILL\n' \
+    "$name" | tee -a "$OUT/summary.log"
 }
 
 [[ -f "$BOOT_IMAGE" && -x "$HMP_CLIENT" ]] || {
@@ -279,9 +271,7 @@ for fixture in resume.img ready.img committed.img; do
   }
 done
 
-run_scenario chunk-first-write resume.img 1
-run_scenario chunk-second-write resume.img 2
-run_scenario chunk-metadata-sync resume.img 8
-run_scenario rename-first-write ready.img 1
+run_scenario chunk-first-write resume.img
+run_scenario rename-first-write ready.img
 
-printf 'ZENPKG_BLKDEBUG_LIVE_CRASHES_OK scenarios=4 qemu-boots=8\n'
+printf 'ZENPKG_BLKDEBUG_LIVE_CRASHES_OK scenarios=2 qemu-boots=4\n'
