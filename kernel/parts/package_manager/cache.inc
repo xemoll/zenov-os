@@ -56,41 +56,56 @@ void cache_report_target(const char* marker, const package_repository::Target& t
 
 #include "transport.inc"
 
-bool fetch_target(const package_repository::Target& target) {
+TransportOutcome fetch_target_budget(const package_repository::Target& target, uint32_t chunk_budget) {
     char final_path[48]{}, partial_path[48]{}, source_path[48]{};
     if (!cache_path(target, false, final_path) || !cache_path(target, true, partial_path) ||
         !repository_source_path(target, source_path)) {
         serial::line("ZENPKG_CACHE_PATH_INVALID");
-        return false;
+        return TransportOutcome::failed;
     }
 
     if (verified_target_file(final_path, target)) {
+        if (transport_journal_present && transport_target_matches_journal(target, transport_journal) &&
+            !transport_commit_finished(target)) {
+            serial::line("ZENPKG_TRANSPORT_STALE_JOURNAL_CLEAR_FAILED");
+            return TransportOutcome::failed;
+        }
         cache_report_target("ZENPKG_CACHE_HIT", target);
-        return true;
+        return TransportOutcome::complete;
     }
 
     storage::FileInfo info{};
-    if (storage::query(final_path, info) && !storage::package_cache_remove(final_path)) {
+    if (storage::query(final_path, info) &&
+        (!storage::package_cache_remove(final_path) || !storage::sync_metadata())) {
         serial::line("ZENPKG_CACHE_INVALID_OBJECT_REMOVE_FAILED");
-        return false;
+        return TransportOutcome::failed;
     }
 
-    if (!transport_fetch_verified_source(source_path, partial_path, target)) {
-        serial::line("ZENPKG_CACHE_TRANSPORT_REJECTED");
-        return false;
-    }
+    const TransportOutcome outcome = transport_transfer(source_path, partial_path, target, chunk_budget);
+    if (outcome != TransportOutcome::complete) return outcome;
 
-    if (!storage::package_cache_rename(partial_path, final_path) || !storage::sync_metadata() ||
-        !verified_target_file(final_path, target)) {
-        (void)storage::package_cache_remove(partial_path);
+    if (!storage::package_cache_rename(partial_path, final_path)) {
+        serial::line("ZENPKG_CACHE_COMMIT_DEFERRED");
+        return TransportOutcome::failed;
+    }
+    if (!storage::sync_metadata() || !verified_target_file(final_path, target)) {
         (void)storage::package_cache_remove(final_path);
         (void)storage::sync_metadata();
+        (void)transport_reset_target(target, "ZENPKG_TRANSPORT_COMMIT_RESET");
         serial::line("ZENPKG_CACHE_COMMIT_REJECTED");
-        return false;
+        return TransportOutcome::failed;
+    }
+    if (!transport_commit_finished(target)) {
+        serial::line("ZENPKG_TRANSPORT_COMMIT_JOURNAL_CLEAR_FAILED");
+        return TransportOutcome::failed;
     }
 
     cache_report_target("ZENPKG_CACHE_FETCH_COMMIT_OK", target);
-    return true;
+    return TransportOutcome::complete;
+}
+
+bool fetch_target(const package_repository::Target& target) {
+    return fetch_target_budget(target, 0xFFFFFFFFU) == TransportOutcome::complete;
 }
 
 bool fetch_latest(const char* name) {
@@ -100,6 +115,15 @@ bool fetch_latest(const char* name) {
         return false;
     }
     return fetch_target(*target);
+}
+
+TransportOutcome fetch_latest_step(const char* name) {
+    const package_repository::Target* target = package_repository::latest_target(name);
+    if (!target) {
+        serial::line("ZENPKG_TARGET_NOT_FOUND");
+        return TransportOutcome::failed;
+    }
+    return fetch_target_budget(*target, 1U);
 }
 
 bool cache_install_path(const package_repository::Target& target, char output[48]) {
@@ -112,59 +136,95 @@ bool cache_install_path(const package_repository::Target& target, char output[48
 }
 
 void cache_status() {
-    uint32_t valid = 0, invalid = 0;
+    uint32_t valid = 0, invalid = 0, partial = 0;
     for (uint32_t i = 0; i < package_repository::target_count(); ++i) {
         const package_repository::Target* target = package_repository::target_at(i);
         if (!target) continue;
-        char path[48]{};
-        if (!cache_path(*target, false, path)) {
+        char final_path[48]{}, partial_path[48]{};
+        if (!cache_path(*target, false, final_path) || !cache_path(*target, true, partial_path)) {
             ++invalid;
             continue;
         }
         storage::FileInfo info{};
-        if (!storage::query(path, info)) continue;
-        if (info.type == storage::zfs_type_file && info.size == target->package_length &&
-            verified_target_file(path, *target)) ++valid;
-        else ++invalid;
+        if (storage::query(final_path, info)) {
+            if (info.type == storage::zfs_type_file && info.size == target->package_length &&
+                verified_target_file(final_path, *target)) ++valid;
+            else ++invalid;
+        }
+        if (storage::query(partial_path, info)) {
+            if (info.type == storage::zfs_type_file && info.size <= target->package_length) ++partial;
+            else ++invalid;
+        }
     }
     console::write("  Valid objects  ");
     console::unsigned_dec(valid);
     console::put('\n');
+    console::write("  Partial objects ");
+    console::unsigned_dec(partial);
+    console::put('\n');
     console::write("  Invalid objects ");
     console::unsigned_dec(invalid);
     console::put('\n');
-    console::line("  Commit model   verified resumable .part then atomic rename");
+    console::line("  Commit model   journaled resumable .part then atomic rename");
     serial::write("ZENPKG_CACHE_STATUS_OK valid=");
     process::serial_u32(valid);
     serial::write(" invalid=");
     process::serial_u32(invalid);
+    serial::write(" partial=");
+    process::serial_u32(partial);
     serial::write("\r\n");
 }
 
 bool cache_verify() {
-    uint32_t checked = 0;
+    uint32_t checked = 0, partial_checked = 0;
     for (uint32_t i = 0; i < package_repository::target_count(); ++i) {
         const package_repository::Target* target = package_repository::target_at(i);
         if (!target) continue;
-        char path[48]{};
-        if (!cache_path(*target, false, path)) return false;
+        char final_path[48]{}, partial_path[48]{};
+        if (!cache_path(*target, false, final_path) || !cache_path(*target, true, partial_path)) return false;
         storage::FileInfo info{};
-        if (!storage::query(path, info)) continue;
-        ++checked;
-        if (info.type != storage::zfs_type_file || info.size != target->package_length ||
-            !verified_target_file(path, *target)) {
-            serial::line("ZENPKG_CACHE_VERIFY_REJECTED");
+        if (storage::query(final_path, info)) {
+            ++checked;
+            if (info.type != storage::zfs_type_file || info.size != target->package_length ||
+                !verified_target_file(final_path, *target)) {
+                serial::line("ZENPKG_CACHE_VERIFY_REJECTED");
+                return false;
+            }
+        }
+        if (storage::query(partial_path, info)) {
+            ++partial_checked;
+            uint32_t source_size = 0;
+            uint8_t prefix_digest[32]{};
+            if (info.type != storage::zfs_type_file || info.size > target->package_length ||
+                !transport_partial_prefix_valid(repository_source_path(*target, final_path) ? final_path : "",
+                    partial_path, *target, info.size, source_size, prefix_digest) ||
+                source_size != target->package_length) {
+                serial::line("ZENPKG_CACHE_PARTIAL_VERIFY_REJECTED");
+                return false;
+            }
+        }
+    }
+    if (transport_journal_present) {
+        const package_repository::Target* target = transport_journal_target();
+        if (!target || !transport_reconcile_active(*target)) {
+            serial::line("ZENPKG_TRANSPORT_JOURNAL_VERIFY_REJECTED");
             return false;
         }
     }
     serial::write("ZENPKG_CACHE_VERIFY_OK objects=");
     process::serial_u32(checked);
+    serial::write(" partials=");
+    process::serial_u32(partial_checked);
     serial::write("\r\n");
     return true;
 }
 
 bool cache_clean() {
     uint32_t removed = 0;
+    if (transport_journal_present && !transport_cancel()) {
+        serial::line("ZENPKG_CACHE_TRANSPORT_CANCEL_FAILED");
+        return false;
+    }
     for (uint32_t i = 0; i < package_repository::target_count(); ++i) {
         const package_repository::Target* target = package_repository::target_at(i);
         if (!target) continue;

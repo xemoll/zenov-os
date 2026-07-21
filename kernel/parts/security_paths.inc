@@ -33,6 +33,11 @@ bool repository_state_path(const char* input) {
     return normalize_for_policy(input, normalized) && string_equal(normalized, "/var/lib/zenpkg/repo.v1");
 }
 
+bool package_transport_state_path(const char* input) {
+    char normalized[48]{};
+    return normalize_for_policy(input, normalized) && string_equal(normalized, "/var/lib/zenpkg/transport.v1");
+}
+
 bool repository_metadata_path(const char* input) {
     char normalized[48]{};
     return normalize_for_policy(input, normalized) && string_starts_with(normalized, "/repo/");
@@ -56,7 +61,7 @@ bool package_cache_partial_path(const char* input) {
 
 bool package_managed_path(const char* input) {
     return package_payload_path(input) || package_database_path(input) || repository_state_path(input) ||
-        package_cache_object_path(input);
+        package_transport_state_path(input) || package_cache_object_path(input);
 }
 
 bool protected_path(const char* input) {
@@ -65,6 +70,7 @@ bool protected_path(const char* input) {
     if (!normalize_for_policy(input, normalized)) return false;
     if (string_starts_with(normalized, "/apps/pkg-") || string_starts_with(normalized, "/repo/") ||
         string_equal(normalized, "/var/lib/zenpkg/state.v1") || string_equal(normalized, "/var/lib/zenpkg/repo.v1") ||
+        string_equal(normalized, "/var/lib/zenpkg/transport.v1") ||
         string_equal(normalized, "/var/cache/zp") || string_starts_with(normalized, "/var/cache/zp/")) return true;
     for (const char* path : protected_paths) if (string_equal(normalized, path)) return true;
     return false;
@@ -130,6 +136,14 @@ bool package_cache_write_partial(const char* path, const uint8_t* data, uint32_t
 bool package_remove(const char* path) {
     if (!security_policy::package_payload_path(path)) {
         security_policy::report_protected_path("package-remove-rejected", path);
+        return false;
+    }
+    return remove(path);
+}
+
+bool package_transport_remove(const char* path) {
+    if (!security_policy::package_transport_state_path(path)) {
+        security_policy::report_protected_path("package-transport-remove-rejected", path);
         return false;
     }
     return remove(path);

@@ -47,6 +47,10 @@ void init() {
         serial::line("ZENPKG_ACTIVE_PAYLOAD_INVALID");
         return;
     }
+    if (!transport_initialize()) {
+        serial::line("ZENPKG_TRANSPORT_INIT_REJECTED");
+        return;
+    }
     if (!cache_verify()) {
         serial::line("ZENPKG_CACHE_INIT_REJECTED");
         return;

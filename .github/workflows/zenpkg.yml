@@ -11,7 +11,9 @@ on:
       - 'tests/zenpkg_test.sh'
       - 'tests/zenrepo_test.sh'
       - 'tests/package_repository_kernel_test.cpp'
+      - 'tests/package_transport_journal_test.cpp'
       - 'tests/qemu_zenpkg.sh'
+      - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
@@ -42,7 +44,9 @@ on:
       - 'tests/zenpkg_test.sh'
       - 'tests/zenrepo_test.sh'
       - 'tests/package_repository_kernel_test.cpp'
+      - 'tests/package_transport_journal_test.cpp'
       - 'tests/qemu_zenpkg.sh'
+      - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
@@ -74,7 +78,7 @@ env:
 jobs:
   package-manager:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -92,21 +96,25 @@ jobs:
         run: |
           rm -f /tmp/zenpkg-check.log
           if ! make clean zenpkg-check > /tmp/zenpkg-check.log 2>&1; then
-            tail -n 180 /tmp/zenpkg-check.log
+            tail -n 220 /tmp/zenpkg-check.log
             exit 1
           fi
-          tail -n 80 /tmp/zenpkg-check.log
+          tail -n 100 /tmp/zenpkg-check.log
       - name: Run standalone ZenPkg format suite
         run: bash tests/zenpkg_test.sh
       - name: Run standalone signed repository suite
         run: bash tests/zenrepo_test.sh
-      - name: Compile kernel repository parser with sanitizers
+      - name: Compile kernel parsers and transport journal with sanitizers
         run: |
           mkdir -p build/sanitized
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             tests/package_repository_kernel_test.cpp -o build/sanitized/package-repository-kernel-test
           build/sanitized/package-repository-kernel-test build/zenrepo-test/fixtures
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/package_transport_journal_test.cpp -o build/sanitized/package-transport-journal-test
+          build/sanitized/package-transport-journal-test
       - name: Compile release host tools
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg/main.cpp -o build/zenpkg-release
@@ -130,19 +138,32 @@ jobs:
         run: |
           rm -f /tmp/zenpkg-qemu.log
           if ! make zenpkg-qemu > /tmp/zenpkg-qemu.log 2>&1; then
-            tail -n 240 /tmp/zenpkg-qemu.log
+            tail -n 280 /tmp/zenpkg-qemu.log
             exit 1
           fi
-          tail -n 120 /tmp/zenpkg-qemu.log
+          tail -n 140 /tmp/zenpkg-qemu.log
+      - name: Boot three phases and prove journal recovery across reboot
+        run: |
+          rm -f /tmp/zenpkg-transport-qemu.log
+          if ! make zenpkg-transport-qemu > /tmp/zenpkg-transport-qemu.log 2>&1; then
+            tail -n 320 /tmp/zenpkg-transport-qemu.log
+            exit 1
+          fi
+          tail -n 180 /tmp/zenpkg-transport-qemu.log
       - name: Verify resumable transport evidence
         run: |
-          serial=build/qemu/zenpkg/serial.log
-          grep -Fq 'ZENPKG_TRANSPORT_BEGIN name=hello-native version=0.2.0 offset=0' "$serial"
-          grep -Fq 'ZENPKG_TRANSPORT_CHUNK_COMMIT name=hello-native version=0.2.0' "$serial"
-          grep -Fq 'ZENPKG_TRANSPORT_COMPLETE name=hello-native version=0.2.0' "$serial"
-          test "$(grep -Fc 'ZENPKG_TRANSPORT_CHUNK_COMMIT name=hello-native version=0.2.0' "$serial")" -ge 1
-          ! grep -Fq 'ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$serial"
-          grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK name=hello-native version=0.2.0' "$serial"
+          lifecycle=build/qemu/zenpkg/serial.log
+          recovery=build/qemu/zenpkg-transport/serial.log
+          grep -Fq 'ZENPKG_TRANSPORT_BEGIN name=hello-native version=0.2.0 offset=0' "$lifecycle"
+          grep -Fq 'ZENPKG_TRANSPORT_COMPLETE name=hello-native version=0.2.0' "$lifecycle"
+          grep -Fq 'ZENPKG_TRANSPORT_PAUSED name=hello-native version=0.2.0 offset=512 expected=647' "$recovery"
+          grep -Fq 'ZENPKG_TRANSPORT_JOURNAL_RECOVERED name=hello-native version=0.2.0 offset=512 expected=647' "$recovery"
+          grep -Fq 'ZENPKG_TRANSPORT_RESUME name=hello-native version=0.2.0 offset=512 expected=647' "$recovery"
+          grep -Fq 'ZENPKG_TRANSPORT_COMPLETE name=hello-native version=0.2.0 offset=647 expected=647' "$recovery"
+          grep -Fq 'ZENPKG_TRANSPORT_JOURNAL_CLEARED name=hello-native version=0.2.0' "$recovery"
+          test "$(grep -Fc 'ZENPKG_TRANSPORT_CHUNK_COMMIT name=hello-native version=0.2.0' "$recovery")" -eq 2
+          ! grep -Fq 'ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$lifecycle" "$recovery"
+          ! grep -Fq 'ZENPKG_TRANSPORT_JOURNAL_INVALID_RESET' "$recovery"
       - name: Upload ZenPkg QEMU evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -153,6 +174,11 @@ jobs:
             build/qemu/zenpkg/serial-*.log
             build/qemu/zenpkg/monitor-*.log
             build/qemu/zenpkg/qemu-*.stderr
+            build/qemu/zenpkg-transport/serial.log
+            build/qemu/zenpkg-transport/serial-*.log
+            build/qemu/zenpkg-transport/monitor-*.log
+            build/qemu/zenpkg-transport/qemu-*.stderr
+            build/qemu/zenpkg-transport-runtime.img
           if-no-files-found: warn
           retention-days: 14
       - name: Upload ZenPkg diagnostics
@@ -163,4 +189,7 @@ jobs:
           path: |
             /tmp/zenpkg-check.log
             /tmp/zenpkg-qemu.log
+            /tmp/zenpkg-transport-qemu.log
+            build/qemu/zenpkg/**
+            build/qemu/zenpkg-transport/**
           if-no-files-found: ignore
