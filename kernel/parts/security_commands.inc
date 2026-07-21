@@ -10,6 +10,7 @@ void command_guard(char* args) {
         security_guard::print_status();
         process::print_capability_status();
         zcap::print_status();
+        zmid::print_status();
         security_audit::print_status();
         zgdb::print_status();
         return;
@@ -31,6 +32,18 @@ void command_guard(char* args) {
         else console::warning("Signed capability policy update rejected; inspect the serial reason.");
         return;
     }
+    if (string_equal(subcommand, "intelligence")) {
+        begin_view("ZENOVGUARD SIGNED MALWARE INTELLIGENCE");
+        zmid::print_status();
+        return;
+    }
+    if (string_equal(subcommand, "intelligence-update")) {
+        begin_view("MALWARE INTELLIGENCE UPDATE");
+        if (!*args) { console::warning("Usage: guard intelligence-update <signed-zmid-path>"); return; }
+        if (zmid::update(args)) console::success("ZMID_ATOMIC_UPDATE_OK");
+        else console::warning("Signed intelligence update rejected; inspect the serial reason.");
+        return;
+    }
     if (string_equal(subcommand, "database")) {
         begin_view("ZENOVGUARD SIGNED DATABASE");
         zgdb::print_status();
@@ -45,7 +58,7 @@ void command_guard(char* args) {
     }
     if (string_equal(subcommand, "selftest")) {
         begin_view("ZENOVGUARD SELF-TEST");
-        if (security_guard::self_test() && security_audit::self_test() && zcap::self_test() && process::capability_self_test()) {
+        if (security_guard::self_test() && security_audit::self_test() && zcap::self_test() && zmid::self_test() && process::capability_self_test()) {
             console::success("ZENOV_GUARD_SELFTEST_OK"); serial::line("ZENOV_GUARD_SELFTEST_OK");
         } else {
             console::warning("ZENOV_GUARD_SELFTEST_FAILED"); serial::line("ZENOV_GUARD_SELFTEST_FAILED");
@@ -78,10 +91,18 @@ void command_guard(char* args) {
     }
     if (string_equal(subcommand, "quarantine")) {
         begin_view("ZENOVGUARD QUARANTINE");
-        if (!*args) { console::warning("Usage: guard quarantine <path>"); return; }
+        if (!*args || string_equal(args, "list")) { security_guard::print_quarantine(); return; }
+        if (string_starts_with(args, "delete ")) {
+            char* path = args + 7U;
+            while (is_space(*path)) ++path;
+            if (!*path) { console::warning("Usage: guard quarantine delete <quarantine-path>"); return; }
+            if (security_guard::delete_quarantine(path)) console::success("ZENOV_GUARD_QUARANTINE_DELETE_OK");
+            else console::warning("Quarantine deletion rejected or audit append failed.");
+            return;
+        }
         if (security_guard::quarantine_path(args)) console::success("ZENOV_GUARD_QUARANTINE_OK");
         else console::warning("Quarantine rejected or persistent audit commit failed.");
         return;
     }
-    console::warning("Usage: guard status | capabilities | capability-policy | capability-update <zcap> | database | update <zgdb> | scan <path|all> | quarantine <path> | log [verify] | selftest");
+    console::warning("Usage: guard status | intelligence | intelligence-update <zmid> | capabilities | capability-policy | capability-update <zcap> | database | update <zgdb> | scan <path|all> | quarantine [list|delete <path>|<path>] | log [verify] | selftest");
 }

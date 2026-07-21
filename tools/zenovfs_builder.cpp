@@ -78,14 +78,15 @@ std::vector<std::uint8_t> empty_audit_journal() {
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 17) {
-            std::cerr << "usage: zenovfs-builder <hello.zex> <fileio.elf> <args.elf> <console.elf> <protect.elf> <kaccess.elf> <zenovapp.zex> <zgdb-v3> <zgdb-v4> <zgdb-tampered> <zgdb-wrong-key> <zcap-v1> <zcap-v2> <zcap-tampered> <zcap-wrong-key> <output.img>\n";
+        if (argc != 21) {
+            std::cerr << "usage: zenovfs-builder <hello.zex> <fileio.elf> <args.elf> <console.elf> <protect.elf> <kaccess.elf> <zenovapp.zex> <zgdb-v3> <zgdb-v4> <zgdb-tampered> <zgdb-wrong-key> <zcap-v1> <zcap-v2> <zcap-tampered> <zcap-wrong-key> <zmid-v1> <zmid-v2> <zmid-tampered> <zmid-wrong-key> <output.img>\n";
             return 2;
         }
         const auto hello = read_all(argv[1]), fileio = read_all(argv[2]), args = read_all(argv[3]), console = read_all(argv[4]);
         const auto protect = read_all(argv[5]), kaccess = read_all(argv[6]), zenovapp = read_all(argv[7]);
         const auto zgdb_v3 = read_all(argv[8]), zgdb_v4 = read_all(argv[9]), zgdb_tampered = read_all(argv[10]), zgdb_wrong_key = read_all(argv[11]);
         const auto zcap_v1 = read_all(argv[12]), zcap_v2 = read_all(argv[13]), zcap_tampered = read_all(argv[14]), zcap_wrong_key = read_all(argv[15]);
+        const auto zmid_v1 = read_all(argv[16]), zmid_v2 = read_all(argv[17]), zmid_tampered = read_all(argv[18]), zmid_wrong_key = read_all(argv[19]);
         std::vector<std::uint8_t> disk(static_cast<std::size_t>(kTotalSectors) * kSectorSize, 0);
         std::array<Entry, kEntryCount> entries{};
         Superblock super{{'Z','E','N','O','V','F','S','1'}, 1u, kTotalSectors, kEntryCount, kEntrySectors, kDataStart, kSlotSectors, 1u,
@@ -104,7 +105,8 @@ int main(int argc, char** argv) {
             "[system]\nversion=0.1.1\n[console]\ntheme=midnight\nprompt=zenov>\n"
             "[storage]\nmount=/data\nfilesystem=ZenovFS1\ntransaction=cow\n"
             "[security]\nengine=ZenovGuard\ndatabase=ZGDB2\nroot=6f788074c018f5aa\n"
-            "capabilities=ZCAP1\ncapability_root=9202c73fad96ad66\naudit=ZGAL1\n"));
+            "capabilities=ZCAP1\ncapability_root=9202c73fad96ad66\n"
+            "intelligence=ZMID1\nintelligence_root=6ca6a5275544c533\naudit=ZGAL1\n"));
         add_file(disk, entries, 8, "/apps/args.elf", args); add_file(disk, entries, 9, "/apps/console.elf", console);
         add_file(disk, entries, 10, "/apps/protect.elf", protect); add_file(disk, entries, 11, "/apps/kaccess.elf", kaccess);
         add_file(disk, entries, 12, "/apps/zenovapp.zex", zenovapp);
@@ -122,14 +124,26 @@ int main(int argc, char** argv) {
         add_file(disk, entries, 25, "/security/updates/zcap-v2.zcap", zcap_v2);
         add_file(disk, entries, 26, "/security/updates/zcap-tampered.zcap", zcap_tampered);
         add_file(disk, entries, 27, "/security/updates/zcap-wrong-key.zcap", zcap_wrong_key);
+        add_file(disk, entries, 28, "/security/zenovguard-intelligence.zmid", zmid_v1);
+        add_file(disk, entries, 29, "/security/zenovguard-intelligence.version", text_bytes("1\n"));
+        add_file(disk, entries, 30, "/security/updates/zmid-v1.zmid", zmid_v1);
+        add_file(disk, entries, 31, "/security/updates/zmid-v2.zmid", zmid_v2);
+        add_file(disk, entries, 32, "/security/updates/zmid-tampered.zmid", zmid_tampered);
+        add_file(disk, entries, 33, "/security/updates/zmid-wrong-key.zmid", zmid_wrong_key);
+        add_directory(entries, 34, "/samples");
+        add_file(disk, entries, 35, "/samples/clean.txt", text_bytes("ZENOV_ZMID_CLEAN_VECTOR_V1\n"));
+        add_file(disk, entries, 36, "/samples/ransomware-test.bin", text_bytes("prefix-ZENOV_RANSOMWARE_TEST_V1-suffix\n"));
+        add_file(disk, entries, 37, "/samples/pua-test.bin", text_bytes("ZENOV_PUA_TEST_V1\n"));
+        add_file(disk, entries, 38, "/samples/malware-v2.bin", text_bytes("ZENOV_MALWARE_TEST_V2\n"));
+        add_directory(entries, 39, "/quarantine");
         std::memcpy(disk.data(), &super, sizeof(super));
         std::memcpy(disk.data() + kSectorSize, entries.data(), sizeof(entries));
-        std::ofstream output(argv[16], std::ios::binary | std::ios::trunc);
+        std::ofstream output(argv[20], std::ios::binary | std::ios::trunc);
         if (!output) throw std::runtime_error("cannot open output image");
         output.write(reinterpret_cast<const char*>(disk.data()), static_cast<std::streamsize>(disk.size()));
         if (!output) throw std::runtime_error("cannot write output image");
         std::cout << "zenovfs-builder: OK version=0.1.1 entries=" << kEntryCount
-                  << " apps=7 zgdb=schema2-v3+v4+2-negative zcap=schema1-v1+v2+2-negative audit=ZGAL1-8288B zenov_source_app=" << zenovapp.size() << "\n";
+                  << " apps=7 zgdb=schema2-v3+v4+2-negative zcap=schema1-v1+v2+2-negative zmid=schema1-v1+v2+2-negative rules=hash+pattern audit=ZGAL1-8288B zenov_source_app=" << zenovapp.size() << "\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zenovfs-builder: " << error.what() << "\n";
