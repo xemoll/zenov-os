@@ -13,6 +13,7 @@ import time
 from typing import Any
 
 PROMPT = "zenov> "
+BREAK_EVENT = "pwritev"
 
 
 class QmpClient:
@@ -58,7 +59,7 @@ class QmpClient:
             self.buffer += chunk
 
     def command(self, execute: str, arguments: dict[str, Any] | None = None,
-                timeout: float = 10.0) -> dict[str, Any]:
+                timeout: float = 20.0) -> dict[str, Any]:
         request_id = f"cmd-{time.monotonic_ns()}"
         request: dict[str, Any] = {"execute": execute, "id": request_id}
         if arguments is not None:
@@ -76,20 +77,14 @@ class QmpClient:
                 raise RuntimeError(f"QMP command failed: {message['error']}")
             return message
 
-    def hmp(self, command_line: str) -> None:
-        self.command("human-monitor-command", {"command-line": command_line})
-
-    def wait_event(self, name: str, timeout: float = 60.0) -> dict[str, Any]:
-        for index, event in enumerate(self.events):
-            if event.get("event") == name:
-                return self.events.pop(index)
-        deadline = time.monotonic() + timeout
-        while True:
-            message = self._read_message(deadline)
-            if message.get("event") == name:
-                return message
-            if "event" in message:
-                self.events.append(message)
+    def hmp(self, command_line: str, timeout: float = 60.0) -> str:
+        response = self.command(
+            "human-monitor-command",
+            {"command-line": command_line},
+            timeout=timeout,
+        )
+        result = response.get("return", "")
+        return result if isinstance(result, str) else json.dumps(result, sort_keys=True)
 
 
 def wait_for_text(path: Path, text: str, timeout: float = 60.0) -> None:
@@ -125,36 +120,17 @@ def send_command(qmp: QmpClient, command: str) -> None:
     qmp.hmp("sendkey ret 10")
 
 
-def read_env(path: Path) -> dict[str, int]:
-    values: dict[str, int] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        if raw and not raw.startswith("#"):
-            key, value = raw.split("=", 1)
-            values[key] = int(value)
-    return values
-
-
-def write_config(path: Path, sector: int) -> None:
-    path.write_text(
-        "[inject-error]\n"
-        'event = "pwritev"\n'
-        'errno = "5"\n'
-        f'sector = "{sector}"\n',
-        encoding="utf-8",
-    )
-
-
 def launch(qemu: str, boot: Path, runtime: Path, serial: Path, qmp_path: Path,
-           stderr: Path, config: Path | None) -> tuple[subprocess.Popen[bytes], QmpClient, Any]:
+           stderr: Path, use_blkdebug: bool) -> tuple[subprocess.Popen[bytes], QmpClient, Any]:
     for path in (serial, qmp_path, stderr):
         path.unlink(missing_ok=True)
     stderr_handle = stderr.open("wb")
     command = [qemu, "-drive", f"file={boot},format=raw,if=floppy"]
-    if config is not None:
+    if use_blkdebug:
         command += [
             "-blockdev", f"driver=file,node-name=runtime-file,filename={runtime},cache.direct=on,cache.no-flush=off",
             "-blockdev", "driver=raw,node-name=runtime-raw,file=runtime-file",
-            "-blockdev", f"driver=blkdebug,node-name=runtime-debug,image=runtime-raw,config={config}",
+            "-blockdev", "driver=blkdebug,node-name=runtime-debug,image=runtime-raw",
             "-device", "ide-hd,drive=runtime-debug,bus=ide.0,unit=0",
         ]
     else:
@@ -176,6 +152,10 @@ def launch(qemu: str, boot: Path, runtime: Path, serial: Path, qmp_path: Path,
 
 
 def stop(process: subprocess.Popen[bytes], qmp: QmpClient, stderr_handle: Any) -> None:
+    try:
+        qmp.command("stop", timeout=3.0)
+    except (ConnectionError, TimeoutError):
+        pass
     try:
         qmp.command("quit", timeout=3.0)
     except (ConnectionError, TimeoutError):
@@ -205,36 +185,57 @@ def wait_boot(serial: Path) -> None:
         wait_for_text(serial, marker)
 
 
+def qemu_io(qmp: QmpClient, command: str, timeout: float = 60.0) -> str:
+    return qmp.hmp(f'qemu-io runtime-debug "{command}"', timeout=timeout)
+
+
 def fault_boot(qemu: str, boot: Path, runtime: Path, out: Path, name: str,
-               sector: int, guest_command: str) -> None:
-    config = out / f"blkdebug-{name}.conf"
+               ordinal: int, guest_command: str) -> None:
+    if ordinal <= 0:
+        raise ValueError("breakpoint ordinal must be positive")
     serial = out / f"serial-{name}-fault.log"
     qmp_path = out / f"qmp-{name}-fault.sock"
     stderr = out / f"qemu-{name}-fault.stderr"
-    event_evidence = out / f"qmp-{name}-events.json"
-    write_config(config, sector)
-    process, qmp, stderr_handle = launch(qemu, boot, runtime, serial, qmp_path, stderr, config)
+    evidence_path = out / f"qmp-{name}-break.json"
+    tag = f"zenpkg-{name}"
+    process, qmp, stderr_handle = launch(qemu, boot, runtime, serial, qmp_path, stderr, True)
+    evidence: dict[str, Any] = {
+        "event": BREAK_EVENT,
+        "ordinal": ordinal,
+        "tag": tag,
+        "guest_command": guest_command,
+        "hits": [],
+    }
     try:
         wait_boot(serial)
-        if any(event.get("event") == "BLOCK_IO_ERROR" for event in qmp.events):
-            raise RuntimeError(f"fault triggered before explicit package command: {name}")
+        break_output = qemu_io(qmp, f"break {BREAK_EVENT} {tag}")
+        if "Could not" in break_output or "not found" in break_output:
+            raise RuntimeError(f"cannot arm blkdebug breakpoint: {break_output.strip()}")
+        evidence["break_output"] = break_output
         send_command(qmp, guest_command)
-        event = qmp.wait_event("BLOCK_IO_ERROR")
-        data = event.get("data", {})
-        if data.get("operation") not in ("write", None):
-            raise RuntimeError(f"unexpected block error operation: {data}")
-        event_evidence.write_text(json.dumps(event, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        for hit in range(1, ordinal + 1):
+            wait_output = qemu_io(qmp, f"wait_break {tag}", timeout=60.0)
+            evidence["hits"].append({"ordinal": hit, "wait_output": wait_output})
+            if hit < ordinal:
+                resume_output = qemu_io(qmp, f"resume {tag}")
+                if "Could not" in resume_output:
+                    raise RuntimeError(f"cannot resume blkdebug breakpoint: {resume_output.strip()}")
+                evidence["hits"][-1]["resume_output"] = resume_output
+        evidence["status_at_crash"] = qmp.command("query-status").get("return", {})
+        evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     finally:
         stop(process, qmp, stderr_handle)
     if contains(serial, "ZENPKG_CACHE_FETCH_COMMIT_OK"):
-        raise RuntimeError(f"fault scenario completed before host crash: {name}")
+        raise RuntimeError(f"fault scenario completed before breakpoint crash: {name}")
+    if stderr.stat().st_size:
+        raise RuntimeError(f"fault QEMU stderr is not empty: {stderr}")
 
 
 def recovery_boot(qemu: str, boot: Path, runtime: Path, out: Path, name: str) -> None:
     serial = out / f"serial-{name}-recovery.log"
     qmp_path = out / f"qmp-{name}-recovery.sock"
     stderr = out / f"qemu-{name}-recovery.stderr"
-    process, qmp, stderr_handle = launch(qemu, boot, runtime, serial, qmp_path, stderr, None)
+    process, qmp, stderr_handle = launch(qemu, boot, runtime, serial, qmp_path, stderr, False)
     try:
         wait_boot(serial)
         send_command(qmp, "pkg transport resume hello-native")
@@ -261,22 +262,21 @@ def recovery_boot(qemu: str, boot: Path, runtime: Path, out: Path, name: str) ->
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Inject exact-sector EIO through a structured QEMU blkdebug node")
+    parser = argparse.ArgumentParser(description="Crash ZenPkg at live QEMU blkdebug pwritev breakpoints")
     parser.add_argument("--boot", type=Path, required=True)
     parser.add_argument("--fixtures", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--qemu", default=os.environ.get("QEMU", "qemu-system-i386"))
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    values = read_env(args.fixtures / "sectors.env")
     scenarios = [
-        ("partial-old-metadata", "resume.img", values["PARTIAL_ENTRY_SECTOR"]),
-        ("journal-old-metadata", "resume.img", values["JOURNAL_ENTRY_SECTOR"]),
-        ("rename-metadata", "ready.img", values["PARTIAL_ENTRY_SECTOR"]),
-        ("journal-remove", "ready.img", values["JOURNAL_ENTRY_SECTOR"]),
+        ("chunk-first-write", "resume.img", 1),
+        ("chunk-second-write", "resume.img", 2),
+        ("chunk-metadata-sync", "resume.img", 8),
+        ("rename-first-write", "ready.img", 1),
     ]
     summary: list[str] = []
-    for name, fixture, sector in scenarios:
+    for name, fixture, ordinal in scenarios:
         runtime = args.out / f"runtime-{name}.img"
         shutil.copyfile(args.fixtures / fixture, runtime)
         fault_boot(
@@ -285,15 +285,17 @@ def main() -> int:
             runtime,
             args.out,
             name,
-            sector,
+            ordinal,
             "pkg transport resume hello-native",
         )
         recovery_boot(args.qemu, args.boot, runtime, args.out, name)
-        summary.append(f"ZENPKG_BLKDEBUG_SCENARIO_OK name={name} sector={sector} event=BLOCK_IO_ERROR")
+        summary.append(
+            f"ZENPKG_BLKDEBUG_BREAKPOINT_SCENARIO_OK name={name} event={BREAK_EVENT} ordinal={ordinal}"
+        )
     summary_path = args.out / "summary.log"
     summary_path.write_text("\n".join(summary) + "\n", encoding="utf-8")
     print(summary_path.read_text(encoding="utf-8"), end="")
-    print(f"ZENPKG_BLKDEBUG_LIVE_IO_FAULTS_OK scenarios={len(scenarios)} qemu-boots={len(scenarios) * 2}")
+    print(f"ZENPKG_BLKDEBUG_LIVE_CRASHES_OK scenarios={len(scenarios)} qemu-boots={len(scenarios) * 2}")
     return 0
 
 
