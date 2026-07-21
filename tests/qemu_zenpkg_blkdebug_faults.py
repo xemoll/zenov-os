@@ -29,6 +29,7 @@ class QmpClient:
                 time.sleep(0.05)
         self.sock.settimeout(0.25)
         self.buffer = b""
+        self.events: list[dict[str, Any]] = []
         greeting = self._read_message(deadline)
         if "QMP" not in greeting:
             raise RuntimeError(f"invalid QMP greeting: {greeting}")
@@ -43,9 +44,9 @@ class QmpClient:
             if newline >= 0:
                 raw = self.buffer[:newline].strip()
                 self.buffer = self.buffer[newline + 1 :]
-                if not raw:
-                    continue
-                return json.loads(raw.decode("utf-8"))
+                if raw:
+                    return json.loads(raw.decode("utf-8"))
+                continue
             if time.monotonic() >= deadline:
                 raise TimeoutError("timed out waiting for QMP message")
             try:
@@ -66,6 +67,9 @@ class QmpClient:
         deadline = time.monotonic() + timeout
         while True:
             message = self._read_message(deadline)
+            if "event" in message:
+                self.events.append(message)
+                continue
             if message.get("id") != request_id:
                 continue
             if "error" in message:
@@ -75,12 +79,17 @@ class QmpClient:
     def hmp(self, command_line: str) -> None:
         self.command("human-monitor-command", {"command-line": command_line})
 
-    def wait_event(self, name: str, timeout: float = 30.0) -> dict[str, Any]:
+    def wait_event(self, name: str, timeout: float = 60.0) -> dict[str, Any]:
+        for index, event in enumerate(self.events):
+            if event.get("event") == name:
+                return self.events.pop(index)
         deadline = time.monotonic() + timeout
         while True:
             message = self._read_message(deadline)
             if message.get("event") == name:
                 return message
+            if "event" in message:
+                self.events.append(message)
 
 
 def wait_for_text(path: Path, text: str, timeout: float = 60.0) -> None:
@@ -92,24 +101,19 @@ def wait_for_text(path: Path, text: str, timeout: float = 60.0) -> None:
     raise TimeoutError(f"missing serial marker {text!r} in {path}")
 
 
-def serial_contains(path: Path, text: str) -> bool:
+def contains(path: Path, text: str) -> bool:
     return path.exists() and text in path.read_text(encoding="utf-8", errors="replace")
 
 
 def send_text(qmp: QmpClient, text: str) -> None:
+    keymap = {" ": "spc", ".": "dot", "-": "minus", "_": "shift-minus", "/": "slash"}
     for char in text:
         if char.islower() or char.isdigit():
             key = char
         elif char.isupper():
             key = f"shift-{char.lower()}"
         else:
-            key = {
-                " ": "spc",
-                ".": "dot",
-                "-": "minus",
-                "_": "shift-minus",
-                "/": "slash",
-            }.get(char)
+            key = keymap.get(char)
             if key is None:
                 raise ValueError(f"unsupported QEMU key: {char!r}")
         qmp.hmp(f"sendkey {key} 10")
@@ -124,14 +128,13 @@ def send_command(qmp: QmpClient, command: str) -> None:
 def read_env(path: Path) -> dict[str, int]:
     values: dict[str, int] = {}
     for raw in path.read_text(encoding="utf-8").splitlines():
-        if not raw or raw.startswith("#"):
-            continue
-        key, value = raw.split("=", 1)
-        values[key] = int(value)
+        if raw and not raw.startswith("#"):
+            key, value = raw.split("=", 1)
+            values[key] = int(value)
     return values
 
 
-def write_blkdebug_config(path: Path, sector: int) -> None:
+def write_config(path: Path, sector: int) -> None:
     path.write_text(
         "[inject-error]\n"
         'event = "write_aio"\n'
@@ -142,49 +145,36 @@ def write_blkdebug_config(path: Path, sector: int) -> None:
     )
 
 
-def qemu_command(qemu: str, boot_image: Path, runtime_image: Path, serial: Path,
-                 qmp_socket: Path, stderr: Path, config: Path | None) -> tuple[list[str], Any]:
+def launch(qemu: str, boot: Path, runtime: Path, serial: Path, qmp_path: Path,
+           stderr: Path, config: Path | None) -> tuple[subprocess.Popen[bytes], QmpClient, Any]:
+    for path in (serial, qmp_path, stderr):
+        path.unlink(missing_ok=True)
     stderr_handle = stderr.open("wb")
-    command = [
-        qemu,
-        "-drive", f"file={boot_image},format=raw,if=floppy",
-    ]
+    command = [qemu, "-drive", f"file={boot},format=raw,if=floppy"]
     if config is None:
-        command += ["-drive", f"file={runtime_image},format=raw,if=ide,index=0,media=disk,cache=none"]
+        command += ["-drive", f"file={runtime},format=raw,if=ide,index=0,media=disk,cache=none"]
     else:
         command += [
-            "-drive", f"if=none,id=faultdisk,cache=none,file=blkdebug:{config}:{runtime_image}",
+            "-drive", f"if=none,id=faultdisk,format=raw,cache=none,file=blkdebug:{config}:{runtime}",
             "-device", "ide-hd,drive=faultdisk,bus=ide.0,unit=0",
         ]
     command += [
         "-boot", "a", "-m", "32M", "-machine", "pc,vmport=off", "-vga", "std",
         "-display", "none", "-serial", f"file:{serial}",
-        "-qmp", f"unix:{qmp_socket},server=on,wait=off", "-monitor", "none",
+        "-qmp", f"unix:{qmp_path},server=on,wait=off", "-monitor", "none",
         "-no-reboot", "-no-shutdown",
     ]
-    return command, stderr_handle
-
-
-def launch_qemu(qemu: str, boot_image: Path, runtime_image: Path, serial: Path,
-                qmp_socket: Path, stderr: Path, config: Path | None) -> tuple[subprocess.Popen[bytes], QmpClient, Any]:
-    for path in (serial, qmp_socket, stderr):
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
-    command, stderr_handle = qemu_command(qemu, boot_image, runtime_image, serial, qmp_socket, stderr, config)
     process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr_handle)
     try:
-        qmp = QmpClient(qmp_socket)
+        return process, QmpClient(qmp_path), stderr_handle
     except Exception:
         process.kill()
         process.wait(timeout=10)
         stderr_handle.close()
         raise
-    return process, qmp, stderr_handle
 
 
-def stop_qemu(process: subprocess.Popen[bytes], qmp: QmpClient, stderr_handle: Any) -> None:
+def stop(process: subprocess.Popen[bytes], qmp: QmpClient, stderr_handle: Any) -> None:
     try:
         qmp.command("quit", timeout=3.0)
     except (ConnectionError, TimeoutError):
@@ -201,82 +191,77 @@ def stop_qemu(process: subprocess.Popen[bytes], qmp: QmpClient, stderr_handle: A
         raise RuntimeError(f"QEMU exited with status {process.returncode}")
 
 
-def wait_base_boot(serial: Path, require_manager: bool = True) -> None:
-    for marker in (
+def wait_boot(serial: Path, manager: bool = True) -> None:
+    markers = [
         "ZENOVOS_BOOT_OK",
         "ZENOVFS_MOUNT_OK",
         "ZENOV_GUARD_READY",
         "ZENREPO_READY trust=verified packages=2",
         "ZENPKG_SHA256_OK",
-    ):
+    ]
+    if manager:
+        markers.append("ZENPKG_MANAGER_READY")
+    markers.append(PROMPT)
+    for marker in markers:
         wait_for_text(serial, marker)
-    if require_manager:
-        wait_for_text(serial, "ZENPKG_MANAGER_READY")
-    wait_for_text(serial, PROMPT)
 
 
-def fault_boot(qemu: str, boot_image: Path, runtime_image: Path, out: Path,
-               name: str, sector: int, command: str | None) -> dict[str, Any]:
+def fault_boot(qemu: str, boot: Path, runtime: Path, out: Path, name: str,
+               sector: int, guest_command: str | None) -> None:
     config = out / f"blkdebug-{name}.conf"
     serial = out / f"serial-{name}-fault.log"
-    qmp_socket = out / f"qmp-{name}-fault.sock"
+    qmp_path = out / f"qmp-{name}-fault.sock"
     stderr = out / f"qemu-{name}-fault.stderr"
     events = out / f"qmp-{name}-events.json"
-    write_blkdebug_config(config, sector)
-    process, qmp, stderr_handle = launch_qemu(
-        qemu, boot_image, runtime_image, serial, qmp_socket, stderr, config
-    )
+    write_config(config, sector)
+    process, qmp, stderr_handle = launch(qemu, boot, runtime, serial, qmp_path, stderr, config)
     try:
-        if command is not None:
-            wait_base_boot(serial)
-            send_command(qmp, command)
-        event = qmp.wait_event("BLOCK_IO_ERROR", timeout=60.0)
+        if guest_command is not None:
+            wait_boot(serial)
+            send_command(qmp, guest_command)
+        event = qmp.wait_event("BLOCK_IO_ERROR")
         data = event.get("data", {})
         if data.get("operation") not in ("write", None):
-            raise RuntimeError(f"unexpected BLOCK_IO_ERROR operation: {data}")
+            raise RuntimeError(f"unexpected block error operation: {data}")
         events.write_text(json.dumps(event, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     finally:
-        stop_qemu(process, qmp, stderr_handle)
-    if serial_contains(serial, "ZENPKG_CACHE_FETCH_COMMIT_OK"):
-        raise RuntimeError(f"fault scenario {name} completed before injected crash")
-    return event
+        stop(process, qmp, stderr_handle)
+    if contains(serial, "ZENPKG_CACHE_FETCH_COMMIT_OK"):
+        raise RuntimeError(f"fault scenario completed before crash: {name}")
 
 
-def recovery_boot(qemu: str, boot_image: Path, runtime_image: Path, out: Path, name: str) -> None:
+def recovery_boot(qemu: str, boot: Path, runtime: Path, out: Path, name: str) -> None:
     serial = out / f"serial-{name}-recovery.log"
-    qmp_socket = out / f"qmp-{name}-recovery.sock"
+    qmp_path = out / f"qmp-{name}-recovery.sock"
     stderr = out / f"qemu-{name}-recovery.stderr"
-    process, qmp, stderr_handle = launch_qemu(
-        qemu, boot_image, runtime_image, serial, qmp_socket, stderr, None
-    )
+    process, qmp, stderr_handle = launch(qemu, boot, runtime, serial, qmp_path, stderr, None)
     try:
-        wait_base_boot(serial)
+        wait_boot(serial)
         send_command(qmp, "pkg transport resume hello-native")
         deadline = time.monotonic() + 60.0
         while time.monotonic() < deadline:
-            if serial_contains(serial, "ZENPKG_CACHE_FETCH_COMMIT_OK name=hello-native version=0.2.0") or \
-               serial_contains(serial, "ZENPKG_CACHE_HIT name=hello-native version=0.2.0"):
+            if contains(serial, "ZENPKG_CACHE_FETCH_COMMIT_OK name=hello-native version=0.2.0") or \
+               contains(serial, "ZENPKG_CACHE_HIT name=hello-native version=0.2.0"):
                 break
             time.sleep(0.05)
         else:
-            raise TimeoutError(f"recovery did not produce a verified cache object: {name}")
+            raise TimeoutError(f"recovery did not produce verified cache object: {name}")
         send_command(qmp, "pkg cache verify")
         wait_for_text(serial, "ZENPKG_CACHE_VERIFY_OK objects=1 partials=0")
         send_command(qmp, "fsck")
         wait_for_text(serial, "ZENOVFS_FSCK_OK")
     finally:
-        stop_qemu(process, qmp, stderr_handle)
+        stop(process, qmp, stderr_handle)
     text = serial.read_text(encoding="utf-8", errors="replace")
-    forbidden = ("PANIC", "ASSERT", "DOUBLE FAULT", "ZENPKG_CACHE_INIT_REJECTED")
-    for marker in forbidden:
+    for marker in ("PANIC", "ASSERT", "DOUBLE FAULT", "ZENPKG_CACHE_INIT_REJECTED"):
         if marker in text:
             raise RuntimeError(f"recovery {name} contains forbidden marker: {marker}")
-    if stderr.stat().st_size != 0:
+    if stderr.stat().st_size:
         raise RuntimeError(f"recovery QEMU stderr is not empty: {stderr}")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Inject live QEMU blkdebug EIO faults into ZenPkg transport metadata writes")
+    parser = argparse.ArgumentParser(description="Inject QEMU blkdebug EIO into live ZenPkg metadata writes")
     parser.add_argument("--boot", type=Path, required=True)
     parser.add_argument("--fixtures", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
@@ -290,19 +275,16 @@ def main() -> int:
         ("rename-metadata", "ready.img", values["PARTIAL_ENTRY_SECTOR"], "pkg transport resume hello-native"),
         ("journal-remove", "committed.img", values["JOURNAL_ENTRY_SECTOR"], None),
     ]
-    combined: list[str] = []
-    for name, fixture_name, sector, command in scenarios:
+    summary: list[str] = []
+    for name, fixture, sector, guest_command in scenarios:
         runtime = args.out / f"runtime-{name}.img"
-        shutil.copyfile(args.fixtures / fixture_name, runtime)
-        event = fault_boot(args.qemu, args.boot, runtime, args.out, name, sector, command)
+        shutil.copyfile(args.fixtures / fixture, runtime)
+        fault_boot(args.qemu, args.boot, runtime, args.out, name, sector, guest_command)
         recovery_boot(args.qemu, args.boot, runtime, args.out, name)
-        combined.append(
-            f"ZENPKG_BLKDEBUG_SCENARIO_OK name={name} sector={sector} "
-            f"event={event.get('event', '<missing>')}"
-        )
-    summary = args.out / "summary.log"
-    summary.write_text("\n".join(combined) + "\n", encoding="utf-8")
-    print(summary.read_text(encoding="utf-8"), end="")
+        summary.append(f"ZENPKG_BLKDEBUG_SCENARIO_OK name={name} sector={sector} event=BLOCK_IO_ERROR")
+    summary_path = args.out / "summary.log"
+    summary_path.write_text("\n".join(summary) + "\n", encoding="utf-8")
+    print(summary_path.read_text(encoding="utf-8"), end="")
     print(f"ZENPKG_BLKDEBUG_LIVE_IO_FAULTS_OK scenarios={len(scenarios)} qemu-boots={len(scenarios) * 2}")
     return 0
 
