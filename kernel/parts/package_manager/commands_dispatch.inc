@@ -80,11 +80,43 @@ void cache_command(char* input) {
     }
 }
 
+void transport_command(char* input) {
+    char* action = nullptr;
+    char* arguments = nullptr;
+    if (!split_subcommand(input, action, arguments)) {
+        console::line("Usage: pkg transport status|step <name>|resume <name>|cancel");
+        return;
+    }
+    if (string_equal(action, "status")) {
+        transport_status();
+    } else if (string_equal(action, "step")) {
+        lower_in_place(arguments);
+        if (!*arguments) {
+            console::warning("Usage: pkg transport step <name>");
+            return;
+        }
+        const TransportOutcome outcome = fetch_latest_step(arguments);
+        if (outcome == TransportOutcome::pending) console::success("PKG_TRANSPORT_STEP_PENDING");
+        else if (outcome == TransportOutcome::complete) console::success("PKG_TRANSPORT_STEP_COMPLETE");
+        else console::warning("Transport step failed.");
+    } else if (string_equal(action, "resume")) {
+        lower_in_place(arguments);
+        if (!*arguments) console::warning("Usage: pkg transport resume <name>");
+        else if (fetch_latest(arguments)) console::success("PKG_TRANSPORT_RESUME_OK");
+        else console::warning("Transport resume failed.");
+    } else if (string_equal(action, "cancel")) {
+        if (transport_cancel()) console::success("PKG_TRANSPORT_CANCEL_OK");
+        else console::warning("Transport cancellation failed.");
+    } else {
+        console::warning("Unknown pkg transport action.");
+    }
+}
+
 void command(char* input) {
     char* action = nullptr;
     char* arguments = nullptr;
     if (!split_subcommand(input, action, arguments)) {
-        console::line("Usage: pkg status|list|search|plan|verify|fetch|install|upgrade|repair|policy|info|rollback|remove|run|cache|repo");
+        console::line("Usage: pkg status|list|search|plan|verify|fetch|install|upgrade|repair|policy|info|rollback|remove|run|cache|transport|repo");
         return;
     }
     if (string_equal(action, "status")) {
@@ -136,6 +168,8 @@ void command(char* input) {
         run_package(arguments);
     } else if (string_equal(action, "cache")) {
         cache_command(arguments);
+    } else if (string_equal(action, "transport")) {
+        transport_command(arguments);
     } else if (string_equal(action, "repo")) {
         repository_command(arguments);
     } else {
