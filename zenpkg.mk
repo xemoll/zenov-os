@@ -47,6 +47,9 @@ $(BUILD)/zenpkg-transport-fault-test: tools/zenpkg_transport_fault_test.cpp tool
 $(BUILD)/zenpkg-blkdebug-seed: tools/zenpkg_blkdebug_seed.cpp tools/zenov_audit_format.hpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tools/zenpkg_blkdebug_seed.cpp -o $@
 
+$(BUILD)/zenpkg-blkdebug-qemu-test: tools/zenpkg_blkdebug_qemu_test.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) -include fcntl.h -pthread $< -o $@
+
 $(BUILD)/zenrepo-metadata/.stamp: $(ZENREPO_FIXTURE_MATERIALIZER) $(wildcard tools/zenrepo/fixtures/*.inc) | $(BUILD)
 	bash $(ZENREPO_FIXTURE_MATERIALIZER) $(BUILD)/zenrepo-metadata
 	@touch $@
@@ -95,7 +98,7 @@ $(BUILD)/zenpkg-manifest.json: $(ZENPKG_PACKAGES) $(ZENREPO_METADATA) $(ZENPKG_D
 zenrepo-check: $(BUILD)/zenrepo
 	bash tests/zenrepo_test.sh
 
-$(ZENPKG_CHECK_STAMP): $(BUILD)/package-repository-kernel-test $(BUILD)/package-transport-journal-test $(BUILD)/zenpkg-transport-fault-test $(BUILD)/zenpkg-blkdebug-seed $(BUILD)/zenovfs-package-seed $(BUILD)/zenpkg $(BUILD)/zenrepo $(ZENPKG_PACKAGES) $(ZENPKG_DATA_STAMP)
+$(ZENPKG_CHECK_STAMP): $(BUILD)/package-repository-kernel-test $(BUILD)/package-transport-journal-test $(BUILD)/zenpkg-transport-fault-test $(BUILD)/zenpkg-blkdebug-seed $(BUILD)/zenpkg-blkdebug-qemu-test $(BUILD)/zenovfs-package-seed $(BUILD)/zenpkg $(BUILD)/zenrepo $(ZENPKG_PACKAGES) $(ZENPKG_DATA_STAMP)
 	$(BUILD)/zenovfs-package-seed --self-test
 	bash tests/zenrepo_test.sh
 	$(BUILD)/package-repository-kernel-test $(BUILD)/zenrepo-test/fixtures
@@ -147,10 +150,10 @@ $(ZENPKG_BLKDEBUG_FIXTURE_STAMP): all $(BUILD)/zenpkg-blkdebug-seed
 	@for image in resume.img ready.img committed.img; do $(BUILD)/zenovfs-verify $(BUILD)/qemu/zenpkg-blkdebug-fixtures/$$image; done
 	@touch $@
 
-$(ZENPKG_BLKDEBUG_QEMU_STAMP): $(ZENPKG_BLKDEBUG_FIXTURE_STAMP) tests/qemu_zenpkg_blkdebug_faults.py
+$(ZENPKG_BLKDEBUG_QEMU_STAMP): $(ZENPKG_BLKDEBUG_FIXTURE_STAMP) $(BUILD)/zenpkg-blkdebug-qemu-test
 	@rm -rf $(BUILD)/qemu/zenpkg-blkdebug
 	@mkdir -p $(BUILD)/qemu/zenpkg-blkdebug
-	python3 tests/qemu_zenpkg_blkdebug_faults.py \
+	$(BUILD)/zenpkg-blkdebug-qemu-test \
 	  --boot $(BUILD)/zenov-os.img \
 	  --fixtures $(BUILD)/qemu/zenpkg-blkdebug-fixtures \
 	  --out $(BUILD)/qemu/zenpkg-blkdebug
