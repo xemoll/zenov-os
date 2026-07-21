@@ -137,7 +137,7 @@ def read_env(path: Path) -> dict[str, int]:
 def write_config(path: Path, sector: int) -> None:
     path.write_text(
         "[inject-error]\n"
-        'event = "write_aio"\n'
+        'event = "pwritev"\n'
         'errno = "5"\n'
         f'sector = "{sector}"\n',
         encoding="utf-8",
