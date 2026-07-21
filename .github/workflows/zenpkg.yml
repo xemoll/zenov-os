@@ -18,6 +18,7 @@ on:
       - 'tests/qemu_zenpkg.sh'
       - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'tests/qemu_zenpkg_transport_faults.sh'
+      - 'tests/qemu_zenpkg_blkdebug_breakpoints.sh'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
@@ -55,6 +56,7 @@ on:
       - 'tests/qemu_zenpkg.sh'
       - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'tests/qemu_zenpkg_transport_faults.sh'
+      - 'tests/qemu_zenpkg_blkdebug_breakpoints.sh'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
@@ -132,17 +134,20 @@ jobs:
             tools/zenpkg_blkdebug_seed.cpp -o build/sanitized/zenpkg-blkdebug-seed
           rm -rf /tmp/zenpkg-blkdebug-sanitized
           build/sanitized/zenpkg-blkdebug-seed build/zenov-data.img build/hello-native-0.2.0.zpk /tmp/zenpkg-blkdebug-sanitized
-          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic -include fcntl.h -pthread \
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic -pthread \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
-            tools/zenpkg_blkdebug_qemu_test.cpp -o build/sanitized/zenpkg-blkdebug-qemu-test
+            tools/zenpkg_blkdebug_qemu_test.cpp -o build/sanitized/zenpkg-qmp-hmp-client
+          build/sanitized/zenpkg-qmp-hmp-client --self-test
+          bash -n tests/qemu_zenpkg_blkdebug_breakpoints.sh
       - name: Compile release host tools
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg/main.cpp -o build/zenpkg-release
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenrepo/main.cpp -o build/zenrepo-release
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg_transport_fault_test.cpp -o build/zenpkg-transport-fault-release
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg_blkdebug_seed.cpp -o build/zenpkg-blkdebug-seed-release
-          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic -include fcntl.h -pthread \
-            tools/zenpkg_blkdebug_qemu_test.cpp -o build/zenpkg-blkdebug-qemu-test-release
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic -pthread \
+            tools/zenpkg_blkdebug_qemu_test.cpp -o build/zenpkg-qmp-hmp-client-release
+          build/zenpkg-qmp-hmp-client-release --self-test
           build/zenpkg-release --help
           bash tools/zenrepo/materialize_fixtures.sh /tmp/zenrepo-fixtures >/dev/null
           build/zenrepo-release inspect /tmp/zenrepo-fixtures/timestamp.zrm
@@ -186,7 +191,7 @@ jobs:
             exit 1
           fi
           tail -n 240 /tmp/zenpkg-transport-fault-qemu.log
-      - name: Crash at live block I/O breakpoints and reboot the same disks
+      - name: Crash at proven live block I/O boundaries and reboot the same disks
         run: |
           rm -f /tmp/zenpkg-blkdebug-qemu.log
           if ! make zenpkg-blkdebug-qemu > /tmp/zenpkg-blkdebug-qemu.log 2>&1; then
@@ -215,14 +220,15 @@ jobs:
           grep -Fq 'ZENPKG_CACHE_VERIFY_REJECTED' "$faults"
           grep -Fq 'ZENPKG_CACHE_INIT_REJECTED' "$faults"
           test "$(grep -Fc 'ZENPKG_TRANSPORT_CHUNK_COMMIT name=hello-native version=0.2.0' "$recovery")" -eq 2
-          test "$(grep -Fc 'ZENPKG_BLKDEBUG_BREAKPOINT_SCENARIO_OK' "$blkdebug/summary.log")" -eq 4
-          test "$(find "$blkdebug" -name 'qmp-*-break.json' -type f | wc -l)" -eq 4
+          test "$(grep -Fc 'ZENPKG_BLKDEBUG_BREAKPOINT_SCENARIO_OK' "$blkdebug/summary.log")" -eq 2
+          test "$(find "$blkdebug" -name 'qmp-*-arm.json' -type f | wc -l)" -eq 2
+          test "$(find "$blkdebug" -name 'qmp-*-break.json' -type f | wc -l)" -eq 2
+          ! grep -Eiq 'Could not|Cannot find|Error:' "$blkdebug"/qmp-*-arm.json
+          grep -R -Fq '"confirmation": "arm-and-stall"' "$blkdebug"/qmp-*-break.json
           grep -R -Fq '"event": "pwritev"' "$blkdebug"/qmp-*-break.json
-          grep -Fq 'ordinal=1' "$blkdebug/summary.log"
-          grep -Fq 'ordinal=2' "$blkdebug/summary.log"
-          grep -Fq 'ordinal=8' "$blkdebug/summary.log"
+          test "$(grep -Fl 'ZENPKG_CACHE_VERIFY_OK objects=1 partials=0' "$blkdebug"/serial-*-recovery.log | wc -l)" -eq 2
+          test "$(grep -Fl 'ZENOVFS_FSCK_OK' "$blkdebug"/serial-*-recovery.log | wc -l)" -eq 2
           test "$(find "$blkdebug" -name 'qemu-*.stderr' -type f -size +0c | wc -l)" -eq 0
-          grep -R -Fq 'ZENPKG_CACHE_VERIFY_OK objects=1 partials=0' "$blkdebug"/serial-*-recovery.log
           ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$lifecycle" "$recovery" "$faults" "$blkdebug"/serial-*.log
       - name: Upload ZenPkg QEMU evidence
         if: always()
