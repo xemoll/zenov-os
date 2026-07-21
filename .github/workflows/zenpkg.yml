@@ -10,6 +10,7 @@ on:
       - 'tools/zenovfs_package_seed.cpp'
       - 'tools/zenpkg_transport_fault_test.cpp'
       - 'tools/zenpkg_blkdebug_seed.cpp'
+      - 'tools/zenpkg_blkdebug_qemu_test.cpp'
       - 'tests/zenpkg_test.sh'
       - 'tests/zenrepo_test.sh'
       - 'tests/package_repository_kernel_test.cpp'
@@ -17,7 +18,6 @@ on:
       - 'tests/qemu_zenpkg.sh'
       - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'tests/qemu_zenpkg_transport_faults.sh'
-      - 'tests/qemu_zenpkg_blkdebug_faults.py'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
@@ -47,6 +47,7 @@ on:
       - 'tools/zenovfs_package_seed.cpp'
       - 'tools/zenpkg_transport_fault_test.cpp'
       - 'tools/zenpkg_blkdebug_seed.cpp'
+      - 'tools/zenpkg_blkdebug_qemu_test.cpp'
       - 'tests/zenpkg_test.sh'
       - 'tests/zenrepo_test.sh'
       - 'tests/package_repository_kernel_test.cpp'
@@ -54,7 +55,6 @@ on:
       - 'tests/qemu_zenpkg.sh'
       - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'tests/qemu_zenpkg_transport_faults.sh'
-      - 'tests/qemu_zenpkg_blkdebug_faults.py'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
@@ -112,7 +112,7 @@ jobs:
         run: bash tests/zenpkg_test.sh
       - name: Run standalone signed repository suite
         run: bash tests/zenrepo_test.sh
-      - name: Compile parsers and crash matrix with sanitizers
+      - name: Compile parsers and crash tools with sanitizers
         run: |
           mkdir -p build/sanitized
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
@@ -132,13 +132,17 @@ jobs:
             tools/zenpkg_blkdebug_seed.cpp -o build/sanitized/zenpkg-blkdebug-seed
           rm -rf /tmp/zenpkg-blkdebug-sanitized
           build/sanitized/zenpkg-blkdebug-seed build/zenov-data.img build/hello-native-0.2.0.zpk /tmp/zenpkg-blkdebug-sanitized
-          python3 -m py_compile tests/qemu_zenpkg_blkdebug_faults.py
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic -include fcntl.h -pthread \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tools/zenpkg_blkdebug_qemu_test.cpp -o build/sanitized/zenpkg-blkdebug-qemu-test
       - name: Compile release host tools
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg/main.cpp -o build/zenpkg-release
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenrepo/main.cpp -o build/zenrepo-release
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg_transport_fault_test.cpp -o build/zenpkg-transport-fault-release
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg_blkdebug_seed.cpp -o build/zenpkg-blkdebug-seed-release
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic -include fcntl.h -pthread \
+            tools/zenpkg_blkdebug_qemu_test.cpp -o build/zenpkg-blkdebug-qemu-test-release
           build/zenpkg-release --help
           bash tools/zenrepo/materialize_fixtures.sh /tmp/zenrepo-fixtures >/dev/null
           build/zenrepo-release inspect /tmp/zenrepo-fixtures/timestamp.zrm
