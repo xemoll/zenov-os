@@ -8,10 +8,11 @@ OUT="${3:-build/qemu/zenpkg-blkdebug}"
 HMP_CLIENT="${4:-build/zenpkg-qmp-hmp-client}"
 PROMPT='zenov> '
 GUEST_COMMAND='pkg transport resume hello-native'
+BLOCK_DEVICE='zenpkg-disk'
 
 mkdir -p "$OUT"
 rm -f "$OUT"/serial-*.log "$OUT"/qemu-*.stderr "$OUT"/qmp-*.sock \
-  "$OUT"/qmp-*-break.json "$OUT"/runtime-*.img "$OUT"/summary.log
+  "$OUT"/qmp-*-arm.json "$OUT"/qmp-*-break.json "$OUT"/runtime-*.img "$OUT"/summary.log
 
 VM_PID=''
 cleanup_vm() {
@@ -50,6 +51,14 @@ hmp() {
   "$HMP_CLIENT" "$socket" "$command" "$timeout"
 }
 
+require_hmp_success() {
+  local response="$1" operation="$2"
+  if grep -Eiq 'Could not|not found|No medium|Invalid argument|Permission denied' <<<"$response"; then
+    echo "zenpkg-blkdebug: HMP $operation failed: $response" >&2
+    return 1
+  fi
+}
+
 send_text() {
   local socket="$1" text="$2" char lower key
   local i
@@ -85,7 +94,7 @@ start_qemu() {
       -blockdev "driver=file,node-name=runtime-file,filename=$runtime,cache.direct=on,cache.no-flush=off" \
       -blockdev 'driver=raw,node-name=runtime-raw,file=runtime-file' \
       -blockdev 'driver=blkdebug,node-name=runtime-debug,image=runtime-raw' \
-      -device 'ide-hd,drive=runtime-debug,bus=ide.0,unit=0' \
+      -device "ide-hd,id=$BLOCK_DEVICE,drive=runtime-debug,bus=ide.0,unit=0" \
       -boot a -m 32M -machine pc,vmport=off -vga std -display none \
       -serial "file:$serial" -qmp "unix:$socket,server=on,wait=off" -monitor none \
       -no-reboot -no-shutdown >/dev/null 2>"$stderr" &
@@ -127,29 +136,34 @@ fault_boot() {
   local name="$1" runtime="$2" ordinal="$3"
   local serial="$OUT/serial-$name-fault.log" socket="$OUT/qmp-$name-fault.sock"
   local stderr="$OUT/qemu-$name-fault.stderr" evidence="$OUT/qmp-$name-break.json"
-  local tag="zenpkg-$name" hit output
+  local arm_evidence="$OUT/qmp-$name-arm.json"
+  local tag="zenpkg-$name" hit response
 
   start_qemu "$runtime" "$serial" "$socket" "$stderr" fault
   wait_for_boot "$serial"
-  hmp "$socket" "qemu-io runtime-debug \"break pwritev $tag\"" 15 >/dev/null
+  response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"break pwritev $tag\"" 15)"
+  printf '%s\n' "$response" >"$arm_evidence"
+  require_hmp_success "$response" 'break'
   printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=armed ordinal=%s\n' "$name" "$ordinal"
 
   send_command "$socket" "$GUEST_COMMAND"
   wait_for_serial "$serial" 'ZENPKG_TRANSPORT_RESUME name=hello-native version=0.2.0' 200
   printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=guest-command-running\n' "$name"
 
-  output=''
   for ((hit=1; hit<=ordinal; ++hit)); do
-    output="$(hmp "$socket" "qemu-io runtime-debug \"wait_break $tag\"" 60)"
+    response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"wait_break $tag\"" 60)"
+    require_hmp_success "$response" 'wait_break'
     printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=break-hit hit=%s\n' "$name" "$hit"
     if ((hit < ordinal)); then
-      hmp "$socket" "qemu-io runtime-debug \"resume $tag\"" 15 >/dev/null
+      response="$(hmp "$socket" "qemu-io $BLOCK_DEVICE \"resume $tag\"" 15)"
+      require_hmp_success "$response" 'resume'
       sleep 0.2
     fi
   done
 
   cat >"$evidence" <<EOF
 {
+  "block_device": "$BLOCK_DEVICE",
   "crash": "SIGKILL",
   "event": "pwritev",
   "guest_command": "$GUEST_COMMAND",
@@ -164,7 +178,6 @@ EOF
     echo "zenpkg-blkdebug: scenario committed before crash: $name" >&2; return 1;
   }
   assert_clean_logs "$serial" "$stderr" "fault-$name"
-  [[ -n "$output" ]] || true
 }
 
 recovery_boot() {
