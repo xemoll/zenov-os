@@ -148,6 +148,15 @@ void ensure_directory(std::vector<std::uint8_t>& image, std::uint32_t index, con
     table[index] = directory;
 }
 
+void isolate_metadata_sector(std::vector<std::uint8_t>& image, std::uint32_t object_index,
+                             const char* prefix) {
+    const std::uint32_t first = object_index - (object_index % 8U);
+    for (std::uint32_t index = first; index < first + 8U; ++index) {
+        if (index == object_index) continue;
+        ensure_directory(image, index, std::string("/var/lib/zenpkg/") + prefix + std::to_string(index));
+    }
+}
+
 void put_file(std::vector<std::uint8_t>& image, std::uint32_t index, const std::string& path,
               const std::uint8_t* data, std::size_t size) {
     Superblock& block = super(image);
@@ -218,6 +227,8 @@ std::vector<std::uint8_t> make_state(const std::vector<std::uint8_t>& base,
     auto image = base;
     ensure_directory(image, kCacheDirectoryIndex, "/var/cache");
     ensure_directory(image, kCacheZpDirectoryIndex, "/var/cache/zp");
+    isolate_metadata_sector(image, kPartialIndex, "blk-p-");
+    isolate_metadata_sector(image, kJournalIndex, "blk-j-");
     const auto digest = zenov_audit_host::sha256(package.data(), package.size());
     const std::string key = hex_prefix(digest.data());
     const std::string partial_path = "/var/cache/zp/" + key + ".part";
@@ -247,8 +258,11 @@ int main(int argc, char** argv) {
             package.size() > static_cast<std::size_t>(super(base).slot_sectors) * kSectorSize ||
             package.size() < 8U || std::memcmp(package.data(), "ZENPKG1", 7U) != 0)
             throw std::runtime_error("invalid package fixture");
-        for (const std::uint32_t index : {kCacheDirectoryIndex, kCacheZpDirectoryIndex, kPartialIndex, kJournalIndex}) {
-            if (entries(base)[index].used) throw std::runtime_error("deterministic high seed slot is occupied");
+        for (std::uint32_t index = 94U; index <= 103U; ++index) {
+            if (entries(base)[index].used) throw std::runtime_error("partial-sector seed slot is occupied");
+        }
+        for (std::uint32_t index = 112U; index <= 119U; ++index) {
+            if (entries(base)[index].used) throw std::runtime_error("journal-sector seed slot is occupied");
         }
 
         const std::filesystem::path output = argv[3];
