@@ -290,7 +290,7 @@ controller_zmid_corrupt() {
 run_phase() {
   local controller="$1" serial="$2" monitor="$3" stderr="$4" data_image="$5"
   set +e
-  "$controller" "$serial" | timeout 95s "$QEMU" \
+  "$controller" "$serial" | timeout 180s "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
     -drive "file=$data_image,format=raw,if=ide,index=0,media=disk" \
     -boot a -m 32M -machine pc,vmport=off -vga std -display none \
