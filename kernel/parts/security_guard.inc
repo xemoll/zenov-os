@@ -60,7 +60,8 @@ AuditRecord audit_log[audit_capacity]{};
 uint32_t audit_next = 0, audit_count = 0;
 uint32_t scans = 0, blocked = 0, quarantined = 0, trusted_launches = 0;
 uint32_t write_scans = 0, write_blocked = 0, audit_only_findings = 0;
-uint8_t* write_scan_buffer = nullptr;
+alignas(16) uint8_t write_scan_storage[process::application_buffer_bytes]{};
+uint8_t* write_scan_buffer = write_scan_storage;
 bool self_test_passed = false, baseline_verified = false, enforcement_ready = false;
 
 uint32_t rotate_right(uint32_t value, uint32_t count) { return (value >> count) | (value << (32U - count)); }
@@ -394,8 +395,6 @@ bool verify_trusted_baseline() {
     return true;
 }
 bool init() {
-    write_scan_buffer = static_cast<uint8_t*>(heap::allocate(process::application_buffer_bytes, 16U));
-    if (!write_scan_buffer) { serial::line("ZENOV_GUARD_SCAN_BUFFER_FAILED"); return false; }
     self_test_passed = self_test();
     if (!self_test_passed) { serial::line("ZENOV_GUARD_SELFTEST_FAILED"); return false; }
     serial::line("ZENOV_GUARD_SELFTEST_OK");
