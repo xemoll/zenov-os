@@ -1,0 +1,36 @@
+name: ZenovOS Security PR51 Source Snapshot
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/security-pr51-source-snapshot.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Verify exact security parent
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "a582ceece0585355601a5ded24468a854d723d7a"
+      - name: Create exact source archive
+        run: |
+          set -euo pipefail
+          git archive --format=zip --output=zenov-os-security-a582-source.zip a582ceece0585355601a5ded24468a854d723d7a
+          sha256sum zenov-os-security-a582-source.zip > zenov-os-security-a582-source.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-security-a582-source
+          path: |
+            zenov-os-security-a582-source.zip
+            zenov-os-security-a582-source.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
