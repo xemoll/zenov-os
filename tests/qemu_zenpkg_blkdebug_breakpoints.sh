@@ -9,7 +9,8 @@ HMP_CLIENT="${4:-build/zenpkg-qmp-hmp-client}"
 PROMPT='zenov> '
 GUEST_COMMAND='pkg transport resume hello-native'
 BLOCK_DEVICE='runtime-debug'
-BREAK_SETTLE_SECONDS='0.75'
+SERIAL_POLL_SECONDS='0.005'
+BREAK_SETTLE_SECONDS='0.02'
 
 mkdir -p "$OUT"
 rm -f "$OUT"/serial-*.log "$OUT"/qemu-*.stderr "$OUT"/qmp-*.sock \
@@ -26,11 +27,11 @@ cleanup_vm() {
 trap cleanup_vm EXIT
 
 wait_for_serial() {
-  local file="$1" text="$2" timeout_tenths="${3:-600}"
-  local i
-  for ((i=0; i<timeout_tenths; ++i)); do
+  local file="$1" text="$2" timeout_millis="${3:-60000}"
+  local elapsed
+  for ((elapsed=0; elapsed<timeout_millis; elapsed+=5)); do
     [[ -f "$file" ]] && grep -Fq "$text" "$file" && return 0
-    sleep 0.1
+    sleep "$SERIAL_POLL_SECONDS"
   done
   echo "zenpkg-blkdebug: missing serial marker: $text" >&2
   return 1
@@ -148,7 +149,7 @@ fault_boot() {
   printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=armed ordinal=%s\n' "$name" "$ordinal"
 
   send_command "$socket" "$GUEST_COMMAND"
-  wait_for_serial "$serial" 'ZENPKG_TRANSPORT_RESUME name=hello-native version=0.2.0' 200
+  wait_for_serial "$serial" 'ZENPKG_TRANSPORT_RESUME name=hello-native version=0.2.0' 20000
   printf 'ZENPKG_BLKDEBUG_STAGE name=%s stage=guest-command-running\n' "$name"
   sleep "$BREAK_SETTLE_SECONDS"
   ! grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK' "$serial" || {
@@ -179,6 +180,7 @@ fault_boot() {
   "guest_command": "$GUEST_COMMAND",
   "hit_count": $ordinal,
   "ordinal": $ordinal,
+  "serial_poll_seconds": $SERIAL_POLL_SECONDS,
   "settle_seconds": $BREAK_SETTLE_SECONDS,
   "tag": "$tag"
 }
@@ -199,15 +201,15 @@ recovery_boot() {
   start_qemu "$runtime" "$serial" "$socket" "$stderr" recovery
   wait_for_boot "$serial"
   send_command "$socket" "$GUEST_COMMAND"
-  local i
-  for ((i=0; i<600; ++i)); do
+  local elapsed
+  for ((elapsed=0; elapsed<60000; elapsed+=5)); do
     if grep -Fq 'ZENPKG_CACHE_FETCH_COMMIT_OK name=hello-native version=0.2.0' "$serial" || \
        grep -Fq 'ZENPKG_CACHE_HIT name=hello-native version=0.2.0' "$serial"; then
       break
     fi
-    sleep 0.1
+    sleep "$SERIAL_POLL_SECONDS"
   done
-  ((i < 600)) || { echo "zenpkg-blkdebug: recovery did not produce verified cache object: $name" >&2; return 1; }
+  ((elapsed < 60000)) || { echo "zenpkg-blkdebug: recovery did not produce verified cache object: $name" >&2; return 1; }
 
   send_command "$socket" 'pkg cache verify'
   wait_for_serial "$serial" 'ZENPKG_CACHE_VERIFY_OK objects=1 partials=0'
