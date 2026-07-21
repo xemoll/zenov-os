@@ -91,7 +91,7 @@ start_qemu() {
   if [[ "$mode" == fault ]]; then
     "$QEMU" \
       -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
-      -blockdev "driver=file,node-name=runtime-file,filename=$runtime,cache.direct=on,cache.no-flush=off" \
+      -blockdev "driver=file,node-name=runtime-file,filename=$runtime,cache.direct=off,cache.no-flush=off" \
       -blockdev 'driver=raw,node-name=runtime-raw,file=runtime-file' \
       -blockdev 'driver=blkdebug,node-name=runtime-debug,image=runtime-raw' \
       -device 'ide-hd,id=zenpkg-disk,drive=runtime-debug,bus=ide.0,unit=0' \
@@ -211,6 +211,10 @@ run_scenario() {
   local name="$1" fixture="$2" ordinal="$3"
   local runtime="$OUT/runtime-$name.img"
   cp "$FIXTURES/$fixture" "$runtime"
+  cmp "$FIXTURES/$fixture" "$runtime"
+  sync -f "$runtime"
+  cmp "$FIXTURES/$fixture" "$runtime"
+  sha256sum "$runtime"
   fault_boot "$name" "$runtime" "$ordinal"
   recovery_boot "$name" "$runtime"
   printf 'ZENPKG_BLKDEBUG_BREAKPOINT_SCENARIO_OK name=%s event=pwritev ordinal=%s crash=SIGKILL\n' \
