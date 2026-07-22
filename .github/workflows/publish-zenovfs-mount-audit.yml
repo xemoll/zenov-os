@@ -40,6 +40,7 @@ jobs:
             zmid-update-rollback.patch
             quarantine-digest-prefix.patch
             quarantine-read-block.patch
+            zmid-action-constant-sharing.patch
             zenovfs-mount-index.patch
             zenovfs-workflow-context7-hardening.patch
           )
