@@ -1,56 +1,11 @@
-name: ZenUniverse Catalog
+name: Publication staging — ZenUniverse CI disabled
 
 on:
-  push:
-    paths:
-      - 'GNUmakefile'
-      - 'universe.mk'
-      - 'tools/zenuniverse/**'
-      - 'tests/zenuniverse_test.sh'
-      - 'packages/universe/**'
-      - 'docs/ZENUNIVERSE_REPOSITORY_0.1.1.md'
-      - '.github/workflows/zenuniverse.yml'
-  pull_request:
-    paths:
-      - 'GNUmakefile'
-      - 'universe.mk'
-      - 'tools/zenuniverse/**'
-      - 'tests/zenuniverse_test.sh'
-      - 'packages/universe/**'
-      - 'docs/ZENUNIVERSE_REPOSITORY_0.1.1.md'
-      - '.github/workflows/zenuniverse.yml'
-
-permissions:
-  contents: read
+  workflow_dispatch:
 
 jobs:
-  universal-catalog:
+  staging-only:
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      CXX: g++
-      SOURCE_DATE_EPOCH: '0'
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-      - name: Install strict native toolchain
-        run: sudo apt-get update && sudo apt-get install -y build-essential
-      - name: Build and test universal catalog
-        run: make universe-check
-      - name: Verify deterministic catalog independently
-        run: |
-          rm -rf /tmp/zenuniverse-rebuild
-          make --no-print-directory BUILD=/tmp/zenuniverse-rebuild universe-check
-          cmp build/zenuniverse.zuc /tmp/zenuniverse-rebuild/zenuniverse.zuc
-          grep -q '^ZENUNIVERSE1$' build/zenuniverse.zuc
-          grep -q '^count=16$' build/zenuniverse.zuc
-      - name: Verify provider policy inventory
-        run: |
-          test "$(find packages/universe -name '*.zsource' | wc -l)" -eq 16
-          ! grep -R '^mirror=' packages/universe/profile-*game.zsource
-          grep -q '^delivery=user-supplied$' packages/universe/profile-playstation2-game.zsource
-          grep -q '^delivery=user-supplied$' packages/universe/profile-playstation3-game.zsource
-          grep -q '^delivery=user-supplied$' packages/universe/profile-xbox-game.zsource
-          grep -q '^delivery=user-supplied$' packages/universe/profile-xbox360-game.zsource
-          ! grep -R -E 'BEGIN (RSA )?PRIVATE KEY|BEGIN PRIVATE KEY' tools/zenuniverse packages/universe
+      - run: echo staging-only
