@@ -92,10 +92,12 @@ int main() {
            "write-out-of-range");
 
     device.writable = false;
+    device.write_sector = nullptr;
     result = block_device_write(device, state, 1U, input);
     expect(result.status == BlockStatus::read_only && write_calls == 1U,
-           "write-read-only");
+           "write-read-only-without-callback");
     device.writable = true;
+    device.write_sector = write_ok;
 
     device.read_sector = nullptr;
     result = block_device_read(device, state, 1U, sector);
