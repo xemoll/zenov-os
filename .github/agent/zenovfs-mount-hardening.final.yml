@@ -45,7 +45,7 @@ jobs:
           set -euo pipefail
           mkdir -p build/sanitized ci-logs
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
-            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-integer-conversion \
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-conversion \
             -fno-sanitize-recover=all -fno-omit-frame-pointer \
             tests/zenovfs_mount_validation_test.cpp -o build/sanitized/zenovfs-mount-validation-test
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
