@@ -39,13 +39,15 @@ send_text() {
 controller() {
   local serial="$1"
   wait_for_serial "$serial" 'ATA_DEADLINE_DRIVER_READY clock=pit100 timeout=3000ms reset=5000ms attempts=2' || { echo quit; return 1; }
+  wait_for_serial "$serial" 'BLOCK_DEVICE_TYPED_ABI_READY version=1' || { echo quit; return 1; }
   wait_for_serial "$serial" 'ZENOVFS_MOUNT_OK' || { echo quit; return 1; }
   wait_for_serial "$serial" 'ZENOVOS_UI_READY' || { echo quit; return 1; }
   wait_for_serial "$serial" "$PROMPT" || { echo quit; return 1; }
   send_text 'disk status'; echo 'sendkey ret 10'
   wait_for_serial "$serial" 'BLOCK_DEVICE_COUNTERS_OK' || { echo quit; return 1; }
   wait_for_serial "$serial" 'BLOCK_DEVICE_STATUS_OK' || { echo quit; return 1; }
-  wait_for_serial "$serial" 'BLOCK_RESULT_API_OK version=1' || { echo quit; return 1; }
+  wait_for_serial "$serial" 'BLOCK_RESULT_API_OK version=2' || { echo quit; return 1; }
+  wait_for_serial "$serial" 'BLOCK_DEVICE_TYPED_ABI_OK version=1' || { echo quit; return 1; }
   sleep 0.2
   echo quit
 }
@@ -74,8 +76,10 @@ if [[ $status -ne 0 ]]; then
 fi
 
 [[ ! -s "$OUT/qemu.stderr" ]] || { echo 'qemu-block-status: non-empty QEMU stderr' >&2; cat "$OUT/qemu.stderr" >&2; exit 1; }
+grep -Fq 'BLOCK_DEVICE_TYPED_ABI_READY version=1' "$OUT/serial.log"
 grep -Fq 'BLOCK_DEVICE_COUNTERS_OK' "$OUT/serial.log"
 grep -Fq 'BLOCK_DEVICE_STATUS_OK' "$OUT/serial.log"
-grep -Fq 'BLOCK_RESULT_API_OK version=1' "$OUT/serial.log"
+grep -Fq 'BLOCK_RESULT_API_OK version=2' "$OUT/serial.log"
+grep -Fq 'BLOCK_DEVICE_TYPED_ABI_OK version=1' "$OUT/serial.log"
 ! grep -Eq 'BLOCK_DEVICE_COUNTERS_INVALID|KERNEL PANIC|DOUBLE FAULT|ASSERT|PS2_MOUSE_UNAVAILABLE' "$OUT/serial.log"
-printf 'BLOCK_STATUS_QEMU_OK command="disk status" typed-results=1 counters=consistent\n' | tee "$OUT/summary.log"
+printf 'BLOCK_STATUS_QEMU_OK command="disk status" typed-results=2 typed-abi=1 counters=consistent\n' | tee "$OUT/summary.log"
