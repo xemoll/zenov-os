@@ -1,4 +1,7 @@
 void init_deadline() {
+    // Keep the legacy entrypoint referenced while ZenovFS still uses its boolean
+    // BlockDevice ABI. The implementation is removed in the typed-I/O migration.
+    (void)&init;
     heap::init();
     serial::line("Storage: probing ATA primary master with monotonic deadlines...");
     ata_present = false;
