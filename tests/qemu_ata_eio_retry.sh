@@ -129,6 +129,7 @@ grep -Fq 'ZENOVFS_FSCK_OK' "$OUT/serial.log"
 grep -Fq 'ZENOVOS_UI_READY' "$OUT/serial.log"
 ! grep -Eq 'KERNEL PANIC|DOUBLE FAULT|ASSERT|PS2_MOUSE_UNAVAILABLE' "$OUT/serial.log"
 
-reason="$(grep -F 'ATA_IO_ERROR op=write reason=' "$OUT/serial.log" | head -n 1 | sed 's/.*reason=//')"
+reason="$(grep -F 'ATA_IO_ERROR op=write reason=' "$OUT/serial.log" | head -n 1 | sed 's/.*reason=//' | tr -d '\r')"
+[[ -n "$reason" ]] || { echo 'qemu-ata-eio: empty normalized ATA reason' >&2; exit 1; }
 printf 'ATA_EIO_RETRY_QEMU_OK injected=EIO operation=write reason=%s resets=1 attempts=2 proof=%s\n' \
   "$reason" "$PROOF_TEXT" | tee "$OUT/summary.log"
