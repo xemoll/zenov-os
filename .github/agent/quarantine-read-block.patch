@@ -52,7 +52,7 @@ diff --git a/tests/qemu_smoke.sh b/tests/qemu_smoke.sh
 diff --git a/tools/zenovfs_antimalware_verify.cpp b/tools/zenovfs_antimalware_verify.cpp
 --- a/tools/zenovfs_antimalware_verify.cpp
 +++ b/tools/zenovfs_antimalware_verify.cpp
-@@ -109,6 +109,9 @@ int main(int argc, char** argv) {
+@@ -109,8 +109,13 @@ int main(int argc, char** argv) {
          if (!contains_record(audit, 8U, 4U, "/samples/malware-v2.bin")) {
              throw std::runtime_error("updated-intelligence read block missing from audit journal");
          }
@@ -60,6 +60,10 @@ diff --git a/tools/zenovfs_antimalware_verify.cpp b/tools/zenovfs_antimalware_ve
 +            throw std::runtime_error("quarantine read block missing from audit journal");
 +        }
          if (find(entries, "/ransomware-write.bin")) throw std::runtime_error("blocked ransomware write persisted");
+         if (find(entries, "/samples/ransomware-test.bin")) throw std::runtime_error("quarantined source still present");
++
+         const Entry* pua = find(entries, "/pua-audit.bin");
+         const Entry* split = find(entries, "/split.bin");
 diff --git a/.github/workflows/antimalware.yml b/.github/workflows/antimalware.yml
 --- a/.github/workflows/antimalware.yml
 +++ b/.github/workflows/antimalware.yml
