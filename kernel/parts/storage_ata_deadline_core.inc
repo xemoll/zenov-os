@@ -80,6 +80,13 @@ BlockResult ata2_block_result(BlockOperation operation, uint32_t lba, const ata_
                         result.status, result.error_register);
 }
 
+void ata2_publish_device_state(bool present, uint32_t sectors) {
+    ata_present = present;
+    ata_sector_total = present ? sectors : 0U;
+    ata0.present = present;
+    ata0.sectors = present ? sectors : 0U;
+}
+
 void ata2_pause() { asm volatile("pause"); }
 uint32_t ata2_deadline(uint32_t timeout_ms) { return ata_policy::deadline_after(timer_ticks, timeout_ms, ata2_clock_hz); }
 
@@ -141,7 +148,9 @@ ata_policy::Result ata2_soft_reset(uint8_t attempts) {
     if (!result.ok()) {
         ++ata_diagnostics.reset_failures;
         result.error = ata_policy::Error::reset_failed;
+        ata2_publish_device_state(false, 0U);
         ata2_record_attempt_failure("reset", BlockOperation::reset, 0U, result);
+        serial::line("ATA_DEVICE_OFFLINE reason=reset-failed");
         return result;
     }
 
@@ -149,21 +158,21 @@ ata_policy::Result ata2_soft_reset(uint8_t attempts) {
     ++ata_diagnostics.revalidations;
     ++ata_diagnostics.commands;
     result = ata2_identify_once(attempts);
-    const bool capacity_valid = ata_capacity_revalidated(expected_sectors, ata_sector_total);
-    const bool capacity_changed = expected_sectors != 0U && ata_sector_total != 0U && ata_sector_total != expected_sectors;
+    const uint32_t observed_sectors = ata_sector_total;
+    const bool capacity_valid = ata_capacity_revalidated(expected_sectors, observed_sectors);
+    const bool capacity_changed = expected_sectors != 0U && observed_sectors != 0U && observed_sectors != expected_sectors;
     if (!result.ok() || !capacity_valid) {
-        ++ata_diagnostics.reset_failures;
         ++ata_diagnostics.revalidation_failures;
-        ata_present = false;
-        ata_sector_total = 0U;
+        ata2_publish_device_state(false, 0U);
         result.error = ata_policy::Error::reset_failed;
         ata2_record_attempt_failure("revalidate", BlockOperation::reset, 0U, result);
         serial::line(capacity_changed ? "ATA_RECOVERY_REVALIDATE_FAILED reason=capacity-changed" :
                                        "ATA_RECOVERY_REVALIDATE_FAILED reason=identify");
+        serial::line("ATA_DEVICE_OFFLINE reason=revalidation-failed");
         return result;
     }
 
-    ata_present = true;
+    ata2_publish_device_state(true, observed_sectors);
     serial::line("ATA_RECOVERY_RESET_OK");
     serial::line("ATA_RECOVERY_REVALIDATE_OK command=identify capacity=stable");
     return result;
