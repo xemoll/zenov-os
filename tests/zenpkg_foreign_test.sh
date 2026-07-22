@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: BSD-2-Clause
-set -euo pipefail
+set -Eeuo pipefail
+
+on_error() {
+  local status=$?
+  local source="${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}"
+  local line="${BASH_LINENO[0]:-0}"
+  printf 'zenpkg-foreign-test: %s:%s: status=%s command=%q\n' \
+    "$source" "$line" "$status" "$BASH_COMMAND" >&2
+  exit "$status"
+}
+trap on_error ERR
 
 ZENPKG="${1:?usage: zenpkg_foreign_test.sh ZENPKG HELLO.ZEX OUT}"
 NATIVE_ZEX="${2:?usage: zenpkg_foreign_test.sh ZENPKG HELLO.ZEX OUT}"
@@ -18,12 +28,14 @@ out = Path(sys.argv[1])
 out.mkdir(parents=True, exist_ok=True)
 
 
-def elf_ident(elf_class: int, endian: int, osabi: int, etype: int, machine: int) -> bytearray:
-    data = bytearray(20)
+def elf_ident(elf_class: int, endian: int, osabi: int, etype: int,
+              machine: int, flags: int = 0) -> bytearray:
+    data = bytearray(40)
     data[0:7] = b"\x7fELF" + bytes([elf_class, endian, 1])
     data[7] = osabi
     order = "<" if endian == 1 else ">"
     struct.pack_into(order + "HH", data, 16, etype, machine)
+    struct.pack_into(order + "I", data, 36, flags)
     return data
 
 
@@ -78,7 +90,8 @@ psp_pkg = bytearray(b"\x7fPKG\x80\0\0\x02")
 (out / "static.elf").write_bytes(static_elf())
 (out / "wx.elf").write_bytes(static_elf(7))
 (out / "foreign-x64.elf").write_bytes(elf_ident(2, 1, 0, 2, 62))
-(out / "ps2.elf").write_bytes(elf_ident(1, 1, 0, 2, 8))
+(out / "generic-mips.elf").write_bytes(elf_ident(1, 1, 0, 2, 8))
+(out / "ps2.elf").write_bytes(elf_ident(1, 1, 0, 2, 8, 0x20924001))
 (out / "ps4.elf").write_bytes(elf_ident(2, 1, 9, 0xFE00, 62))
 
 # ELF32/i386 ET_EXEC with PT_INTERP. Import must reject it before output.
@@ -93,6 +106,10 @@ iso = bytearray(0x8006)
 iso[0x8001:0x8006] = b"CD001"
 (out / "game.iso").write_bytes(iso)
 (out / "game.chd").write_bytes(b"MComprHD" + bytes(56))
+
+large_dmg = bytearray(1024 * 1024)
+large_dmg[-512:-508] = b"koly"
+(out / "large.dmg").write_bytes(large_dmg)
 PY
 
 probe_expect() {
@@ -102,15 +119,21 @@ probe_expect() {
   local confidence="$4"
   local log="$OUT/$(basename "$file").probe.log"
   "$ZENPKG" probe "$file" > "$log"
-  grep -Fqx "format: $format" "$log"
-  grep -Fqx "support: $support" "$log"
-  grep -Fqx "confidence: $confidence" "$log"
-  grep -Fq "PROBE_OK format=$format support=$support confidence=$confidence" "$log"
+  if ! grep -Fqx "format: $format" "$log" ||
+     ! grep -Fqx "support: $support" "$log" ||
+     ! grep -Fqx "confidence: $confidence" "$log" ||
+     ! grep -Fq "PROBE_OK format=$format support=$support confidence=$confidence" "$log"; then
+    printf 'probe mismatch: file=%s expected=%s/%s/%s\n' \
+      "$file" "$format" "$support" "$confidence" >&2
+    cat "$log" >&2
+    return 1
+  fi
 }
 
 probe_expect "$NATIVE_ZEX" zex1 host-import signature
 probe_expect "$OUT/fixtures/static.elf" elf host-import signature
 probe_expect "$OUT/fixtures/foreign-x64.elf" elf-foreign runtime-required signature
+probe_expect "$OUT/fixtures/generic-mips.elf" elf-foreign runtime-required signature
 probe_expect "$OUT/fixtures/ps2.elf" playstation-ps2-elf runtime-required signature
 probe_expect "$OUT/fixtures/ps4.elf" playstation-self runtime-required signature
 probe_expect "$OUT/fixtures/sample.exe" pe runtime-required signature
@@ -127,6 +150,7 @@ probe_expect "$OUT/fixtures/sample-v3.apk" alpine-apk inspect-only signature
 probe_expect "$OUT/fixtures/sample.pkg.tar.zst" arch-package inspect-only signature
 probe_expect "$OUT/fixtures/sample.AppImage" appimage runtime-required signature
 probe_expect "$OUT/fixtures/sample.pkg" apple-pkg runtime-required signature
+probe_expect "$OUT/fixtures/large.dmg" apple-dmg runtime-required signature
 probe_expect "$OUT/fixtures/sample.xbe" xbox-xbe runtime-required signature
 probe_expect "$OUT/fixtures/sample.xex" xbox-xex runtime-required signature
 probe_expect "$OUT/fixtures/sample-stfs.bin" xbox-stfs runtime-required signature
@@ -146,11 +170,21 @@ probe_expect "$OUT/fixtures/game.chd" chd runtime-required signature
 probe_expect "$OUT/fixtures/java-class.class" unknown unsupported signature
 probe_expect "$OUT/fixtures/unknown.dat" unknown unsupported signature
 
-echo ZENPKG_FOREIGN_PROBE_OK cases=37 generations=legacy-current
+grep -Fqx 'bytes: 1048576' "$OUT/large.dmg.probe.log"
+grep -Fqx 'sampled_bytes: 66048' "$OUT/large.dmg.probe.log"
+expected_large_sha="$(sha256sum "$OUT/fixtures/large.dmg" | awk '{print $1}')"
+actual_large_sha="$(awk '/^sha256: / {print $2}' "$OUT/large.dmg.probe.log")"
+test "$actual_large_sha" = "$expected_large_sha"
+
+echo ZENPKG_FOREIGN_PROBE_OK cases=39 generations=legacy-current streaming=1
 
 import_native_twice() {
-  local input="$1" name="$2" payload="$3" extension="$4"
-  local first="$OUT/$name-a.zpk" second="$OUT/$name-b.zpk"
+  local input="$1"
+  local name="$2"
+  local payload="$3"
+  local extension="$4"
+  local first="$OUT/$name-a.zpk"
+  local second="$OUT/$name-b.zpk"
   "$ZENPKG" import-native "$input" \
     --name "$name" --version 0.1.0 --license BSD-2-Clause \
     --source local-fixture --asset-policy redistributable \
@@ -173,8 +207,11 @@ import_native_twice "$OUT/fixtures/static.elf" imported-elf elf32 elf
 echo ZENPKG_NATIVE_IMPORT_OK payloads=zex1,elf32 deterministic=2
 
 reject_import() {
-  local input="$1" name="$2" expected="$3"
-  local output="$OUT/$name.zpk" log="$OUT/$name.log"
+  local input="$1"
+  local name="$2"
+  local expected="$3"
+  local output="$OUT/$name.zpk"
+  local log="$OUT/$name.log"
   set +e
   "$ZENPKG" import-native "$input" \
     --name "$name" --version 0.1.0 --license BSD-2-Clause \
@@ -195,6 +232,8 @@ reject_import "$OUT/fixtures/wx.elf" rejected-wx \
   'ELF load segment violates the ZenovOS loader contract'
 reject_import "$OUT/fixtures/foreign-x64.elf" rejected-x64 \
   'format elf-foreign is not eligible for native import; support=runtime-required'
+reject_import "$OUT/fixtures/generic-mips.elf" rejected-mips \
+  'format elf-foreign is not eligible for native import; support=runtime-required'
 reject_import "$OUT/fixtures/ps2.elf" rejected-ps2 \
   'format playstation-ps2-elf is not eligible for native import; support=runtime-required'
 
@@ -212,5 +251,5 @@ path.write_bytes(data)
 PY
 reject_import "$OUT/corrupt.zex" corrupt-zex 'ZEX1 image checksum mismatch'
 
-echo ZENPKG_FOREIGN_REJECTION_OK cases=6
-echo ZENPKG_FOREIGN_TEST_OK probes=37 native-import=zex1,elf32 deterministic=2 rejection=6 generations=legacy-current
+echo ZENPKG_FOREIGN_REJECTION_OK cases=7
+echo ZENPKG_FOREIGN_TEST_OK probes=39 native-import=zex1,elf32 deterministic=2 rejection=7 generations=legacy-current streaming=1
