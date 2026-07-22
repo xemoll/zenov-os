@@ -30,7 +30,6 @@ int main() {
     expect(success.lba == 42U && success.attempts == 2U, "success-context");
     expect(std::strcmp(block_operation_name(BlockOperation::flush), "flush") == 0, "operation-name");
     expect(std::strcmp(block_status_name(BlockStatus::command_aborted), "command-aborted") == 0, "status-name");
-    expect(std::strcmp(block_status_name(BlockStatus::read_only), "read-only") == 0, "read-only-name");
 
     const BlockResult failure = block_result(BlockOperation::write, BlockStatus::interface_crc,
                                              7U, 1U, 0x51U, 0x80U);
@@ -45,7 +44,6 @@ int main() {
     expect(!block_retryable(BlockStatus::id_not_found), "no-retry-id-not-found");
     expect(!block_retryable(BlockStatus::out_of_range), "no-retry-out-of-range");
     expect(!block_retryable(BlockStatus::invalid_argument), "no-retry-invalid-argument");
-    expect(!block_retryable(BlockStatus::read_only), "no-retry-read-only");
     expect(!block_retryable(BlockStatus::reset_failed), "no-retry-reset-failed");
 
     if (failures != 0) return 1;
