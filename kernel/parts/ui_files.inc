@@ -36,23 +36,6 @@ void files_uint_text(uint32_t value, char output[16]) {
     output[index] = 0;
 }
 
-void files_truncate(const char* input, char* output, uint32_t capacity, uint32_t maximum) {
-    if (!output || capacity == 0U) return;
-    output[0] = 0;
-    if (!input) return;
-    uint32_t length = 0;
-    while (input[length] && length < maximum && length + 1U < capacity) {
-        output[length] = input[length];
-        ++length;
-    }
-    if (input[length] && length + 4U < capacity && length >= 3U) {
-        output[length++] = '.';
-        output[length++] = '.';
-        output[length++] = '.';
-    }
-    output[length] = 0;
-}
-
 void files_ensure_visible() {
     if (files_entry_count == 0U) { files_focus = 0; files_scroll = 0; return; }
     if (files_focus >= files_entry_count) files_focus = files_entry_count - 1U;
@@ -155,9 +138,8 @@ void render_files_list() {
     fill_round_rect(content_x + 6, window_y + 66, 24, 24, 7,
                     string_equal(files_path, "/") ? current_theme.surface_high : current_theme.accent_soft);
     draw_char(content_x + 15, window_y + 75, '<', current_theme.text, 1);
-    char path_label[45];
-    files_truncate(files_path, path_label, sizeof(path_label), 43U);
-    draw_text(content_x + 40, window_y + 75, path_label, current_theme.text, 1);
+    draw_text_ellipsis(content_x + 40, window_y + 75, files_content_width - 52,
+                       files_path, current_theme.text, 1);
 
     draw_text(content_x + 8, window_y + 108, "NAME", current_theme.text_muted, 1);
     draw_text(content_x + 230, window_y + 108, "TYPE", current_theme.text_muted, 1);
@@ -176,9 +158,7 @@ void render_files_list() {
                                           mix(current_theme.surface_high, current_theme.accent, 1U, 7U));
         const bool directory = entry.type == storage::zfs_type_directory;
         draw_files_entry_icon(content_x + 6, row_y + 4, directory);
-        char name[30];
-        files_truncate(entry.name, name, sizeof(name), 26U);
-        draw_text(content_x + 38, row_y + 11, name, current_theme.text, 1);
+        draw_text_ellipsis(content_x + 38, row_y + 11, 180, entry.name, current_theme.text, 1);
         draw_text(content_x + 230, row_y + 11, directory ? "DIR" : "FILE", current_theme.text_muted, 1);
         if (!directory) {
             char size[16];
@@ -233,9 +213,8 @@ void render_files_text_preview(int32_t x, int32_t y) {
 
 void render_files_preview() {
     draw_window_chrome("ZEN FILES", "PREVIEW");
-    char name[60];
-    files_truncate(files_preview_path, name, sizeof(name), 56U);
-    draw_text(window_x + 24, window_y + 68, name, current_theme.text, 1);
+    draw_text_ellipsis(window_x + 24, window_y + 68, window_width - 48,
+                       files_preview_path, current_theme.text, 1);
     draw_text(window_x + 24, window_y + 88, files_preview_binary ? "BINARY" : "TEXT", current_theme.text_muted, 1);
     draw_text(window_x + 120, window_y + 88, "SIZE", current_theme.text_muted, 1);
     draw_uint(window_x + 150, window_y + 88, files_preview_total, current_theme.text);

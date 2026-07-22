@@ -57,6 +57,15 @@ controller() {
   wait_for_serial "UI_SYSTEM_CENTER_OK" || { echo quit; return 1; }
   wait_for_serial "UI_ACCESSIBILITY_OK" || { echo quit; return 1; }
   wait_for_serial "UI_START_SYSTEM_TOOLS_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_SEPTINUM_SHELL_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_FONT_ATLAS_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_FONT_METRICS_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_BORDER_STROKE_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_CONFIG_PARSER_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_EDGE_AWARE_SCALER_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_TEXT_ELLIPSIS_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_CLIPPING_SAFETY_OK" || { echo quit; return 1; }
+  wait_for_serial "UI_COLOR_MIX_OK" || { echo quit; return 1; }
   wait_for_serial "UI_DISPLAY_MODE_OK 1024x768" || { echo quit; return 1; }
   capture_mode desktop-1024x768
 
@@ -212,6 +221,37 @@ check_ppm "$OUT/large-pointer-1024x768.ppm" "1024 768"
 check_ppm "$OUT/packages-status-1024x768.ppm" "1024 768"
 check_ppm "$OUT/security-status-1024x768.ppm" "1024 768"
 
+
+check_ppm_payload() {
+  local file="$1" dimensions width_px height_px payload actual
+  dimensions="$(sed -n '2p' "$file" | tr -d '\r')"
+  read -r width_px height_px <<<"$dimensions"
+  payload=$((width_px * height_px * 3))
+  actual="$(wc -c <"$file")"
+  (( actual > payload && actual < payload + 128 )) || {
+    echo "qemu-display-ui: invalid PPM payload size for $file: bytes=$actual pixels=$payload" >&2
+    return 1
+  }
+}
+
+check_distinct() {
+  local first="$1" second="$2"
+  if cmp -s "$first" "$second"; then
+    echo "qemu-display-ui: screenshots unexpectedly identical: $first $second" >&2
+    return 1
+  fi
+}
+
+for screenshot in "$OUT"/*.ppm; do check_ppm_payload "$screenshot"; done
+check_distinct "$OUT/desktop-1024x768.ppm" "$OUT/start-1024x768.ppm"
+check_distinct "$OUT/start-1024x768.ppm" "$OUT/start-search-1024x768.ppm"
+check_distinct "$OUT/desktop-1024x768.ppm" "$OUT/quick-settings-1024x768.ppm"
+check_distinct "$OUT/settings-1024x768.ppm" "$OUT/settings-style-1024x768.ppm"
+check_distinct "$OUT/settings-accessibility-1024x768.ppm" "$OUT/high-contrast-1024x768.ppm"
+check_distinct "$OUT/high-contrast-1024x768.ppm" "$OUT/large-pointer-1024x768.ppm"
+check_distinct "$OUT/packages-status-1024x768.ppm" "$OUT/security-status-1024x768.ppm"
+sha256sum "$OUT"/*.ppm >"$OUT/framebuffer-sha256.txt"
+
 for mode in \
   640x480 720x480 800x600 960x540 960x600 1024x576 1024x600 1024x768 \
   1152x648 1152x720 1152x864 1280x720 1280x768 1280x800 1280x960 1280x1024 \
@@ -222,7 +262,7 @@ for mode in \
   }
 done
 
-for marker in UI_ADAPTIVE_DISPLAY_OK UI_HYBRID_SCALER_OK "UI_DISPLAY_MODE_COUNT 22" UI_SETTINGS_CONTROLS_OK UI_START_MENU_OK UI_QUICK_SETTINGS_OK UI_PERSONALIZATION_OK UI_TASKBAR_OK UI_ANIMATION_MODEL_OK UI_SYSTEM_CENTER_OK UI_ACCESSIBILITY_OK UI_START_SYSTEM_TOOLS_OK UI_HIGH_CONTRAST_ON UI_LARGE_POINTER_ON UI_START_PACKAGES_OPEN_OK UI_START_SECURITY_OPEN_OK UI_DISPLAY_CYCLE_OK UI_DISPLAY_PERSIST_OK; do
+for marker in UI_ADAPTIVE_DISPLAY_OK UI_HYBRID_SCALER_OK "UI_DISPLAY_MODE_COUNT 22" UI_SETTINGS_CONTROLS_OK UI_START_MENU_OK UI_QUICK_SETTINGS_OK UI_PERSONALIZATION_OK UI_TASKBAR_OK UI_ANIMATION_MODEL_OK UI_SYSTEM_CENTER_OK UI_ACCESSIBILITY_OK UI_START_SYSTEM_TOOLS_OK UI_SEPTINUM_SHELL_OK UI_FONT_ATLAS_OK UI_FONT_METRICS_OK UI_BORDER_STROKE_OK UI_CONFIG_PARSER_OK UI_EDGE_AWARE_SCALER_OK UI_TEXT_ELLIPSIS_OK UI_CLIPPING_SAFETY_OK UI_COLOR_MIX_OK UI_HIGH_CONTRAST_ON UI_LARGE_POINTER_ON UI_START_PACKAGES_OPEN_OK UI_START_SECURITY_OPEN_OK UI_DISPLAY_CYCLE_OK UI_DISPLAY_PERSIST_OK; do
   grep -q "$marker" "$SERIAL" || { echo "qemu-display-ui: missing marker: $marker" >&2; exit 1; }
 done
 

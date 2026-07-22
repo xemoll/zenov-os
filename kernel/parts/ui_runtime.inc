@@ -7,12 +7,9 @@ uint32_t physical_background(uint32_t y) {
 }
 
 void present_physical_region(int32_t x, int32_t y, int32_t region_width, int32_t region_height) {
-    if (!framebuffer || !backbuffer || region_width <= 0 || region_height <= 0) return;
-    if (x < 0) { region_width += x; x = 0; }
-    if (y < 0) { region_height += y; y = 0; }
-    if (x + region_width > static_cast<int32_t>(display_width)) region_width = static_cast<int32_t>(display_width) - x;
-    if (y + region_height > static_cast<int32_t>(display_height)) region_height = static_cast<int32_t>(display_height) - y;
-    if (region_width <= 0 || region_height <= 0) return;
+    if (!framebuffer || !backbuffer ||
+        !clip_rect_to_bounds(x, y, region_width, region_height,
+                             static_cast<int32_t>(display_width), static_cast<int32_t>(display_height))) return;
 
     for (int32_t py = y; py < y + region_height; ++py) {
         const uint32_t background = physical_background(static_cast<uint32_t>(py));
@@ -230,6 +227,25 @@ void serial_hex(uint32_t value) {
     for (int32_t shift = 28; shift >= 0; shift -= 4) serial::put(digits[(value >> static_cast<uint32_t>(shift)) & 0xFU]);
 }
 
+bool border_stroke_contract_ok() {
+    if (!backbuffer) return false;
+    constexpr int32_t test_size = 9;
+    constexpr uint32_t interior = 0x102030U;
+    constexpr uint32_t border = 0xD0E0F0U;
+    uint32_t saved[test_size * test_size]{};
+    for (int32_t row = 0; row < test_size; ++row)
+        for (int32_t column = 0; column < test_size; ++column)
+            saved[row * test_size + column] = backbuffer[static_cast<uint32_t>(row) * width + static_cast<uint32_t>(column)];
+    fill_rect(0, 0, test_size, test_size, interior);
+    draw_round_border(0, 0, test_size, test_size, 3, border);
+    const bool preserved = backbuffer[4U * width + 4U] == interior;
+    const bool stroked = backbuffer[4U] == border && backbuffer[4U * width] == border;
+    for (int32_t row = 0; row < test_size; ++row)
+        for (int32_t column = 0; column < test_size; ++column)
+            backbuffer[static_cast<uint32_t>(row) * width + static_cast<uint32_t>(column)] = saved[row * test_size + column];
+    return preserved && stroked;
+}
+
 bool init() {
     physical_framebuffer = find_qemu_framebuffer();
     if (!physical_framebuffer) { serial::line("GRAPHICS_PCI_NOT_FOUND"); return false; }
@@ -248,7 +264,24 @@ bool init() {
     const uint32_t before = backbuffer[0]; fill_rect(-4, -4, 8, 8, rgb(255,0,0)); const bool clipping = backbuffer[0] == rgb(255,0,0); backbuffer[0] = before;
     serial::line(clipping ? "CLIPPING_OK" : "CLIPPING_FAILED");
     serial::line(blend(rgb(255,255,255), rgb(0,0,0), 128) == rgb(128,128,128) ? "ALPHA_BLEND_OK" : "ALPHA_BLEND_FAILED");
-    serial::line(glyph_for('Z') && glyph_for('0') && glyph_for('?') ? "FONT_RENDER_OK" : "FONT_RENDER_FAILED");
+    const bool border_stroke_ok = border_stroke_contract_ok();
+    const bool font_atlas_ok = font_contract_ok();
+    const bool font_metrics_ok = font_metrics_contract_ok();
+    const bool text_ellipsis_ok = text_ellipsis_contract_ok();
+    const bool clipping_safety_ok = clipping_safety_contract_ok();
+    const bool color_mix_ok = color_mix_contract_ok();
+    const bool config_parser_ok = config_parser_contract_ok();
+    const bool edge_scaler_ok = scaler_edge_contract_ok();
+    const bool font_ok = glyph_for('Z') && glyph_for('0') && glyph_for('?') && font_atlas_ok && font_metrics_ok;
+    serial::line(font_ok ? "FONT_RENDER_OK" : "FONT_RENDER_FAILED");
+    serial::line(font_atlas_ok ? "UI_FONT_ATLAS_OK" : "UI_FONT_ATLAS_FAILED");
+    serial::line(font_metrics_ok ? "UI_FONT_METRICS_OK" : "UI_FONT_METRICS_FAILED");
+    serial::line(text_ellipsis_ok ? "UI_TEXT_ELLIPSIS_OK" : "UI_TEXT_ELLIPSIS_FAILED");
+    serial::line(clipping_safety_ok ? "UI_CLIPPING_SAFETY_OK" : "UI_CLIPPING_SAFETY_FAILED");
+    serial::line(color_mix_ok ? "UI_COLOR_MIX_OK" : "UI_COLOR_MIX_FAILED");
+    serial::line(border_stroke_ok ? "UI_BORDER_STROKE_OK" : "UI_BORDER_STROKE_FAILED");
+    serial::line(config_parser_ok ? "UI_CONFIG_PARSER_OK" : "UI_CONFIG_PARSER_FAILED");
+    serial::line(edge_scaler_ok ? "UI_EDGE_AWARE_SCALER_OK" : "UI_EDGE_AWARE_SCALER_FAILED");
     serial::line(desktop_radius >= 6U && desktop_radius <= 20U ? "UI_ROUNDED_RECT_OK" : "UI_ROUNDED_RECT_FAILED");
     serial::line(current_theme.canvas_top != current_theme.canvas_bottom ? "UI_GRADIENT_OK" : "UI_GRADIENT_FAILED");
     const bool bounds_ok = window_x >= 0 && window_y >= 0 && window_x + window_width <= static_cast<int32_t>(width) && window_y + window_height <= static_cast<int32_t>(height);
@@ -256,6 +289,9 @@ bool init() {
     const bool geometry_ok = window_width % ui_grid == 0 && window_height % ui_grid == 0 &&
         taskbar_main_x() >= taskbar_margin && taskbar_tray_x() + taskbar_tray_width <= static_cast<int32_t>(width) - taskbar_margin &&
         launcher_panel_x + launcher_panel_width <= static_cast<int32_t>(width);
+    const bool cohesive_shell_ok = quick_panel_y() >= taskbar_margin &&
+        quick_tile_y(quick_settings_count - 1U) + quick_tile_height <= quick_panel_y() + quick_panel_height - 36 &&
+        launcher_card_y(launcher_item_count - 1U) + launcher_card_height <= launcher_panel_y + launcher_panel_height - 48;
     serial::line(geometry_ok ? "UI_GEOMETRY_OK" : "UI_GEOMETRY_FAILED");
     const bool navigation_ok = launcher_item_count == 6U && settings_page_count == 4U && quick_settings_count == 6U &&
         key_f10 > key_f9 && key_f11 > key_f10 && key_super > key_f10;
@@ -275,17 +311,24 @@ bool init() {
     serial::line("UI_SYSTEM_CENTER_OK");
     serial::line("UI_ACCESSIBILITY_OK");
     serial::line("UI_START_SYSTEM_TOOLS_OK");
+    serial::line(cohesive_shell_ok ? "UI_SEPTINUM_SHELL_OK" : "UI_SEPTINUM_SHELL_FAILED");
     serial::line("UI_ANIMATION_MODEL_OK");
     serial::write("UI_DISPLAY_MODE_COUNT "); serial_uint(display_mode_count); serial::write("\r\n");
     serial::line("UI_SETTINGS_CONTROLS_OK");
     report_display_mode("UI_DISPLAY_MODE_OK");
     serial::write("DESKTOP_SCENE_HASH="); serial_hex(scene_hash()); serial::write("\r\n");
     serial::line("DESKTOP_SCENE_OK");
-    return clipping && runtime_preferences_loaded && bounds_ok && geometry_ok && navigation_ok && display_ok && scaler_ok;
+    return clipping && runtime_preferences_loaded && bounds_ok && geometry_ok && cohesive_shell_ok && navigation_ok &&
+        display_ok && scaler_ok && font_atlas_ok && font_metrics_ok && text_ellipsis_ok && clipping_safety_ok &&
+        color_mix_ok && border_stroke_ok && config_parser_ok && edge_scaler_ok;
 }
 
 bool hit(int32_t x, int32_t y, int32_t rect_x, int32_t rect_y, int32_t rect_width, int32_t rect_height) {
-    return x >= rect_x && x < rect_x + rect_width && y >= rect_y && y < rect_y + rect_height;
+    if (rect_width <= 0 || rect_height <= 0) return false;
+    const int64_t right = static_cast<int64_t>(rect_x) + rect_width;
+    const int64_t bottom = static_cast<int64_t>(rect_y) + rect_height;
+    return static_cast<int64_t>(x) >= rect_x && static_cast<int64_t>(x) < right &&
+        static_cast<int64_t>(y) >= rect_y && static_cast<int64_t>(y) < bottom;
 }
 
 void wait_animation_tick() {

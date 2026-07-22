@@ -76,6 +76,8 @@ static constexpr Glyph glyphs[] = {
     {'\'',{4,4,8,0,0,0,0}}, {'"',{10,10,0,0,0,0,0}}, {' ',{0,0,0,0,0,0,0}}
 };
 
+#include "ui_font.inc"
+
 struct Theme {
     uint32_t canvas_top, canvas_bottom, glow_primary, glow_secondary;
     uint32_t surface, surface_high, surface_low, border;
@@ -136,6 +138,7 @@ uint32_t blend(uint32_t source, uint32_t destination, uint8_t alpha) {
 }
 uint32_t mix(uint32_t first, uint32_t second, uint32_t numerator, uint32_t denominator) {
     if (!denominator) return first;
+    if (numerator > denominator) numerator = denominator;
     const uint32_t inverse = denominator - numerator;
     const uint32_t red = ((((first >> 16U) & 0xFFU) * inverse) + (((second >> 16U) & 0xFFU) * numerator)) / denominator;
     const uint32_t green = ((((first >> 8U) & 0xFFU) * inverse) + (((second >> 8U) & 0xFFU) * numerator)) / denominator;
@@ -143,13 +146,38 @@ uint32_t mix(uint32_t first, uint32_t second, uint32_t numerator, uint32_t denom
     return (red << 16U) | (green << 8U) | blue;
 }
 
-bool clip_rect(int32_t& x, int32_t& y, int32_t& rect_width, int32_t& rect_height) {
-    if (rect_width <= 0 || rect_height <= 0 || x >= static_cast<int32_t>(width) || y >= static_cast<int32_t>(height) || x + rect_width <= 0 || y + rect_height <= 0) return false;
-    if (x < 0) { rect_width += x; x = 0; }
-    if (y < 0) { rect_height += y; y = 0; }
-    if (x + rect_width > static_cast<int32_t>(width)) rect_width = static_cast<int32_t>(width) - x;
-    if (y + rect_height > static_cast<int32_t>(height)) rect_height = static_cast<int32_t>(height) - y;
+bool clip_rect_to_bounds(int32_t& x, int32_t& y, int32_t& rect_width, int32_t& rect_height,
+                         int32_t bounds_width, int32_t bounds_height) {
+    if (rect_width <= 0 || rect_height <= 0 || bounds_width <= 0 || bounds_height <= 0) return false;
+    int64_t left = x;
+    int64_t top = y;
+    int64_t right = left + static_cast<int64_t>(rect_width);
+    int64_t bottom = top + static_cast<int64_t>(rect_height);
+    if (right <= 0 || bottom <= 0 || left >= bounds_width || top >= bounds_height) return false;
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > bounds_width) right = bounds_width;
+    if (bottom > bounds_height) bottom = bounds_height;
+    x = static_cast<int32_t>(left);
+    y = static_cast<int32_t>(top);
+    rect_width = static_cast<int32_t>(right - left);
+    rect_height = static_cast<int32_t>(bottom - top);
     return rect_width > 0 && rect_height > 0;
+}
+
+bool clip_rect(int32_t& x, int32_t& y, int32_t& rect_width, int32_t& rect_height) {
+    return clip_rect_to_bounds(x, y, rect_width, rect_height,
+                               static_cast<int32_t>(width), static_cast<int32_t>(height));
+}
+
+bool clipping_safety_contract_ok() {
+    int32_t x = -4, y = -4, w = 8, h = 8;
+    const bool partial = clip_rect(x, y, w, h) && x == 0 && y == 0 && w == 4 && h == 4;
+    x = 2147483644; y = 0; w = 16; h = 1;
+    const bool positive_overflow_rejected = !clip_rect(x, y, w, h);
+    x = -2147483647 - 1; y = 0; w = 16; h = 1;
+    const bool negative_overflow_rejected = !clip_rect(x, y, w, h);
+    return partial && positive_overflow_rejected && negative_overflow_rejected;
 }
 
 void fill_rect(int32_t x, int32_t y, int32_t rect_width, int32_t rect_height, uint32_t color) {
@@ -170,7 +198,9 @@ void fill_rect_alpha(int32_t x, int32_t y, int32_t rect_width, int32_t rect_heig
 
 void vertical_gradient(int32_t x, int32_t y, int32_t rect_width, int32_t rect_height, uint32_t top, uint32_t bottom) {
     if (rect_height <= 0) return;
-    for (int32_t row = 0; row < rect_height; ++row) fill_rect(x, y + row, rect_width, 1, mix(top, bottom, static_cast<uint32_t>(row), static_cast<uint32_t>(rect_height)));
+    const uint32_t denominator = rect_height > 1 ? static_cast<uint32_t>(rect_height - 1) : 1U;
+    for (int32_t row = 0; row < rect_height; ++row)
+        fill_rect(x, y + row, rect_width, 1, mix(top, bottom, static_cast<uint32_t>(row), denominator));
 }
 
 void fill_circle_alpha(int32_t center_x, int32_t center_y, int32_t radius, uint32_t color, uint8_t alpha) {
@@ -225,9 +255,37 @@ void fill_round_rect_alpha(int32_t x, int32_t y, int32_t rect_width, int32_t rec
     }
 }
 
+int32_t rounded_row_inset(int32_t rect_height, int32_t radius, int32_t row) {
+    if (rect_height <= 0 || radius <= 0 || row < 0 || row >= rect_height) return 0;
+    const int32_t corner_row = row < radius ? row : (row >= rect_height - radius ? rect_height - row - 1 : radius);
+    if (corner_row >= radius) return 0;
+    const int32_t dy = radius - corner_row - 1;
+    const int32_t radius_squared = radius * radius;
+    int32_t span = radius;
+    while (span > 0 && span * span + dy * dy > radius_squared) --span;
+    return radius - span;
+}
+
 void draw_round_border(int32_t x, int32_t y, int32_t rect_width, int32_t rect_height, int32_t radius, uint32_t color) {
-    fill_round_rect(x, y, rect_width, rect_height, radius, color);
-    fill_round_rect(x + 1, y + 1, rect_width - 2, rect_height - 2, radius > 1 ? radius - 1 : 0, current_theme.surface);
+    if (rect_width <= 0 || rect_height <= 0) return;
+    const int32_t maximum = (rect_width < rect_height ? rect_width : rect_height) / 2;
+    if (radius < 0) radius = 0;
+    if (radius > maximum) radius = maximum;
+    const int32_t inner_radius = radius > 1 ? radius - 1 : 0;
+    for (int32_t row = 0; row < rect_height; ++row) {
+        const int32_t outer_inset = rounded_row_inset(rect_height, radius, row);
+        const int32_t outer_left = x + outer_inset;
+        const int32_t outer_right = x + rect_width - outer_inset - 1;
+        if (row == 0 || row + 1 == rect_height || rect_width <= 2 || rect_height <= 2) {
+            fill_rect(outer_left, y + row, outer_right - outer_left + 1, 1, color);
+            continue;
+        }
+        const int32_t inner_inset = rounded_row_inset(rect_height - 2, inner_radius, row - 1);
+        const int32_t inner_left = x + 1 + inner_inset;
+        const int32_t inner_right = x + rect_width - inner_inset - 2;
+        if (inner_left > outer_left) fill_rect(outer_left, y + row, inner_left - outer_left, 1, color);
+        if (outer_right > inner_right) fill_rect(inner_right + 1, y + row, outer_right - inner_right, 1, color);
+    }
 }
 
 void draw_shadow(int32_t x, int32_t y, int32_t rect_width, int32_t rect_height, int32_t radius) {
@@ -236,27 +294,126 @@ void draw_shadow(int32_t x, int32_t y, int32_t rect_width, int32_t rect_height, 
 }
 
 const Glyph* glyph_for(char value) {
-    if (value >= 'a' && value <= 'z') value = static_cast<char>(value - ('a' - 'A'));
-    for (uint32_t index = 0; index < sizeof(glyphs) / sizeof(glyphs[0]); ++index) if (glyphs[index].value == value) return &glyphs[index];
-    for (uint32_t index = 0; index < sizeof(glyphs) / sizeof(glyphs[0]); ++index) if (glyphs[index].value == '?') return &glyphs[index];
+    if (value >= 'a' && value <= 'z') {
+        const Glyph* lowercase = lowercase_glyph_for(value);
+        if (lowercase) return lowercase;
+    }
+    for (uint32_t index = 0; index < sizeof(glyphs) / sizeof(glyphs[0]); ++index)
+        if (glyphs[index].value == value) return &glyphs[index];
+    for (uint32_t index = 0; index < sizeof(glyphs) / sizeof(glyphs[0]); ++index)
+        if (glyphs[index].value == '?') return &glyphs[index];
     return nullptr;
+}
+
+bool font_contract_ok() {
+    const Glyph* lower_a = glyph_for('a');
+    const Glyph* upper_a = glyph_for('A');
+    return lower_a && upper_a && lower_a != upper_a && lower_a->rows[0] == 0U &&
+        upper_a->rows[0] != 0U && glyph_for('g') && glyph_for('z');
 }
 
 void draw_char(int32_t x, int32_t y, char value, uint32_t color, uint32_t scale = 1U) {
     const Glyph* glyph = glyph_for(value);
     if (!glyph || !scale) return;
-    for (uint32_t row = 0; row < 7U; ++row) {
-        for (uint32_t column = 0; column < 5U; ++column) {
-            if (glyph->rows[row] & (1U << (4U - column))) fill_rect(x + static_cast<int32_t>(column * scale), y + static_cast<int32_t>(row * scale), static_cast<int32_t>(scale), static_cast<int32_t>(scale), color);
+    for (int32_t row = 0; row < 7; ++row) {
+        for (int32_t column = 0; column < 5; ++column) {
+            const uint8_t coverage = font_soft_coverage(glyph, row, column);
+            if (!coverage) continue;
+            const int32_t pixel_x = x + column * static_cast<int32_t>(scale);
+            const int32_t pixel_y = y + row * static_cast<int32_t>(scale);
+            if (coverage == 255U)
+                fill_rect(pixel_x, pixel_y, static_cast<int32_t>(scale), static_cast<int32_t>(scale), color);
+            else
+                fill_rect_alpha(pixel_x, pixel_y, static_cast<int32_t>(scale), static_cast<int32_t>(scale), color, coverage);
+        }
+    }
+}
+
+void draw_text_glyph(int32_t x, int32_t y, const Glyph* glyph, const FontGlyphMetrics& metrics,
+                     uint32_t color, uint32_t scale) {
+    if (!glyph || !scale || !metrics.width) return;
+    for (int32_t row = 0; row < 7; ++row) {
+        for (int32_t column = metrics.left; column <= metrics.right; ++column) {
+            const uint8_t coverage = font_soft_coverage(glyph, row, column);
+            if (!coverage) continue;
+            const int32_t pixel_x = x + (column - metrics.left) * static_cast<int32_t>(scale);
+            const int32_t pixel_y = y + row * static_cast<int32_t>(scale);
+            if (coverage == 255U)
+                fill_rect(pixel_x, pixel_y, static_cast<int32_t>(scale), static_cast<int32_t>(scale), color);
+            else
+                fill_rect_alpha(pixel_x, pixel_y, static_cast<int32_t>(scale), static_cast<int32_t>(scale), color, coverage);
         }
     }
 }
 
 void draw_text(int32_t x, int32_t y, const char* text, uint32_t color, uint32_t scale = 1U) {
-    while (text && *text) { draw_char(x, y, *text++, color, scale); x += static_cast<int32_t>(6U * scale); }
+    while (text && *text) {
+        const Glyph* glyph = glyph_for(*text++);
+        const FontGlyphMetrics metrics = font_glyph_metrics(glyph);
+        draw_text_glyph(x, y, glyph, metrics, color, scale);
+        x += static_cast<int32_t>(metrics.advance * scale);
+    }
 }
 
-int32_t text_width(const char* text, uint32_t scale = 1U) { return static_cast<int32_t>(string_length(text) * 6U * scale); }
+int32_t text_width(const char* text, uint32_t scale = 1U) {
+    uint32_t width_pixels = 0U;
+    while (text && *text) width_pixels += font_glyph_metrics(glyph_for(*text++)).advance;
+    return static_cast<int32_t>(width_pixels * scale);
+}
+
+uint32_t text_prefix_count_for_width(const char* text, int32_t maximum_width, uint32_t scale = 1U) {
+    if (!text || maximum_width <= 0 || !scale) return 0U;
+    int32_t used = 0;
+    uint32_t count = 0U;
+    while (text[count]) {
+        const FontGlyphMetrics metrics = font_glyph_metrics(glyph_for(text[count]));
+        const int32_t advance = static_cast<int32_t>(metrics.advance * scale);
+        if (advance <= 0 || used > maximum_width - advance) break;
+        used += advance;
+        ++count;
+    }
+    return count;
+}
+
+void draw_text_ellipsis(int32_t x, int32_t y, int32_t maximum_width, const char* text,
+                        uint32_t color, uint32_t scale = 1U) {
+    if (!text || maximum_width <= 0 || !scale) return;
+    if (text_width(text, scale) <= maximum_width) { draw_text(x, y, text, color, scale); return; }
+    const int32_t ellipsis_width = text_width("...", scale);
+    if (ellipsis_width > maximum_width) return;
+    const uint32_t count = text_prefix_count_for_width(text, maximum_width - ellipsis_width, scale);
+    for (uint32_t index = 0; index < count; ++index) {
+        const Glyph* glyph = glyph_for(text[index]);
+        const FontGlyphMetrics metrics = font_glyph_metrics(glyph);
+        draw_text_glyph(x, y, glyph, metrics, color, scale);
+        x += static_cast<int32_t>(metrics.advance * scale);
+    }
+    draw_text(x, y, "...", color, scale);
+}
+
+void draw_text_right_ellipsis(int32_t right, int32_t y, int32_t maximum_width, const char* text,
+                              uint32_t color, uint32_t scale = 1U) {
+    const int32_t width_pixels = text_width(text, scale);
+    if (width_pixels <= maximum_width) draw_text(right - width_pixels, y, text, color, scale);
+    else draw_text_ellipsis(right - maximum_width, y, maximum_width, text, color, scale);
+}
+
+bool font_metrics_contract_ok() {
+    return text_width("ill") < text_width("mmm") && text_width(" ") == 4 && text_width("ii") == 8;
+}
+
+bool text_ellipsis_contract_ok() {
+    const int32_t dots = text_width("...");
+    const int32_t two_i = text_width("ii");
+    return dots > 0 && text_prefix_count_for_width("iiii", two_i) == 2U &&
+        text_prefix_count_for_width("iiii", 0) == 0U;
+}
+
+bool color_mix_contract_ok() {
+    return mix(0x102030U, 0xA0B0C0U, 2U, 1U) == 0xA0B0C0U &&
+        mix(0x102030U, 0xA0B0C0U, 0U, 0U) == 0x102030U;
+}
+
 void draw_text_right(int32_t right, int32_t y, const char* text, uint32_t color, uint32_t scale = 1U) { draw_text(right - text_width(text, scale), y, text, color, scale); }
 void draw_text_center(int32_t center, int32_t y, const char* text, uint32_t color, uint32_t scale = 1U) { draw_text(center - text_width(text, scale) / 2, y, text, color, scale); }
 
