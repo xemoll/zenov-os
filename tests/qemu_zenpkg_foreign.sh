@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: BSD-2-Clause
-set -euo pipefail
+set -Eeuo pipefail
+
+on_error() {
+  local status=$?
+  local source="${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}"
+  local line="${BASH_LINENO[0]:-0}"
+  printf 'qemu-zenpkg-foreign: %s:%s: status=%s command=%q\n' \
+    "$source" "$line" "$status" "$BASH_COMMAND" >&2
+  exit "$status"
+}
+trap on_error ERR
 
 QEMU="${QEMU:-qemu-system-i386}"
 BOOT_IMAGE="${1:-build/zenov-os.img}"
@@ -12,7 +22,9 @@ mkdir -p "$OUT"
 rm -f "$OUT/serial.log" "$OUT/monitor.log" "$OUT/qemu.stderr" "$OUT/runtime.img" "$OUT/summary.log"
 
 wait_for_serial() {
-  local file="$1" text="$2" timeout_tenths="${3:-900}"
+  local file="$1"
+  local text="$2"
+  local timeout_tenths="${3:-900}"
   local i
   for ((i=0; i<timeout_tenths; ++i)); do
     [[ -f "$file" ]] && grep -Fq "$text" "$file" && return 0
@@ -23,7 +35,9 @@ wait_for_serial() {
 }
 
 send_text() {
-  local text="$1" char lower
+  local text="$1"
+  local char
+  local lower
   local i
   for ((i=0; i<${#text}; ++i)); do
     char="${text:i:1}"
