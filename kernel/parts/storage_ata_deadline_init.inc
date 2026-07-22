@@ -1,7 +1,4 @@
 void init_deadline() {
-    // Keep the legacy typed fallback referenced until its fixed-loop transport
-    // is removed in a dedicated compatibility cleanup.
-    (void)&init;
     heap::init();
     serial::line("Storage: probing ATA primary master with monotonic deadlines...");
     ata_present = false;
