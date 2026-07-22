@@ -28,13 +28,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
 
       - name: Verify tested source revision
         run: |
           [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
           git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
-          echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
+          actual_revision="$(git rev-parse HEAD)"
+          test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
+          echo "tested-source-revision=$actual_revision"
 
       - name: Install native toolchain and QEMU
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
