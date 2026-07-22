@@ -3,10 +3,14 @@ void init_deadline() {
     serial::line("Storage: probing ATA primary master with monotonic deadlines...");
     ata_present = false;
     ata_sector_total = 0U;
+    ata0.present = false;
+    ata0.sectors = 0U;
     ata0.read_sector = ata2_read_result;
     ata0.write_sector = ata2_write_result;
-    ata0.present = ata2_identify();
-    ata0.sectors = ata_sector_total;
+    zfs_io_state = block_io_state_initial();
+
+    const bool identified = ata2_identify();
+    ata2_publish_device_state(identified, identified ? ata_sector_total : 0U);
     if (!ata0.present) {
         serial::line("Storage: ATA device not found or recovery failed");
         return;
