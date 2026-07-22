@@ -1,5 +1,5 @@
-bool flush_entry(uint32_t index) { if (index >= zfs_super.entry_count || !ata0.read_sector(entry_sector(index), sector_buffer).ok()) return false; memcpy(sector_buffer + entry_slot_offset(index), &zfs_entries[index], sizeof(ZfsEntry)); return ata0.write_sector(entry_sector(index), sector_buffer).ok(); }
-bool load_entries() { uint8_t* destination = reinterpret_cast<uint8_t*>(zfs_entries); for (uint32_t sector = 0; sector < zfs_super.entry_sectors; ++sector) if (!ata0.read_sector(1U + sector, destination + sector * sector_size).ok()) return false; return true; }
+bool flush_entry(uint32_t index) { if (index >= zfs_super.entry_count || !zfs_read_sector(entry_sector(index), sector_buffer).ok()) return false; memcpy(sector_buffer + entry_slot_offset(index), &zfs_entries[index], sizeof(ZfsEntry)); return zfs_write_sector(entry_sector(index), sector_buffer).ok(); }
+bool load_entries() { uint8_t* destination = reinterpret_cast<uint8_t*>(zfs_entries); for (uint32_t sector = 0; sector < zfs_super.entry_sectors; ++sector) if (!zfs_read_sector(1U + sector, destination + sector * sector_size).ok()) return false; return true; }
 bool recover_transactions() {
     bool recovered = false;
     for (uint32_t i = 0; i < zfs_super.entry_count; ++i) {
@@ -26,7 +26,8 @@ bool recover_transactions() {
     return true;
 }
 bool mount() {
-    if (!ata0.present || !ata0.read_sector(0, reinterpret_cast<uint8_t*>(&zfs_super)).ok()) return false;
+    zfs_mounted = false;
+    if (!ata0.present || !zfs_read_sector(0U, reinterpret_cast<uint8_t*>(&zfs_super)).ok()) return false;
     const char expected[8] = {'Z','E','N','O','V','F','S','1'};
     if (!bytes_equal(zfs_super.magic, expected, 8) || zfs_super.version != 1 || !zfs_super.entry_count || zfs_super.entry_count > zfs_max_entries || zfs_super.total_sectors > ata0.sectors || !zfs_super.slot_sectors) return false;
     if (!load_entries()) return false;
@@ -47,7 +48,7 @@ bool read_file(const char* input, uint8_t* output, uint32_t capacity, uint32_t& 
     const uint32_t size = zfs_entries[found].size;
     uint32_t copied = 0;
     for (uint32_t sector = 0; copied < size; ++sector) {
-        if (!ata0.read_sector(data_sector(static_cast<uint32_t>(found)) + sector, sector_buffer).ok()) return false;
+        if (!zfs_read_sector(data_sector(static_cast<uint32_t>(found)) + sector, sector_buffer).ok()) return false;
         uint32_t chunk = size - copied;
         if (chunk > sector_size) chunk = sector_size;
         memcpy(output + copied, sector_buffer, chunk);
@@ -82,7 +83,7 @@ bool write_file(const char* input, const uint8_t* data, uint32_t size, bool appe
         uint32_t chunk = total - written;
         if (chunk > sector_size) chunk = sector_size;
         memcpy(sector_buffer, file_buffer + written, chunk);
-        if (!ata0.write_sector(data_sector(static_cast<uint32_t>(staging_index)) + sector, sector_buffer).ok()) return false;
+        if (!zfs_write_sector(data_sector(static_cast<uint32_t>(staging_index)) + sector, sector_buffer).ok()) return false;
         written += chunk;
     }
     ZfsEntry& stage = zfs_entries[staging_index];
@@ -100,7 +101,7 @@ bool write_file(const char* input, const uint8_t* data, uint32_t size, bool appe
     flush_entry(static_cast<uint32_t>(staging_index));
     return true;
 }
-bool make_directory(const char* input) { if (!zfs_mounted) return false; char path[48]; if (!normalize_path(input, path) || string_equal(path, "/") || find_entry(path) >= 0 || !parent_exists(path)) return false; const int32_t index = free_entry(); if (index < 0) return false; ZfsEntry& entry = zfs_entries[index]; memset(&entry, 0, sizeof(entry)); entry.used = 1; entry.type = zfs_type_directory; return path_copy(entry.path, path, sizeof(entry.path)) && flush_entry(static_cast<uint32_t>(index)); }
+bool make_directory(const char* input) { if (!zfs_mounted) return false; char path[48]; if (!normalize_path(input, path) || string_equal(path, "/") || find_entry(path) >= 0 || !parent_exists(path)) return false; const int32_t index = free_entry(); if (index < 0) return false; ZfsEntry& entry = zfs_entries[index]; memset(&entry, 0, sizeof(ZfsEntry)); entry.used = 1; entry.type = zfs_type_directory; return path_copy(entry.path, path, sizeof(entry.path)) && flush_entry(static_cast<uint32_t>(index)); }
 bool touch(const char* input) { char path[48]; if (!normalize_path(input, path)) return false; const int32_t found = find_entry(path); return found >= 0 ? zfs_entries[found].type == zfs_type_file : write_file(path, nullptr, 0, false); }
 bool has_children(const char* path) { const uint32_t length = static_cast<uint32_t>(string_length(path)); for (uint32_t i = 0; i < zfs_super.entry_count; ++i) if (zfs_entries[i].used && zfs_entries[i].type != zfs_type_transaction && string_starts_with(zfs_entries[i].path, path) && zfs_entries[i].path[length] == '/' && zfs_entries[i].path[length + 1]) return true; return false; }
 bool remove(const char* input) { if (!zfs_mounted) return false; char path[48]; if (!normalize_path(input, path) || string_equal(path, "/")) return false; const int32_t index = find_entry(path); if (index < 0 || (zfs_entries[index].type == zfs_type_directory && has_children(path))) return false; memset(&zfs_entries[index], 0, sizeof(ZfsEntry)); return flush_entry(static_cast<uint32_t>(index)); }
