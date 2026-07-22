@@ -1,0 +1,93 @@
+diff --git a/kernel/parts/storage_format.inc b/kernel/parts/storage_format.inc
+--- a/kernel/parts/storage_format.inc
++++ b/kernel/parts/storage_format.inc
+@@ -31,7 +31,7 @@ bool zfs_format_path_valid(const char path[48]) {
+     const uint32_t length = zfs_format_path_length(path);
+     if (length < 2U || length >= 48U || path[0] != '/' || path[length - 1U] == '/') return false;
+     for (uint32_t i = length + 1U; i < 48U; ++i) if (path[i] != 0) return false;
+-    uint32_t component = 1U;
++    uint32_t component = 1U, components = 1U;
+     for (uint32_t i = 1U; i < length; ++i) {
+         const uint8_t value = static_cast<uint8_t>(path[i]);
+         if (value < 0x20U || value == 0x7FU) return false;
+         if (path[i] != '/') continue;
+         if (i == component || zfs_format_dot_component(path, component, i)) return false;
++        if (++components > 16U) return false;
+         component = i + 1U;
+     }
+     return component < length && !zfs_format_dot_component(path, component, length);
+diff --git a/tests/zenovfs_mount_validation_test.cpp b/tests/zenovfs_mount_validation_test.cpp
+--- a/tests/zenovfs_mount_validation_test.cpp
++++ b/tests/zenovfs_mount_validation_test.cpp
+@@ -96,6 +96,7 @@ int main() {
+         { auto value = entries; std::memset(value[1].path, 'A', sizeof(value[1].path)); value[1].path[0] = '/'; require_entries_rejected(super, value, "entry-path"); }
+         { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/apps/bad\nname"); require_entries_rejected(super, value, "entry-path"); }
+         { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/apps/../tool"); require_entries_rejected(super, value, "entry-path"); }
++        { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a"); require_entries_rejected(super, value, "entry-path"); }
+         { auto value = entries; value[1].size = 65537U; require_entries_rejected(super, value, "file-size"); }
+         { auto value = entries; value[0].size = 1U; require_entries_rejected(super, value, "directory-metadata"); }
+         { auto value = entries; value[2] = value[1]; require_entries_rejected(super, value, "duplicate-path"); }
+@@ -109,7 +110,7 @@ int main() {
+             if (!storage::zfs_format_entries_valid(super, value.data(), reason)) throw std::runtime_error("valid post-delete committed state rejected");
+         }
+ 
+-        std::cout << "ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=23 shared-kernel-validator=yes\n";
++        std::cout << "ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=24 shared-kernel-validator=yes\n";
+         return 0;
+     } catch (const std::exception& error) {
+         std::cerr << "zenovfs-mount-validation-test: " << error.what() << '\n';
+diff --git a/tools/zenovfs_mount_corrupt.cpp b/tools/zenovfs_mount_corrupt.cpp
+--- a/tools/zenovfs_mount_corrupt.cpp
++++ b/tools/zenovfs_mount_corrupt.cpp
+@@ -80,6 +80,10 @@ int main(int argc, char** argv) {
+         } else if (mode == "entry-path") {
+             std::memset(entries[sample].path, 'A', sizeof(entries[sample].path));
+             entries[sample].path[0] = '/';
++        } else if (mode == "component-depth") {
++            static constexpr char deep[] = "/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a";
++            std::memset(entries[sample].path, 0, sizeof(entries[sample].path));
++            std::memcpy(entries[sample].path, deep, sizeof(deep));
+         } else if (mode == "duplicate-path") {
+             if (spare == kEntryCount) throw std::runtime_error("no free entry for duplicate fixture");
+             entries[spare] = entries[sample];
+diff --git a/tests/qemu_zenovfs_mount_reject.sh b/tests/qemu_zenovfs_mount_reject.sh
+--- a/tests/qemu_zenovfs_mount_reject.sh
++++ b/tests/qemu_zenovfs_mount_reject.sh
+@@ -64,9 +64,10 @@ run_case metadata-layout metadata-layout
+ run_case slot-size slot-size
+ run_case entry-path entry-path
++run_case component-depth entry-path
+ run_case duplicate-path duplicate-path
+ run_case transition-old-mismatch transition-old-mismatch
+ 
+-printf 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=6 ui_reached=0\n' | tee "$OUT/summary.log"
++printf 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=7 ui_reached=0\n' | tee "$OUT/summary.log"
+diff --git a/.github/workflows/zenovfs-mount-hardening.yml b/.github/workflows/zenovfs-mount-hardening.yml
+--- a/.github/workflows/zenovfs-mount-hardening.yml
++++ b/.github/workflows/zenovfs-mount-hardening.yml
+@@ -40,7 +40,7 @@ jobs:
+           UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+             build/sanitized/zenovfs-mount-validation-test | tee ci-logs/zenovfs-mount-validation.log
+-          grep -Fq 'ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=18 shared-kernel-validator=yes' ci-logs/zenovfs-mount-validation.log
++          grep -Fq 'ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=24 shared-kernel-validator=yes' ci-logs/zenovfs-mount-validation.log
+@@ -53,7 +53,7 @@ jobs:
+           bash tests/qemu_zenovfs_mount_reject.sh \
+             build/zenov-os.img build/zenov-data.img build/zenovfs-mount-corrupt \
+             build/qemu/zenovfs-mount-reject
+-          grep -Fq 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=6 ui_reached=0' build/qemu/zenovfs-mount-reject/summary.log
++          grep -Fq 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=7 ui_reached=0' build/qemu/zenovfs-mount-reject/summary.log
+@@ -61,6 +61,8 @@ jobs:
+           grep -Fq 'transition-old-mismatch' kernel/parts/storage_format.inc
+           grep -Fq 'run_case entry-sectors entry-sectors' tests/qemu_zenovfs_mount_reject.sh
++          grep -Fq 'components > 16U' kernel/parts/storage_format.inc
++          grep -Fq 'run_case component-depth entry-path' tests/qemu_zenovfs_mount_reject.sh
+           grep -Fq 'entries[sample].path[0] = '\''/'\'';' tools/zenovfs_mount_corrupt.cpp
+           grep -Fq 'entries[spare].reserved = 0U' tools/zenovfs_mount_corrupt.cpp
+diff --git a/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md b/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+--- a/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
++++ b/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+@@ -21,6 +21,7 @@ Entry validation rejects:
+ - unterminated, control-character, dot-component and non-canonical paths;
++- paths deeper than the runtime normalizer's 16-component bound;
+ - file sizes larger than one fixed ZenovFS1 slot;
+ - non-zero metadata on directories and unused entries;

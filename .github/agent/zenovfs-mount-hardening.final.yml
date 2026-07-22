@@ -1,0 +1,112 @@
+name: ZenovFS Mount Hardening
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  malformed-metadata-fail-closed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact tested source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
+          printf 'tested-source-revision=%s\n' "$ZENOV_SOURCE_REVISION"
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl qemu-system-x86
+
+      - name: Validate shared parser with sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/sanitized ci-logs
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-conversion \
+            -fno-sanitize-recover=all -fno-omit-frame-pointer \
+            tests/zenovfs_mount_validation_test.cpp -o build/sanitized/zenovfs-mount-validation-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            build/sanitized/zenovfs-mount-validation-test | tee ci-logs/zenovfs-mount-validation.log
+          grep -Fq 'ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=24 shared-kernel-validator=yes' ci-logs/zenovfs-mount-validation.log
+
+      - name: Build strict kernel and complete host matrices
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean check 2>&1 | tee ci-logs/zenovfs-mount-strict-build.log
+
+      - name: Run complete security and recovery lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          make qemu 2>&1 | tee ci-logs/zenovfs-security-qemu.log
+          grep -Fq 'ZENOV_GUARD_READ_BLOCKED path=/quarantine/q-92ec69273708e45efb43afbe.qtn verdict=INFECTED signature=Quarantine.ReadDenied' build/qemu/serial-phase1.log
+          grep -Fq 'ZENOV_SECURITY_RUNTIME_IMAGE_OK' ci-logs/zenovfs-security-qemu.log
+
+      - name: Boot malformed metadata images fail closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/qemu_zenovfs_mount_reject.sh \
+            build/zenov-os.img build/zenov-data.img build/zenovfs-mount-corrupt \
+            build/qemu/zenovfs-mount-reject
+          grep -Fq 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=7 ui_reached=0' build/qemu/zenovfs-mount-reject/summary.log
+
+      - name: Verify deterministic rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          make deterministic 2>&1 | tee ci-logs/zenovfs-deterministic.log
+          grep -Fq 'deterministic rebuild: OK' ci-logs/zenovfs-deterministic.log
+
+      - name: Verify source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'zfs_format_superblock_valid' kernel/parts/storage_format.inc
+          grep -Fq 'zfs_format_entries_valid' kernel/parts/storage_format.inc
+          grep -Fq 'components > 16U' kernel/parts/storage_format.inc
+          grep -Fq 'if (copied) memset(output, 0, copied);' kernel/parts/storage.inc
+          grep -Fq 'if (size) memset(output, 0, size);' kernel/parts/storage.inc
+          grep -Fq 'bool restore_update(uint32_t previous_version, uint32_t previous_size)' kernel/parts/zmid_policy.inc
+          grep -Fq 'for (uint32_t i = 0; i < 12U; ++i)' kernel/parts/security_guard.inc
+          grep -Fq 'action_block = security_guard::policy_action_block' kernel/parts/zmid_policy.inc
+          grep -Fq 'run_case component-depth entry-path' tests/qemu_zenovfs_mount_reject.sh
+          echo 'ZENOVFS_MOUNT_HARDENING_SOURCE_CONTRACT_OK'
+
+      - name: Upload mount-hardening evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenovfs-mount-hardening-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            ci-logs/*.log
+            build/qemu/serial*.log
+            build/qemu/zenovfs-mount-reject/*.serial.log
+            build/qemu/zenovfs-mount-reject/*.qemu.stderr
+            build/qemu/zenovfs-mount-reject/summary.log

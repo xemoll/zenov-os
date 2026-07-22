@@ -1,0 +1,49 @@
+name: Publish exact ZenovFS mount audit tree
+
+on:
+  push:
+    branches:
+      - agent/zenovfs-security-publication-clean
+  pull_request:
+
+concurrency:
+  group: zenovfs-security-publication-clean
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish-content-addressed-blobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl jq qemu-system-x86
+
+      - name: Reconstruct, test and publish exact production tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: bash .github/agent/run-zenovfs-security-publication.sh
+
+      - name: Upload exact tree map and verification logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: zenovfs-mount-audit-map
+          if-no-files-found: error
+          path: |
+            /tmp/zenovfs-mount-map.txt
+            ci-logs/*.log
+            build/qemu/serial*.log
+            build/qemu/zenovfs-mount-reject/*.serial.log
+            build/qemu/zenovfs-mount-reject/*.qemu.stderr
+            build/qemu/zenovfs-mount-reject/summary.log

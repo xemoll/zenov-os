@@ -1,0 +1,10 @@
+diff --git a/tests/zenovfs_mount_validation_test.cpp b/tests/zenovfs_mount_validation_test.cpp
+--- a/tests/zenovfs_mount_validation_test.cpp
++++ b/tests/zenovfs_mount_validation_test.cpp
+@@ -3,6 +3,7 @@
+ #include <cstring>
+ #include <iostream>
+ #include <stdexcept>
++#include <string>
+ 
+ namespace storage {

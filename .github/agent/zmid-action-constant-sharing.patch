@@ -1,0 +1,28 @@
+diff --git a/kernel/parts/security_guard.inc b/kernel/parts/security_guard.inc
+--- a/kernel/parts/security_guard.inc
++++ b/kernel/parts/security_guard.inc
+@@ -5,6 +5,7 @@ constexpr uint32_t sha256_bytes = 32U;
+ constexpr uint32_t audit_capacity = 32U;
++constexpr uint8_t policy_action_block = 1U;
+ 
+ enum class Verdict : uint8_t { clean, trusted, untrusted, suspicious, infected, error };
+ enum class AuditAction : uint8_t { boot, scan, execute, quarantine, write_block, intelligence_update, ransomware, ransomware_policy, read_block, read_audit };
+@@ -307,7 +308,7 @@ bool allow_persistent_read(const char* path, const uint8_t* data, uint32_t size) {
+     if (starts_with_quarantine(normalized)) {
+         ScanResult result{};
+         result.verdict = Verdict::infected;
+-        result.policy_action = zmid::action_block;
++        result.policy_action = policy_action_block;
+         result.size = size;
+         storage::path_copy(result.path, normalized, sizeof(result.path));
+         storage::path_copy(result.signature, "Quarantine.ReadDenied", sizeof(result.signature));
+diff --git a/kernel/parts/zmid_policy.inc b/kernel/parts/zmid_policy.inc
+--- a/kernel/parts/zmid_policy.inc
++++ b/kernel/parts/zmid_policy.inc
+@@ -10,7 +10,7 @@ constexpr uint32_t max_database_bytes = 16U * 1024U;
+ constexpr uint32_t max_records = 32U;
+ constexpr uint32_t max_pattern_bytes = 32U;
+ constexpr uint8_t record_hash = 1U, record_pattern = 2U;
+-constexpr uint8_t action_block = 1U, action_quarantine = 2U, action_audit = 4U;
++constexpr uint8_t action_block = security_guard::policy_action_block, action_quarantine = 2U, action_audit = 4U;
+ constexpr uint8_t known_actions = action_block | action_quarantine | action_audit;

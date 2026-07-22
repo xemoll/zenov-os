@@ -1,0 +1,449 @@
+diff --git a/kernel/parts/storage.inc b/kernel/parts/storage.inc
+index 72a24d0e..00000000 100644
+--- a/kernel/parts/storage.inc
++++ b/kernel/parts/storage.inc
+@@ -51,6 +51,7 @@ static_assert(sizeof(ZfsSuperblock) == sector_size && sizeof(ZfsEntry) == 64);
+ constexpr uint32_t zfs_max_entries = 128U, transaction_none = 0xFFFFFFFFU;
+ constexpr uint8_t zfs_type_file = 1, zfs_type_directory = 2, zfs_type_transaction = 3;
+ constexpr uint16_t zfs_flag_committed = 0x0001U;
++#include "storage_format.inc"
+ ZfsSuperblock zfs_super{}; ZfsEntry zfs_entries[zfs_max_entries]{};
+ bool zfs_mounted = false; char current_directory[48] = "/"; uint8_t sector_buffer[sector_size]; uint8_t* file_buffer = nullptr;
+ 
+@@ -80,7 +81,9 @@ bool normalize_path(const char* input, char* output) {
+         if (!combined[position]) break;
+         char component[48]; uint32_t length = 0;
+         while (combined[position] && combined[position] != '/') {
++            const uint8_t value = static_cast<uint8_t>(combined[position]);
++            if (value < 0x20U || value == 0x7FU) return false;
+             if (length + 1 >= sizeof(component)) return false;
+             component[length++] = combined[position++];
+         }
+@@ -119,7 +122,12 @@ uint32_t entry_slot_offset(uint32_t index) { return (index % 8U) * sizeof(ZfsEnt
+ uint32_t data_sector(uint32_t index) { return zfs_super.data_start + index * zfs_super.slot_sectors; }
+ uint32_t max_file_bytes() { return zfs_super.slot_sectors * sector_size; }
+ bool flush_entry(uint32_t index) { if (index >= zfs_super.entry_count || !ata0.read_sector(entry_sector(index), sector_buffer)) return false; memcpy(sector_buffer + entry_slot_offset(index), &zfs_entries[index], sizeof(ZfsEntry)); return ata0.write_sector(entry_sector(index), sector_buffer); }
+-bool load_entries() { uint8_t* destination = reinterpret_cast<uint8_t*>(zfs_entries); for (uint32_t sector = 0; sector < zfs_super.entry_sectors; ++sector) if (!ata0.read_sector(1U + sector, destination + sector * sector_size)) return false; return true; }
++bool load_entries() {
++    if (zfs_super.entry_sectors > sizeof(zfs_entries) / sector_size) return false;
++    memset(zfs_entries, 0, sizeof(zfs_entries));
++    uint8_t* destination = reinterpret_cast<uint8_t*>(zfs_entries);
++    for (uint32_t sector = 0; sector < zfs_super.entry_sectors; ++sector) if (!ata0.read_sector(1U + sector, destination + sector * sector_size)) return false;
++    return true;
++}
+ bool recover_transactions() {
+     bool recovered = false;
+     for (uint32_t i = 0; i < zfs_super.entry_count; ++i) {
+@@ -133,7 +141,10 @@ bool recover_transactions() {
+         ZfsEntry& committed = zfs_entries[i];
+         if (!committed.used || committed.type != zfs_type_file || !(committed.flags & zfs_flag_committed)) continue;
+         const uint32_t old = committed.reserved;
+         if (old < zfs_super.entry_count && old != i && zfs_entries[old].used) {
++            const ZfsEntry& previous = zfs_entries[old];
++            if (previous.type != zfs_type_file || previous.flags != 0U || !zfs_format_path_equal(previous.path, committed.path)) return false;
+             memset(&zfs_entries[old], 0, sizeof(ZfsEntry));
+             if (!flush_entry(old)) return false;
+         }
+@@ -145,15 +156,29 @@ bool recover_transactions() {
+     return true;
+ }
++bool reject_mount(const char* reason) {
++    serial::write("ZENOVFS_MOUNT_REJECTED reason=");
++    serial::line(reason ? reason : "unknown");
++    return false;
++}
+ bool mount() {
+-    if (!ata0.present || !ata0.read_sector(0, reinterpret_cast<uint8_t*>(&zfs_super))) return false;
+-    const char expected[8] = {'Z','E','N','O','V','F','S','1'};
+-    if (!bytes_equal(zfs_super.magic, expected, 8) || zfs_super.version != 1 || !zfs_super.entry_count || zfs_super.entry_count > zfs_max_entries || zfs_super.total_sectors > ata0.sectors || !zfs_super.slot_sectors) return false;
+-    if (!load_entries()) return false;
++    if (!ata0.present || !ata0.read_sector(0, reinterpret_cast<uint8_t*>(&zfs_super))) return reject_mount("superblock-io");
++    const char* reason = nullptr;
++    if (!zfs_format_superblock_valid(zfs_super, ata0.sectors, reason)) return reject_mount(reason);
++    if (!load_entries()) return reject_mount("entry-table-io");
++    if (!zfs_format_entries_valid(zfs_super, zfs_entries, reason)) return reject_mount(reason);
+     file_buffer = static_cast<uint8_t*>(heap::allocate(max_file_bytes(), 16));
+-    if (!file_buffer || !recover_transactions()) return false;
++    if (!file_buffer) return reject_mount("file-buffer-allocation");
++    if (!recover_transactions()) return reject_mount("transaction-recovery");
++    if (!zfs_format_entries_valid(zfs_super, zfs_entries, reason)) return reject_mount("post-recovery-metadata");
+     zfs_mounted = true;
+     string_copy(current_directory, "/", sizeof(current_directory));
+     return true;
+ }
+diff --git a/kernel/parts/storage_format.inc b/kernel/parts/storage_format.inc
+new file mode 100644
+--- /dev/null
++++ b/kernel/parts/storage_format.inc
+@@ -0,0 +1,181 @@
++constexpr uint32_t zfs_format_max_slot_sectors = (64U * 1024U) / sector_size;
++constexpr uint32_t zfs_format_lba28_sector_limit = 0x10000000U;
++
++bool zfs_format_zero(const uint8_t* bytes, uint32_t size) {
++    if (!bytes) return false;
++    for (uint32_t i = 0; i < size; ++i) if (bytes[i] != 0U) return false;
++    return true;
++}
++
++uint32_t zfs_format_path_length(const char path[48]) {
++    uint32_t length = 0U;
++    while (length < 48U && path[length]) ++length;
++    return length;
++}
++
++bool zfs_format_path_equal(const char left[48], const char right[48]) {
++    const uint32_t left_length = zfs_format_path_length(left);
++    const uint32_t right_length = zfs_format_path_length(right);
++    if (left_length >= 48U || left_length != right_length) return false;
++    for (uint32_t i = 0; i < left_length; ++i) if (left[i] != right[i]) return false;
++    return true;
++}
++
++bool zfs_format_dot_component(const char* path, uint32_t start, uint32_t end) {
++    const uint32_t length = end - start;
++    return (length == 1U && path[start] == '.') || (length == 2U && path[start] == '.' && path[start + 1U] == '.');
++}
++
++bool zfs_format_path_valid(const char path[48]) {
++    const uint32_t length = zfs_format_path_length(path);
++    if (length < 2U || length >= 48U || path[0] != '/' || path[length - 1U] == '/') return false;
++    for (uint32_t i = length + 1U; i < 48U; ++i) if (path[i] != 0) return false;
++    uint32_t component = 1U;
++    for (uint32_t i = 1U; i < length; ++i) {
++        const uint8_t value = static_cast<uint8_t>(path[i]);
++        if (value < 0x20U || value == 0x7FU) return false;
++        if (path[i] != '/') continue;
++        if (i == component || zfs_format_dot_component(path, component, i)) return false;
++        component = i + 1U;
++    }
++    return component < length && !zfs_format_dot_component(path, component, length);
++}
++
++bool zfs_format_label_valid(const char label[16]) {
++    uint32_t length = 0U;
++    while (length < 16U && label[length]) {
++        const uint8_t value = static_cast<uint8_t>(label[length]);
++        if (value < 0x20U || value == 0x7FU) return false;
++        ++length;
++    }
++    if (!length || length >= 16U) return false;
++    for (uint32_t i = length + 1U; i < 16U; ++i) if (label[i] != 0) return false;
++    return true;
++}
++
++bool zfs_format_superblock_valid(const ZfsSuperblock& super, uint32_t device_sectors, const char*& reason) {
++    const char magic[8] = {'Z','E','N','O','V','F','S','1'};
++    for (uint32_t i = 0; i < 8U; ++i) if (super.magic[i] != magic[i]) { reason = "magic"; return false; }
++    if (super.version != 1U) { reason = "version"; return false; }
++    if (!device_sectors || !super.total_sectors || super.total_sectors > device_sectors || super.total_sectors > zfs_format_lba28_sector_limit) { reason = "device-size"; return false; }
++    if (!super.entry_count || super.entry_count > zfs_max_entries) { reason = "entry-count"; return false; }
++    const uint32_t expected_entry_sectors = (super.entry_count * static_cast<uint32_t>(sizeof(ZfsEntry)) + sector_size - 1U) / sector_size;
++    if (super.entry_sectors != expected_entry_sectors || super.entry_sectors > sizeof(ZfsEntry) * zfs_max_entries / sector_size) { reason = "entry-sectors"; return false; }
++    const uint32_t metadata_end = 1U + super.entry_sectors;
++    if (super.data_start < metadata_end || super.data_start >= super.total_sectors) { reason = "metadata-layout"; return false; }
++    if (!super.slot_sectors || super.slot_sectors > zfs_format_max_slot_sectors) { reason = "slot-size"; return false; }
++    if (super.entry_count > (super.total_sectors - super.data_start) / super.slot_sectors) { reason = "data-layout"; return false; }
++    if (!super.generation) { reason = "generation"; return false; }
++    if (!zfs_format_label_valid(super.label)) { reason = "label"; return false; }
++    if (!zfs_format_zero(super.reserved, sizeof(super.reserved))) { reason = "superblock-reserved"; return false; }
++    reason = nullptr;
++    return true;
++}
++
++bool zfs_format_unused_entry_zero(const ZfsEntry& entry) {
++    return zfs_format_zero(reinterpret_cast<const uint8_t*>(&entry), sizeof(entry));
++}
++
++bool zfs_format_parent_present(const ZfsSuperblock& super, const ZfsEntry* entries, const char path[48]) {
++    const uint32_t length = zfs_format_path_length(path);
++    uint32_t slash = length;
++    while (slash > 0U && path[slash - 1U] != '/') --slash;
++    if (slash <= 1U) return true;
++    const uint32_t parent_length = slash - 1U;
++    for (uint32_t i = 0; i < super.entry_count; ++i) {
++        const ZfsEntry& candidate = entries[i];
++        if (!candidate.used || candidate.type != zfs_type_directory || zfs_format_path_length(candidate.path) != parent_length) continue;
++        bool equal = true;
++        for (uint32_t p = 0; p < parent_length; ++p) if (candidate.path[p] != path[p]) { equal = false; break; }
++        if (equal) return true;
++    }
++    return false;
++}
++
++bool zfs_format_transition(const ZfsEntry& entry) {
++    return entry.type == zfs_type_transaction || (entry.type == zfs_type_file && (entry.flags & zfs_flag_committed));
++}
++
++bool zfs_format_entries_valid(const ZfsSuperblock& super, const ZfsEntry* entries, const char*& reason) {
++    if (!entries) { reason = "entry-pointer"; return false; }
++    const uint32_t maximum_file_bytes = super.slot_sectors * sector_size;
++    for (uint32_t i = 0; i < super.entry_count; ++i) {
++        const ZfsEntry& entry = entries[i];
++        if (!entry.used) {
++            if (!zfs_format_unused_entry_zero(entry)) { reason = "unused-entry-data"; return false; }
++            continue;
++        }
++        if (entry.used != 1U) { reason = "entry-used"; return false; }
++        if (entry.type < zfs_type_file || entry.type > zfs_type_transaction) { reason = "entry-type"; return false; }
++        if (!zfs_format_path_valid(entry.path)) { reason = "entry-path"; return false; }
++        if (entry.flags & static_cast<uint16_t>(~zfs_flag_committed)) { reason = "entry-flags"; return false; }
++        if (entry.type == zfs_type_directory) {
++            if (entry.flags || entry.size || entry.checksum || entry.reserved) { reason = "directory-metadata"; return false; }
++        } else {
++            if (entry.size > maximum_file_bytes) { reason = "file-size"; return false; }
++            if (entry.type == zfs_type_transaction && entry.flags) { reason = "transaction-flags"; return false; }
++            if (entry.type == zfs_type_file && !(entry.flags & zfs_flag_committed) && entry.reserved) { reason = "file-reserved"; return false; }
++            if (zfs_format_transition(entry) && entry.reserved != transaction_none && (entry.reserved >= super.entry_count || entry.reserved == i)) { reason = "transition-reference"; return false; }
++        }
++        if (!zfs_format_parent_present(super, entries, entry.path)) { reason = "missing-parent"; return false; }
++    }
++    for (uint32_t i = 0; i < super.entry_count; ++i) {
++        const ZfsEntry& entry = entries[i];
++        if (!entry.used || !zfs_format_transition(entry) || entry.reserved == transaction_none) continue;
++        const ZfsEntry& previous = entries[entry.reserved];
++        if (entry.type == zfs_type_transaction && !previous.used) { reason = "transaction-old-missing"; return false; }
++        if (previous.used && (previous.type != zfs_type_file || previous.flags != 0U || !zfs_format_path_equal(entry.path, previous.path))) { reason = "transition-old-mismatch"; return false; }
++        for (uint32_t j = i + 1U; j < super.entry_count; ++j) {
++            const ZfsEntry& other = entries[j];
++            if (other.used && zfs_format_transition(other) && other.reserved == entry.reserved) { reason = "transition-reference-shared"; return false; }
++        }
++    }
++    for (uint32_t i = 0; i < super.entry_count; ++i) {
++        if (!entries[i].used) continue;
++        for (uint32_t j = i + 1U; j < super.entry_count; ++j) {
++            if (!entries[j].used || !zfs_format_path_equal(entries[i].path, entries[j].path)) continue;
++            const bool allowed = (zfs_format_transition(entries[i]) && entries[i].reserved == j) || (zfs_format_transition(entries[j]) && entries[j].reserved == i);
++            if (!allowed) { reason = "duplicate-path"; return false; }
++        }
++    }
++    reason = nullptr;
++    return true;
++}
+diff --git a/tests/zenovfs_mount_validation_test.cpp b/tests/zenovfs_mount_validation_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/zenovfs_mount_validation_test.cpp
+@@ -0,0 +1,159 @@
++#include <array>
++#include <cstdint>
++#include <cstring>
++#include <iostream>
++#include <stdexcept>
++
++namespace storage {
++using uint8_t = std::uint8_t;
++using uint16_t = std::uint16_t;
++using uint32_t = std::uint32_t;
++constexpr uint32_t sector_size = 512U;
++#pragma pack(push, 1)
++struct ZfsSuperblock { char magic[8]; uint32_t version, total_sectors, entry_count, entry_sectors, data_start, slot_sectors, generation; char label[16]; uint8_t reserved[460]; };
++struct ZfsEntry { uint8_t used, type; uint16_t flags; char path[48]; uint32_t size, checksum, reserved; };
++#pragma pack(pop)
++static_assert(sizeof(ZfsSuperblock) == sector_size && sizeof(ZfsEntry) == 64U);
++constexpr uint32_t zfs_max_entries = 128U, transaction_none = 0xFFFFFFFFU;
++constexpr uint8_t zfs_type_file = 1U, zfs_type_directory = 2U, zfs_type_transaction = 3U;
++constexpr uint16_t zfs_flag_committed = 0x0001U;
++#include "../kernel/parts/storage_format.inc"
++}
++
++namespace {
++using storage::ZfsEntry;
++using storage::ZfsSuperblock;
++constexpr std::uint32_t kDeviceSectors = 32768U;
++
++void set_text(char* output, std::size_t capacity, const char* text) {
++    const std::size_t length = std::strlen(text);
++    if (length >= capacity) throw std::runtime_error("test fixture text too long");
++    std::memset(output, 0, capacity);
++    std::memcpy(output, text, length);
++}
++
++ZfsSuperblock valid_superblock() {
++    ZfsSuperblock super{};
++    std::memcpy(super.magic, "ZENOVFS1", 8U);
++    super.version = 1U;
++    super.total_sectors = kDeviceSectors;
++    super.entry_count = storage::zfs_max_entries;
++    super.entry_sectors = 16U;
++    super.data_start = 32U;
++    super.slot_sectors = 128U;
++    super.generation = 1U;
++    set_text(super.label, sizeof(super.label), "ZENOVDATA");
++    return super;
++}
++
++std::array<ZfsEntry, storage::zfs_max_entries> valid_entries() {
++    std::array<ZfsEntry, storage::zfs_max_entries> entries{};
++    entries[0].used = 1U; entries[0].type = storage::zfs_type_directory; set_text(entries[0].path, sizeof(entries[0].path), "/apps");
++    entries[1].used = 1U; entries[1].type = storage::zfs_type_file; entries[1].size = 128U; entries[1].checksum = 0x12345678U; set_text(entries[1].path, sizeof(entries[1].path), "/apps/tool.elf");
++    return entries;
++}
++
++void require_super_rejected(ZfsSuperblock super, const char* expected) {
++    const char* reason = nullptr;
++    if (storage::zfs_format_superblock_valid(super, kDeviceSectors, reason) || !reason || std::strcmp(reason, expected) != 0) throw std::runtime_error(std::string("superblock case did not reject as ") + expected);
++}
++
++void require_entries_rejected(const ZfsSuperblock& super, std::array<ZfsEntry, storage::zfs_max_entries> entries, const char* expected) {
++    const char* reason = nullptr;
++    if (storage::zfs_format_entries_valid(super, entries.data(), reason) || !reason || std::strcmp(reason, expected) != 0) throw std::runtime_error(std::string("entry case did not reject as ") + expected);
++}
++}
++
++int main() {
++    try {
++        ZfsSuperblock super = valid_superblock();
++        auto entries = valid_entries();
++        const char* reason = nullptr;
++        if (!storage::zfs_format_superblock_valid(super, kDeviceSectors, reason) || !storage::zfs_format_entries_valid(super, entries.data(), reason)) throw std::runtime_error("valid baseline rejected");
++
++        { auto value = super; value.entry_sectors = 17U; require_super_rejected(value, "entry-sectors"); }
++        { auto value = super; value.data_start = 16U; require_super_rejected(value, "metadata-layout"); }
++        { auto value = super; value.slot_sectors = 0U; require_super_rejected(value, "slot-size"); }
++        { auto value = super; value.slot_sectors = 129U; require_super_rejected(value, "slot-size"); }
++        { auto value = super; value.total_sectors = kDeviceSectors + 1U; require_super_rejected(value, "device-size"); }
++        { auto value = super; value.data_start = 32700U; require_super_rejected(value, "data-layout"); }
++        { auto value = super; value.generation = 0U; require_super_rejected(value, "generation"); }
++        { auto value = super; value.reserved[0] = 1U; require_super_rejected(value, "superblock-reserved"); }
++        { auto value = super; std::memset(value.label, 'A', sizeof(value.label)); require_super_rejected(value, "label"); }
++
++        { auto value = entries; value[1].used = 2U; require_entries_rejected(super, value, "entry-used"); }
++        { auto value = entries; std::memset(value[1].path, 'A', sizeof(value[1].path)); value[1].path[0] = '/'; require_entries_rejected(super, value, "entry-path"); }
++        { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/apps/bad\nname"); require_entries_rejected(super, value, "entry-path"); }
++        { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/apps/../tool"); require_entries_rejected(super, value, "entry-path"); }
++        { auto value = entries; value[1].size = 65537U; require_entries_rejected(super, value, "file-size"); }
++        { auto value = entries; value[0].size = 1U; require_entries_rejected(super, value, "directory-metadata"); }
++        { auto value = entries; value[2] = value[1]; require_entries_rejected(super, value, "duplicate-path"); }
++        { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/missing/tool"); require_entries_rejected(super, value, "missing-parent"); }
++        { auto value = entries; value[2] = value[1]; value[2].flags = storage::zfs_flag_committed; value[2].reserved = 0U; require_entries_rejected(super, value, "transition-old-mismatch"); }
++        { auto value = entries; value[2] = value[1]; value[2].type = storage::zfs_type_transaction; value[2].reserved = 3U; require_entries_rejected(super, value, "transaction-old-missing"); }
++
++        {
++            auto value = entries;
++            value[2] = value[1]; value[2].flags = storage::zfs_flag_committed; value[2].reserved = 1U;
++            if (!storage::zfs_format_entries_valid(super, value.data(), reason)) throw std::runtime_error("valid committed recovery pair rejected");
++        }
++        {
++            auto value = entries;
++            value[2] = value[1]; value[2].type = storage::zfs_type_transaction; value[2].reserved = 1U;
++            if (!storage::zfs_format_entries_valid(super, value.data(), reason)) throw std::runtime_error("valid transaction recovery pair rejected");
++        }
++        {
++            auto value = entries;
++            value[2] = value[1]; value[2].flags = storage::zfs_flag_committed; value[2].reserved = 1U;
++            std::memset(&value[1], 0, sizeof(value[1]));
++            if (!storage::zfs_format_entries_valid(super, value.data(), reason)) throw std::runtime_error("valid post-delete committed state rejected");
++        }
++
++        std::cout << "ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=18 shared-kernel-validator=yes\n";
++        return 0;
++    } catch (const std::exception& error) {
++        std::cerr << "zenovfs-mount-validation-test: " << error.what() << '\n';
++        return 1;
++    }
++}
+diff --git a/.github/workflows/zenovfs-mount-hardening.yml b/.github/workflows/zenovfs-mount-hardening.yml
+new file mode 100644
+--- /dev/null
++++ b/.github/workflows/zenovfs-mount-hardening.yml
+@@ -0,0 +1,66 @@
++name: ZenovFS Mount Hardening
++
++on:
++  push:
++  pull_request:
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++jobs:
++  malformed-metadata-fail-closed:
++    runs-on: ubuntu-latest
++    timeout-minutes: 90
++    env:
++      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 0
++      - name: Install strict toolchain
++        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl
++      - name: Build shared validator with sanitizers
++        run: |
++          set -euo pipefail
++          mkdir -p build/sanitized
++          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
++            -fsanitize=address,undefined -fno-omit-frame-pointer \
++            tests/zenovfs_mount_validation_test.cpp -o build/sanitized/zenovfs-mount-validation-test
++          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
++          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
++            build/sanitized/zenovfs-mount-validation-test | tee build/zenovfs-mount-validation.log
++          grep -Fq 'ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=18 shared-kernel-validator=yes' build/zenovfs-mount-validation.log
++      - name: Build strict kernel and full host matrix
++        run: make clean check
++      - name: Verify source contract
++        run: |
++          set -euo pipefail
++          grep -Fq '#include "storage_format.inc"' kernel/parts/storage.inc
++          grep -Fq 'zfs_format_superblock_valid(zfs_super, ata0.sectors, reason)' kernel/parts/storage.inc
++          grep -Fq 'zfs_format_entries_valid(zfs_super, zfs_entries, reason)' kernel/parts/storage.inc
++          grep -Fq 'zfs_super.entry_sectors > sizeof(zfs_entries) / sector_size' kernel/parts/storage.inc
++          grep -Fq 'ZENOVFS_MOUNT_REJECTED reason=' kernel/parts/storage.inc
++          grep -Fq 'entry-sectors' kernel/parts/storage_format.inc
++          grep -Fq 'data-layout' kernel/parts/storage_format.inc
++          grep -Fq 'entry-path' kernel/parts/storage_format.inc
++          grep -Fq 'duplicate-path' kernel/parts/storage_format.inc
++          grep -Fq 'transition-old-mismatch' kernel/parts/storage_format.inc
++          echo 'ZENOVFS_MOUNT_HARDENING_SOURCE_CONTRACT_OK'
+diff --git a/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md b/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+new file mode 100644
+--- /dev/null
++++ b/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+@@ -0,0 +1,46 @@
++# ZenovFS1 mount hardening for 0.1.1
++
++## Threat
++
++The persistent ATA volume is attacker-controlled at the storage boundary. A corrupted superblock or entry table must not be able to influence kernel memory before its geometry and bounded metadata are validated.
++
++The previous mount path trusted `entry_sectors`, `data_start` and `slot_sectors` after checking only the magic, version and entry count. In particular, `load_entries()` copied `entry_sectors × 512` bytes into a fixed 8,192-byte entry array. A forged value above 16 therefore created a direct kernel-memory overwrite before policy initialization.
++
++## Enforced geometry
++
++The shared validator now requires:
++
++- exact `ZENOVFS1` magic and schema 1;
++- a non-zero device-bounded LBA28 sector count;
++- `1..128` entries;
++- an entry-table sector count exactly matching `entry_count × 64` bytes;
++- a data region beginning after all metadata;
++- a slot size of `1..128` sectors, keeping a file within the 64 KiB kernel/user buffers;
++- enough non-overflowing data sectors for every slot;
++- non-zero generation, a bounded printable label and zeroed reserved bytes.
++
++## Entry-table validation
++
++Before any path lookup or recovery mutation, every entry is checked for:
++
++- fully zero unused slots;
++- known type and flag values;
++- a terminated canonical absolute path with no control characters, empty components, `.` or `..`;
++- bounded file sizes and zero-only directory metadata;
++- valid transaction/committed recovery references;
++- no unrelated duplicate paths or shared recovery references;
++- an existing directory parent.
++
++The same checks run again after interrupted-write recovery. Recovery is allowed to remove an old entry only when its type, flags and exact path match the committed replacement.
++
++Runtime path normalization also rejects control characters, preventing path-based serial/audit line injection.
++
++## Evidence
++
++`tests/zenovfs_mount_validation_test.cpp` includes the exact production validator and exercises malformed geometry, unterminated and control-character paths, oversized files, invalid directory metadata, missing parents, duplicate paths and forged recovery references under ASan and UBSan.
++
++The existing strict kernel build, deterministic image generation, COW fault matrix and QEMU workflows continue to run on the same commit.
++
++## Boundary
++
++This validation prevents malformed metadata from causing memory corruption or unsafe recovery. ZenovFS1 still uses FNV-1a only as an accidental-corruption checksum. An offline attacker able to rewrite both data and metadata can recompute it. Authenticated block storage, fs-verity-style Merkle trees, encryption and a hardware-backed rollback boundary remain unimplemented.

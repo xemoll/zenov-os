@@ -1,0 +1,12 @@
+diff --git a/tests/zenovfs_mount_validation_test.cpp b/tests/zenovfs_mount_validation_test.cpp
+--- a/tests/zenovfs_mount_validation_test.cpp
++++ b/tests/zenovfs_mount_validation_test.cpp
+@@ -151,7 +151,7 @@ int main() {
+             if (!storage::zfs_format_entries_valid(super, value.data(), reason)) throw std::runtime_error("valid post-delete committed state rejected");
+         }
+ 
+-        std::cout << "ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=18 shared-kernel-validator=yes\n";
++        std::cout << "ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=23 shared-kernel-validator=yes\n";
+         return 0;
+     } catch (const std::exception& error) {
+         std::cerr << "zenovfs-mount-validation-test: " << error.what() << '\n';

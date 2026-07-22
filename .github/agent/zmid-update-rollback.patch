@@ -1,0 +1,138 @@
+diff --git a/kernel/parts/zmid_policy.inc b/kernel/parts/zmid_policy.inc
+--- a/kernel/parts/zmid_policy.inc
++++ b/kernel/parts/zmid_policy.inc
+@@ -106,6 +106,22 @@ bool write_version(uint32_t version) {
+     return storage::write_file("/security/zenovguard-intelligence.version", reinterpret_cast<const uint8_t*>(text), count, false);
+ }
+ 
++bool restore_update(uint32_t previous_version, uint32_t previous_size) {
++    const bool policy_restored = previous_size && security_guard::write_scan_buffer &&
++        storage::write_file("/security/zenovguard-intelligence.zmid", security_guard::write_scan_buffer, previous_size, false);
++    const bool version_restored = policy_restored && write_version(previous_version);
++    const bool metadata_synced = version_restored && storage::sync_metadata();
++    if (!policy_restored || !version_restored || !metadata_synced) {
++        ready = false;
++        serial::line("ZMID_UPDATE_ROLLBACK_FAILED");
++        return false;
++    }
++    persistent_database_version = previous_version;
++    ready = true;
++    serial::line("ZMID_UPDATE_ROLLBACK_OK");
++    return true;
++}
++
+ void activate(const Record source[max_records], uint32_t count, uint32_t version) {
+@@ -182,24 +198,58 @@ bool update(const char* candidate_path) {
+         serial::line("ZMID_SEQUENCE_REJECTED reason=non-sequential");
+         return false;
+     }
+-    uint32_t size = 0U;
+-    if (!storage::read_file(candidate_path, process::application_buffer, max_database_bytes, size)) return false;
++
++    const uint32_t previous_version = persistent_database_version;
++    uint32_t previous_size = 0U;
++    if (!security_guard::write_scan_buffer ||
++        !storage::read_file("/security/zenovguard-intelligence.zmid", security_guard::write_scan_buffer,
++            security_guard::write_scan_workspace_bytes, previous_size) || !previous_size) {
++        serial::line("ZMID_UPDATE_BACKUP_FAILED");
++        return false;
++    }
++
++    uint32_t candidate_size = 0U;
++    if (!storage::read_file(candidate_path, process::application_buffer, max_database_bytes, candidate_size)) return false;
+     uint32_t final_version = 0U, final_count = 0U;
+-    validation = validate(process::application_buffer, size, active_database_version + 1U, candidate_records, final_count, final_version);
++    validation = validate(process::application_buffer, candidate_size, active_database_version + 1U,
++        candidate_records, final_count, final_version);
+     if (validation != Validation::okay || final_version != version || final_count != count) return false;
+-    if (!storage::write_file("/security/zenovguard-intelligence.zmid", process::application_buffer, size, false)) return false;
+-    if (!write_version(version)) return false;
+-    activate(candidate_records, count, version);
+-    persistent_database_version = version;
+-    ready = true;
++
+     security_guard::ScanResult event{};
+     event.verdict = security_guard::Verdict::trusted;
+     event.policy_action = action_audit;
+     storage::path_copy(event.path, "/security/zenovguard-intelligence.zmid", sizeof(event.path));
+-    storage::path_copy(event.signature, "Signed.Intelligence.Update", sizeof(event.signature));
+-    security_guard::sha256(process::application_buffer, size, event.digest);
+-    event.size = size;
+-    if (!security_guard::record(security_guard::AuditAction::intelligence_update, event)) return false;
+-    serial::write("ZMID_ATOMIC_UPDATE_OK version="); process::serial_u32(version); serial::write("\r\n");
++    storage::path_copy(event.signature, "Signed.Intelligence.UpdateIntent", sizeof(event.signature));
++    security_guard::sha256(process::application_buffer, candidate_size, event.digest);
++    event.size = candidate_size;
++    if (!security_guard::record(security_guard::AuditAction::intelligence_update, event)) {
++        serial::line("ZMID_UPDATE_AUDIT_FAILED");
++        return false;
++    }
++
++    if (!storage::write_file("/security/zenovguard-intelligence.zmid", process::application_buffer, candidate_size, false)) {
++        (void)restore_update(previous_version, previous_size);
++        serial::line("ZMID_UPDATE_POLICY_COMMIT_FAILED");
++        return false;
++    }
++
++    uint32_t committed_size = 0U;
++    if (!storage::read_file("/security/zenovguard-intelligence.zmid", process::application_buffer,
++            max_database_bytes, committed_size) || committed_size != candidate_size ||
++        validate(process::application_buffer, committed_size, active_database_version + 1U,
++            candidate_records, final_count, final_version) != Validation::okay ||
++        final_version != version || final_count != count) {
++        (void)restore_update(previous_version, previous_size);
++        serial::line("ZMID_UPDATE_READBACK_FAILED");
++        return false;
++    }
++    if (!write_version(final_version)) {
++        (void)restore_update(previous_version, previous_size);
++        serial::line("ZMID_UPDATE_VERSION_COMMIT_FAILED");
++        return false;
++    }
++    if (!storage::sync_metadata()) {
++        (void)restore_update(previous_version, previous_size);
++        serial::line("ZMID_UPDATE_SYNC_FAILED");
++        return false;
++    }
++
++    activate(candidate_records, final_count, final_version);
++    persistent_database_version = final_version;
++    ready = true;
++    serial::write("ZMID_ATOMIC_UPDATE_OK version="); process::serial_u32(final_version); serial::write("\r\n");
+     return true;
+ }
+diff --git a/.github/workflows/antimalware.yml b/.github/workflows/antimalware.yml
+--- a/.github/workflows/antimalware.yml
++++ b/.github/workflows/antimalware.yml
+@@ -98,6 +98,19 @@ jobs:
+           grep -Fq 'constexpr uint32_t compiled_database_floor = 1U;' kernel/parts/zmid_policy.inc
+           grep -Fq 'version != active_database_version + 1U' kernel/parts/zmid_policy.inc
+           grep -Fq 'rsa_pss_verify_with_modulus' kernel/parts/zmid_policy.inc
++          grep -Fq 'bool restore_update(uint32_t previous_version, uint32_t previous_size)' kernel/parts/zmid_policy.inc
++          grep -Fq 'ZMID_UPDATE_BACKUP_FAILED' kernel/parts/zmid_policy.inc
++          grep -Fq 'Signed.Intelligence.UpdateIntent' kernel/parts/zmid_policy.inc
++          grep -Fq 'ZMID_UPDATE_AUDIT_FAILED' kernel/parts/zmid_policy.inc
++          grep -Fq 'ZMID_UPDATE_POLICY_COMMIT_FAILED' kernel/parts/zmid_policy.inc
++          grep -Fq 'ZMID_UPDATE_READBACK_FAILED' kernel/parts/zmid_policy.inc
++          grep -Fq 'ZMID_UPDATE_VERSION_COMMIT_FAILED' kernel/parts/zmid_policy.inc
++          grep -Fq 'ZMID_UPDATE_SYNC_FAILED' kernel/parts/zmid_policy.inc
++          grep -Fq 'activate(candidate_records, final_count, final_version);' kernel/parts/zmid_policy.inc
++          grep -Fq 'const bool metadata_synced = version_restored && storage::sync_metadata();' kernel/parts/zmid_policy.inc
++          audit_line=$(grep -Fn 'record(security_guard::AuditAction::intelligence_update, event)' kernel/parts/zmid_policy.inc | cut -d: -f1)
++          commit_line=$(grep -Fn 'write_file("/security/zenovguard-intelligence.zmid", process::application_buffer' kernel/parts/zmid_policy.inc | cut -d: -f1)
++          test "$audit_line" -lt "$commit_line"
+           grep -Fq 'bool allow_persistent_read' kernel/parts/security_guard.inc
+diff --git a/docs/ANTIMALWARE_0.1.1.md b/docs/ANTIMALWARE_0.1.1.md
+--- a/docs/ANTIMALWARE_0.1.1.md
++++ b/docs/ANTIMALWARE_0.1.1.md
+@@ -55,6 +55,12 @@ Active intelligence is stored at `/security/zenovguard-intelligence.zmid`; its m
+ 
+ The active object is written before its version state. Boot reconciles a newer valid signed object with older version metadata, while an active object older than persistent state is rejected.
+ 
++An update first retains the previous signed database in the existing supervisor-only scan workspace and validates the complete candidate. Before the candidate can replace the active object, ZenovGuard commits a durable `INTELLIGENCE-UPDATE` authorization record containing the candidate digest and size. Only then may the active policy be written, read back and revalidated, followed by version state, metadata synchronization and in-memory activation.
++
++This ordering closes the power-loss window in which a new signed object could previously become the boot-reconciled active database without any persistent update evidence. A crash before the authorization record leaves the old policy. A crash after the authorization record but before policy replacement leaves a harmless recorded intent. A crash after replacement leaves both the candidate digest evidence and a signed candidate that boot can reconcile.
++
++Live policy-write, read-back, version or sync failures restore the previous database and version and synchronize the rollback. Rollback failure leaves ZMID unavailable and the wider enforcement path fail-closed. An audit-append failure occurs before policy mutation and therefore needs no policy rollback.
++
+ ## Prevention boundary

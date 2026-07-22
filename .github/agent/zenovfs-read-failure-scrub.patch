@@ -1,0 +1,84 @@
+diff --git a/kernel/parts/storage.inc b/kernel/parts/storage.inc
+--- a/kernel/parts/storage.inc
++++ b/kernel/parts/storage.inc
+@@ -177,14 +177,34 @@ bool read_file(const char* input, uint8_t* output, uint32_t capacity, uint32_t& a
+     const uint32_t size = zfs_entries[found].size;
+     uint32_t copied = 0;
+     for (uint32_t sector = 0; copied < size; ++sector) {
+-        if (!ata0.read_sector(data_sector(static_cast<uint32_t>(found)) + sector, sector_buffer)) return false;
++        if (!ata0.read_sector(data_sector(static_cast<uint32_t>(found)) + sector, sector_buffer)) {
++            if (copied) memset(output, 0, copied);
++            return false;
++        }
+         uint32_t chunk = size - copied;
+         if (chunk > sector_size) chunk = sector_size;
+         memcpy(output + copied, sector_buffer, chunk);
+         copied += chunk;
+     }
+-    if (fnv1a(output, size) != zfs_entries[found].checksum) return false;
++    if (fnv1a(output, size) != zfs_entries[found].checksum) {
++        if (size) memset(output, 0, size);
++        return false;
++    }
+     actual_size = size;
+     return true;
+ }
++bool read_failure_scrub_self_test() {
++    if (!zfs_mounted || !file_buffer) return false;
++    for (uint32_t i = 0; i < zfs_super.entry_count; ++i) {
++        ZfsEntry& entry = zfs_entries[i];
++        if (!entry.used || entry.type != zfs_type_file || !entry.size) continue;
++        const uint32_t expected_size = entry.size;
++        const uint32_t checksum = entry.checksum;
++        entry.checksum ^= 1U;
++        memset(file_buffer, 0xA5, expected_size);
++        uint32_t actual_size = 0xFFFFFFFFU;
++        const bool accepted = read_file(entry.path, file_buffer, max_file_bytes(), actual_size);
++        entry.checksum = checksum;
++        if (accepted || actual_size != 0U) return false;
++        for (uint32_t offset = 0; offset < expected_size; ++offset) if (file_buffer[offset] != 0U) return false;
++        uint32_t verified_size = 0U;
++        return read_file(entry.path, file_buffer, max_file_bytes(), verified_size) && verified_size == expected_size;
++    }
++    return true;
++}
+ bool write_file(const char* input, const uint8_t* data, uint32_t size, bool append) {
+@@ -252,5 +272,12 @@ void print_mounts() { console::line("  SOURCE        TARGET   FILESYSTEM  ACCESS"); console::line("  kernel.zv     /system  initramfs   read-only"); console::line(zfs_mounted ? "  /dev/ata0     /data    ZenovFS1    transactional" : "  /dev/ata0     /data    unavailable -"); }
+ void print_df() { if (!zfs_mounted) { console::warning("Persistent volume is not mounted."); return; } uint32_t files = 0, directories = 0, bytes = 0; for (uint32_t i = 0; i < zfs_super.entry_count; ++i) { if (!zfs_entries[i].used || zfs_entries[i].type == zfs_type_transaction) continue; if (zfs_entries[i].type == zfs_type_directory) ++directories; else { ++files; bytes += zfs_entries[i].size; } } console::write("  Files         "); console::unsigned_dec(files); console::put('\n'); console::write("  Directories   "); console::unsigned_dec(directories); console::put('\n'); console::write("  Payload       "); console::unsigned_dec(bytes); console::line(" bytes"); }
+ bool ready() { return zfs_mounted; }
+ uint32_t file_capacity() { return zfs_mounted ? max_file_bytes() : 0; }
+-void init() { heap::init(); serial::line("Storage: probing ATA primary master..."); ata0.present = ata_identify(); ata0.sectors = ata_sector_total; if (!ata0.present) { serial::line("Storage: ATA device not found"); return; } serial::line("Storage: ATA PIO device online"); if (!mount()) { serial::line("Storage: ZenovFS mount failed"); return; } serial::line("ZENOVFS_MOUNT_OK"); }
++void init() {
++    heap::init(); serial::line("Storage: probing ATA primary master...");
++    ata0.present = ata_identify(); ata0.sectors = ata_sector_total;
++    if (!ata0.present) { serial::line("Storage: ATA device not found"); return; }
++    serial::line("Storage: ATA PIO device online");
++    if (!mount()) { serial::line("Storage: ZenovFS mount failed"); return; }
++    if (!read_failure_scrub_self_test()) { zfs_mounted = false; serial::line("ZENOVFS_READ_FAILURE_SCRUB_FAILED"); return; }
++    serial::line("ZENOVFS_READ_FAILURE_SCRUB_OK");
++    serial::line("ZENOVFS_MOUNT_OK");
++}
+ } // namespace storage
+diff --git a/.github/workflows/zenovfs-mount-hardening.yml b/.github/workflows/zenovfs-mount-hardening.yml
+--- a/.github/workflows/zenovfs-mount-hardening.yml
++++ b/.github/workflows/zenovfs-mount-hardening.yml
+@@ -60,6 +60,9 @@ jobs:
+           grep -Fq 'transition-old-mismatch' kernel/parts/storage_format.inc
+           grep -Fq 'run_case entry-sectors entry-sectors' tests/qemu_zenovfs_mount_reject.sh
+           grep -Fq 'entries[spare].reserved = 0U' tools/zenovfs_mount_corrupt.cpp
++          grep -Fq 'if (copied) memset(output, 0, copied);' kernel/parts/storage.inc
++          grep -Fq 'if (size) memset(output, 0, size);' kernel/parts/storage.inc
++          grep -Fq 'read_failure_scrub_self_test()' kernel/parts/storage.inc
+           echo 'ZENOVFS_MOUNT_HARDENING_SOURCE_CONTRACT_OK'
+diff --git a/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md b/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+--- a/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
++++ b/docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+@@ -34,6 +34,10 @@ The same checks run again after interrupted-write recovery. Recovery is allowed
+ 
+ Runtime path normalization also rejects control characters, preventing path-based serial/audit line injection.
+ 
++## Failed-read disclosure boundary
++
++ZenovFS1 no longer leaves disk bytes in the caller buffer after a sector or checksum failure. The copied prefix or complete candidate is zeroed before an error is returned. A kernel boot self-test deliberately corrupts one in-memory checksum, proves rejection and complete scrubbing, restores the checksum and proves the normal read still succeeds. This prevents a ring-3 caller from examining unverified bytes after a failed syscall.
++
+ ## Evidence

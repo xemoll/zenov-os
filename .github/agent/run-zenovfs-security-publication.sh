@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_SHA=199f98d478a7515c927c97d8fd61bdf5679e7e99
+mkdir -p ci-logs
+
+patches=(
+  zenovfs-mount-hardening.patch
+  zenovfs-mount-hardening-fix.patch
+  zenovfs-mount-hardening-count.patch
+  zenovfs-mount-qemu.patch
+  zenovfs-mount-qemu-fix.patch
+  zenovfs-path-depth-consistency.patch
+  zenovfs-read-failure-scrub.patch
+  zmid-update-rollback.patch
+  quarantine-digest-prefix.patch
+  quarantine-read-block.patch
+  zmid-action-constant-sharing.patch
+  zenovfs-mount-index.patch
+)
+for name in "${patches[@]}"; do cp ".github/agent/$name" "/tmp/$name"; done
+cp .github/agent/zenovfs-mount-hardening.final.yml /tmp/zenovfs-mount-hardening.final.yml
+cp .github/agent/ZENOVFS_MOUNT_HARDENING_0.1.1.final.md /tmp/ZENOVFS_MOUNT_HARDENING_0.1.1.final.md
+cp .github/agent/ANTIMALWARE_0.1.1.final.md /tmp/ANTIMALWARE_0.1.1.final.md
+cp .github/agent/ON_ACCESS_PROTECTION_0.1.1.final.md /tmp/ON_ACCESS_PROTECTION_0.1.1.final.md
+
+git switch --detach "$BASE_SHA"
+test "$(git rev-parse HEAD)" = "$BASE_SHA"
+: > ci-logs/patch-application.log
+
+apply_patch() {
+  local patch="$1"; shift
+  echo "=== $patch $* ===" | tee -a ci-logs/patch-application.log
+  git apply --check --recount --inaccurate-eof --verbose "$@" "/tmp/$patch" >>ci-logs/patch-application.log 2>&1
+  git apply --recount --inaccurate-eof "$@" "/tmp/$patch"
+}
+
+apply_patch zenovfs-mount-hardening.patch
+apply_patch zenovfs-mount-hardening-fix.patch
+apply_patch zenovfs-mount-hardening-count.patch --include=tests/zenovfs_mount_validation_test.cpp
+apply_patch zenovfs-mount-qemu.patch --include=tools/zenovfs_mount_corrupt.cpp --include=tests/qemu_zenovfs_mount_reject.sh
+apply_patch zenovfs-mount-qemu-fix.patch --include=tools/zenovfs_mount_corrupt.cpp
+apply_patch zenovfs-path-depth-consistency.patch --include=kernel/parts/storage_format.inc --include=tools/zenovfs_mount_corrupt.cpp
+
+python3 - <<'PY'
+from pathlib import Path
+
+test = Path('tests/zenovfs_mount_validation_test.cpp')
+text = test.read_text()
+anchor = '        { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/apps/../tool"); require_entries_rejected(super, value, "entry-path"); }\n'
+addition = '        { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a"); require_entries_rejected(super, value, "entry-path"); }\n'
+assert text.count(anchor) == 1 and addition not in text
+text = text.replace(anchor, anchor + addition, 1)
+assert text.count('cases=23 shared-kernel-validator=yes') == 1
+test.write_text(text.replace('cases=23 shared-kernel-validator=yes', 'cases=24 shared-kernel-validator=yes', 1))
+
+script = Path('tests/qemu_zenovfs_mount_reject.sh')
+text = script.read_text()
+anchor = 'run_case entry-path entry-path\n'
+addition = 'run_case component-depth entry-path\n'
+assert text.count(anchor) == 1 and addition not in text
+text = text.replace(anchor, anchor + addition, 1)
+assert text.count('ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=6 ui_reached=0') == 1
+script.write_text(text.replace('ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=6 ui_reached=0', 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=7 ui_reached=0', 1))
+
+makefile = Path('Makefile')
+text = makefile.read_text()
+builder = '$(BUILD)/zenovfs-builder: tools/zenovfs_builder.cpp | $(BUILD)\n\t$(HOST_CXX) $(HOST_FLAGS) $< -o $@\n\n'
+targets = (
+    '$(BUILD)/zenovfs-mount-validation-test: tests/zenovfs_mount_validation_test.cpp kernel/parts/storage_format.inc | $(BUILD)\n'
+    '\t$(HOST_CXX) $(HOST_FLAGS) tests/zenovfs_mount_validation_test.cpp -o $@\n\n'
+    '$(BUILD)/zenovfs-mount-corrupt: tools/zenovfs_mount_corrupt.cpp | $(BUILD)\n'
+    '\t$(HOST_CXX) $(HOST_FLAGS) $< -o $@\n\n'
+)
+assert text.count(builder) == 1 and targets not in text
+text = text.replace(builder, builder + targets, 1)
+old_check = 'check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(BUILD)/zcap-verify $(BUILD)/zmid-verify $(BUILD)/zrwp-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE)'
+new_check = 'check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-mount-validation-test $(BUILD)/zenovfs-mount-corrupt $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(BUILD)/zcap-verify $(BUILD)/zmid-verify $(BUILD)/zrwp-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE)'
+assert text.count(old_check) == 1
+text = text.replace(old_check, new_check, 1)
+image_line = '\t$(BUILD)/image-verify $(BUILD)/zenov-os.img\n'
+validation_line = '\t$(BUILD)/zenovfs-mount-validation-test\n'
+assert text.count(image_line) == 1 and validation_line not in text
+text = text.replace(image_line, image_line + validation_line, 1)
+makefile.write_text(text)
+PY
+
+apply_patch zenovfs-read-failure-scrub.patch --include=kernel/parts/storage.inc
+apply_patch zmid-update-rollback.patch --include=kernel/parts/zmid_policy.inc --include=.github/workflows/antimalware.yml
+apply_patch quarantine-digest-prefix.patch --include=kernel/parts/security_guard.inc --include=.github/workflows/antimalware.yml
+apply_patch quarantine-read-block.patch --include=kernel/parts/security_guard.inc --include=tests/qemu_smoke.sh --include=tools/zenovfs_antimalware_verify.cpp --include=.github/workflows/antimalware.yml
+apply_patch zmid-action-constant-sharing.patch
+apply_patch zenovfs-mount-index.patch
+
+cp /tmp/zenovfs-mount-hardening.final.yml .github/workflows/zenovfs-mount-hardening.yml
+cp /tmp/ZENOVFS_MOUNT_HARDENING_0.1.1.final.md docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+cp /tmp/ANTIMALWARE_0.1.1.final.md docs/ANTIMALWARE_0.1.1.md
+cp /tmp/ON_ACCESS_PROTECTION_0.1.1.final.md docs/ON_ACCESS_PROTECTION_0.1.1.md
+
+git diff --check >ci-logs/final-diff-check.log 2>&1
+cat > /tmp/expected-files <<'EOF'
+.github/workflows/antimalware.yml
+.github/workflows/zenovfs-mount-hardening.yml
+Makefile
+docs/ANTIMALWARE_0.1.1.md
+docs/INDEX.md
+docs/ON_ACCESS_PROTECTION_0.1.1.md
+docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+kernel/parts/security_guard.inc
+kernel/parts/storage.inc
+kernel/parts/storage_format.inc
+kernel/parts/zmid_policy.inc
+tests/qemu_smoke.sh
+tests/qemu_zenovfs_mount_reject.sh
+tests/zenovfs_mount_validation_test.cpp
+tools/zenovfs_antimalware_verify.cpp
+tools/zenovfs_mount_corrupt.cpp
+EOF
+git status --porcelain=v1 --untracked-files=all | cut -c4- | sort > /tmp/actual-files
+diff -u /tmp/expected-files /tmp/actual-files >ci-logs/final-file-set.log
+git diff --stat >ci-logs/final-diff-stat.log
+
+mkdir -p build/sanitized
+clang++ --version | tee ci-logs/clang-version.log
+clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+  -fsanitize=address,undefined,unsigned-integer-overflow,implicit-conversion \
+  -fno-sanitize-recover=all -fno-omit-frame-pointer \
+  tests/zenovfs_mount_validation_test.cpp \
+  -o build/sanitized/zenovfs-mount-validation-test \
+  2>&1 | tee ci-logs/zenovfs-sanitizer-build.log
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  build/sanitized/zenovfs-mount-validation-test \
+  2>&1 | tee ci-logs/zenovfs-mount-validation.log
+grep -Fq 'ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=24 shared-kernel-validator=yes' ci-logs/zenovfs-mount-validation.log
+
+make -n check >ci-logs/make-check-dry-run.log
+grep -Fxq 'build/zenovfs-audit-verify build/zenov-data.img' ci-logs/make-check-dry-run.log
+grep -Fxq 'build/zenovfs-fault-test build/zenov-data.img' ci-logs/make-check-dry-run.log
+make clean check 2>&1 | tee ci-logs/zenovfs-mount-strict-build.log
+make qemu 2>&1 | tee ci-logs/zenovfs-security-qemu.log
+make deterministic 2>&1 | tee ci-logs/zenovfs-deterministic.log
+grep -Fq 'ZENOV_GUARD_READ_BLOCKED path=/quarantine/q-92ec69273708e45efb43afbe.qtn verdict=INFECTED signature=Quarantine.ReadDenied' build/qemu/serial-phase1.log
+grep -Fq 'ZENOV_SECURITY_RUNTIME_IMAGE_OK' ci-logs/zenovfs-security-qemu.log
+grep -Fq 'deterministic rebuild: OK' ci-logs/zenovfs-deterministic.log
+
+bash tests/qemu_zenovfs_mount_reject.sh \
+  build/zenov-os.img build/zenov-data.img build/zenovfs-mount-corrupt \
+  build/qemu/zenovfs-mount-reject
+grep -Fq 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=7 ui_reached=0' build/qemu/zenovfs-mount-reject/summary.log
+
+mapfile -t paths < /tmp/expected-files
+git add "${paths[@]}"
+local_tree=$(git write-tree)
+base_tree=$(git rev-parse HEAD^{tree})
+printf '{"base_tree":"%s","tree":[' "$base_tree" > /tmp/tree-request.json
+first=1
+: > /tmp/zenovfs-mount-map.txt
+printf 'parent=%s\nbase_tree=%s\nlocal_tree=%s\n' "$(git rev-parse HEAD)" "$base_tree" "$local_tree" >> /tmp/zenovfs-mount-map.txt
+for path in "${paths[@]}"; do
+  expected=$(git hash-object "$path")
+  mode=$(git ls-files -s -- "$path" | awk '{print $1}')
+  encoded=$(base64 -w0 "$path")
+  response=$(jq -cn --arg content "$encoded" '{content:$content,encoding:"base64"}' | \
+    curl --fail-with-body -sS -X POST \
+      -H "Authorization: Bearer $GH_TOKEN" \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/blobs" --data-binary @-)
+  actual=$(jq -r '.sha' <<<"$response")
+  test "$actual" = "$expected"
+  if [[ $first -eq 0 ]]; then printf ',' >> /tmp/tree-request.json; fi
+  first=0
+  jq -cn --arg path "$path" --arg mode "$mode" --arg sha "$actual" \
+    '{path:$path,mode:$mode,type:"blob",sha:$sha}' >> /tmp/tree-request.json
+  printf '%s\t%s\t%s\n' "$path" "$mode" "$actual" >> /tmp/zenovfs-mount-map.txt
+done
+printf ']}' >> /tmp/tree-request.json
+tree_response=$(curl --fail-with-body -sS -X POST \
+  -H "Authorization: Bearer $GH_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/trees" --data-binary @/tmp/tree-request.json)
+remote_tree=$(jq -r '.sha' <<<"$tree_response")
+test "$remote_tree" = "$local_tree"
+printf 'remote_tree=%s\n' "$remote_tree" >> /tmp/zenovfs-mount-map.txt
+cat /tmp/zenovfs-mount-map.txt

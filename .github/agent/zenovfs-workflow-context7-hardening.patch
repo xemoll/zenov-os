@@ -1,0 +1,43 @@
+diff --git a/.github/workflows/zenovfs-mount-hardening.yml b/.github/workflows/zenovfs-mount-hardening.yml
+--- a/.github/workflows/zenovfs-mount-hardening.yml
++++ b/.github/workflows/zenovfs-mount-hardening.yml
+@@ -5,6 +5,10 @@ on:
+   pull_request:
+   workflow_dispatch:
+ 
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: true
++
+ permissions:
+   contents: read
+ 
+@@ -16,9 +20,10 @@ jobs:
+       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+         with:
+           fetch-depth: 0
++          persist-credentials: false
+       - name: Install strict native toolchain
+-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
++        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl qemu-system-x86
+@@ -29,8 +34,9 @@ jobs:
+       - name: Build shared validator with sanitizers
+         run: |
+           set -euo pipefail
+           mkdir -p build/sanitized
+-          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+-            -fsanitize=address,undefined -fno-omit-frame-pointer \
++          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
++            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-integer-conversion \
++            -fno-sanitize-recover=all -fno-omit-frame-pointer \
+             tests/zenovfs_mount_validation_test.cpp -o build/sanitized/zenovfs-mount-validation-test
+@@ -65,7 +71,7 @@ jobs:
+       - name: Upload mount-hardening evidence
+         if: always()
+-        uses: actions/upload-artifact@v4
++        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+         with:
+           name: zenovfs-mount-hardening
