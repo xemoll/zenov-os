@@ -1,0 +1,85 @@
+name: Diagnose ZenovFS sanitizer build
+
+on:
+  push:
+    branches:
+      - agent/zenovfs-security-publication-clean
+
+concurrency:
+  group: zenovfs-sanitizer-diagnostic
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  sanitizer-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reconstruct exact validator source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          for name in \
+            zenovfs-mount-hardening.patch \
+            zenovfs-mount-hardening-fix.patch \
+            zenovfs-mount-hardening-count.patch \
+            zenovfs-mount-qemu.patch \
+            zenovfs-mount-qemu-fix.patch \
+            zenovfs-path-depth-consistency.patch; do
+            cp ".github/agent/$name" "/tmp/$name"
+          done
+          git switch --detach 199f98d478a7515c927c97d8fd61bdf5679e7e99
+          git apply --recount --inaccurate-eof /tmp/zenovfs-mount-hardening.patch
+          git apply --recount --inaccurate-eof /tmp/zenovfs-mount-hardening-fix.patch
+          git apply --recount --inaccurate-eof --include=tests/zenovfs_mount_validation_test.cpp /tmp/zenovfs-mount-hardening-count.patch
+          git apply --recount --inaccurate-eof --include=Makefile --include=tools/zenovfs_mount_corrupt.cpp --include=tests/qemu_zenovfs_mount_reject.sh /tmp/zenovfs-mount-qemu.patch
+          git apply --recount --inaccurate-eof --include=tools/zenovfs_mount_corrupt.cpp /tmp/zenovfs-mount-qemu-fix.patch
+          git apply --recount --inaccurate-eof --include=kernel/parts/storage_format.inc --include=tools/zenovfs_mount_corrupt.cpp /tmp/zenovfs-path-depth-consistency.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/zenovfs_mount_validation_test.cpp')
+          text = path.read_text()
+          anchor = '        { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/apps/../tool"); require_entries_rejected(super, value, "entry-path"); }\n'
+          addition = '        { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a"); require_entries_rejected(super, value, "entry-path"); }\n'
+          assert text.count(anchor) == 1 and addition not in text
+          text = text.replace(anchor, anchor + addition, 1)
+          assert text.count('cases=23 shared-kernel-validator=yes') == 1
+          path.write_text(text.replace('cases=23 shared-kernel-validator=yes', 'cases=24 shared-kernel-validator=yes', 1))
+          PY
+          git diff --check
+
+      - name: Install Clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Compile and execute with all sanitizers
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/sanitized ci-logs
+          clang++ --version | tee ci-logs/clang-version.log
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-integer-conversion \
+            -fno-sanitize-recover=all -fno-omit-frame-pointer \
+            tests/zenovfs_mount_validation_test.cpp \
+            -o build/sanitized/zenovfs-mount-validation-test \
+            2>&1 | tee ci-logs/zenovfs-sanitizer-build.log
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            build/sanitized/zenovfs-mount-validation-test \
+            2>&1 | tee ci-logs/zenovfs-sanitizer-runtime.log
+
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: zenovfs-sanitizer-diagnostic-${{ github.run_id }}
+          if-no-files-found: error
+          path: ci-logs/*.log
