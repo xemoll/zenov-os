@@ -1,0 +1,124 @@
+diff --git a/.github/workflows/antimalware.yml b/.github/workflows/antimalware.yml
+index 1e32fa6..f347347 100644
+--- a/.github/workflows/antimalware.yml
++++ b/.github/workflows/antimalware.yml
+@@ -74,6 +74,9 @@ jobs:
+           grep -Fq 'ZENOV_GUARD_WRITE_BLOCKED path=/ransomware-write.bin' build/qemu/serial-phase1.log
+           grep -Fq 'ZENOV_GUARD_WRITE_BLOCKED path=/split.bin' build/qemu/serial-phase1.log
+           grep -Fq 'ZENOV_GUARD_WRITE_AUDIT path=/pua-audit.bin' build/qemu/serial-phase1.log
++          grep -Fq 'ZENOV_GUARD_READ_AUDIT path=/samples/pua-test.bin' build/qemu/serial-phase1.log
++          grep -Fq 'ZENOV_GUARD_READ_BLOCKED path=/samples/ransomware-test.bin' build/qemu/serial-phase1.log
++          grep -Fq 'ZENOV_GUARD_READ_BLOCKED path=/samples/malware-v2.bin' build/qemu/serial-phase1.log
+           grep -Fq 'ZENOV_GUARD_QUARANTINE_LIST_OK entries=2' build/qemu/serial-phase2.log
+           grep -Fq 'ZMID_INIT_FAILED reason=payload-digest' build/qemu/serial-zmid-corrupt.log
+           ! grep -Fq 'ZENOVOS_UI_READY' build/qemu/serial-zmid-corrupt.log
+@@ -93,6 +96,11 @@ jobs:
+           grep -Fq 'constexpr uint32_t compiled_database_floor = 1U;' kernel/parts/zmid_policy.inc
+           grep -Fq 'version != active_database_version + 1U' kernel/parts/zmid_policy.inc
+           grep -Fq 'rsa_pss_verify_with_modulus' kernel/parts/zmid_policy.inc
++          grep -Fq 'bool allow_persistent_read' kernel/parts/security_guard.inc
++          grep -Fq 'bool guarded_read_file' kernel/parts/security_io.inc
++          grep -Fq '#define read_file security_read_file' kernel/kernel.cpp
++          grep -Fq 'if (output != process::application_buffer) return guarded_read_file' kernel/parts/security_io.inc
++          grep -Fq 'if (output && actual_size) memset(output, 0, actual_size);' kernel/parts/security_io.inc
+           grep -Fq 'bool allow_persistent_write' kernel/parts/security_guard.inc
+           grep -Fq 'bool allow_persistent_transfer' kernel/parts/security_guard.inc
+           grep -Fq 'bool guarded_write_file' kernel/parts/security_paths.inc
+@@ -110,6 +118,7 @@ jobs:
+           grep -Fq '"/quarantine"' kernel/parts/security_paths.inc
+           grep -Fq '"format": "zenov-os-build-v14"' build/build-manifest.json
+           grep -Fq '"zmid_root_key_id": "6ca6a5275544c533"' build/build-manifest.json
++          grep -Fq '"on_access_read": "shell and ring-3 file reads / infected block and output scrub / suspicious durable audit / internal policy namespaces excluded"' build/build-manifest.json
+           grep -Fq '"zrwp_root_key_id": "7186b2bd819e47dc"' build/build-manifest.json
+           echo 'ZENOV_SIGNED_SECURITY_SOURCE_CONTRACT_OK'
+ 
+diff --git a/Makefile b/Makefile
+index 28ef01a..fa4b962 100644
+--- a/Makefile
++++ b/Makefile
+@@ -367,7 +367,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
+ 	 '  "graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop",' \
+ 	 '  "input": "PS2 keyboard and 3-byte PS2 mouse packets",' \
+ 	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
+-	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 executable policy / ZCAP1 syscall policy / ZMID1 signed malware intelligence / ZRWP1 controlled-folder and behavior policy / on-write prevention / protected quarantine / RSA-PSS / ZGAL1 hash chain / fail-closed boot",' \
++	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 executable policy / ZCAP1 syscall policy / ZMID1 signed malware intelligence / ZRWP1 controlled-folder and behavior policy / on-write and synchronous on-access read prevention / protected quarantine / RSA-PSS / ZGAL1 hash chain / fail-closed boot",' \
+ 	 '  "zgdb_schema": 2,' \
+ 	 '  "zgdb_compiled_floor": 3,' \
+ 	 '  "zgdb_root_key_id": "6f788074c018f5aa",' \
+@@ -387,6 +387,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
+ 	 "  \"zmid_v1_sha256\": \"$$zmid_v1_hash\"," \
+ 	 "  \"zmid_v2_sha256\": \"$$zmid_v2_hash\"," \
+ 	 '  "zmid_rule_model": "bounded SHA-256 and byte-pattern rules / block-quarantine-audit actions / 32 rules / 32-byte patterns",' \
++	 '  "on_access_read": "shell and ring-3 file reads / infected block and output scrub / suspicious durable audit / internal policy namespaces excluded",' \
+ 	 '  "zrwp_schema": 1,' \
+ 	 '  "zrwp_compiled_floor": 1,' \
+ 	 '  "zrwp_root_key_id": "7186b2bd819e47dc",' \
+@@ -443,6 +444,7 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
+ 	@grep -q '"zmid_root_key_id": "6ca6a5275544c533"' $(BUILD)/build-manifest.json
+ 	@grep -q '"zmid_v1_sha256": "$(ZMID_V1_SHA256)"' $(BUILD)/build-manifest.json
+ 	@grep -q '"zmid_v2_sha256": "$(ZMID_V2_SHA256)"' $(BUILD)/build-manifest.json
++	@grep -q '"on_access_read": "shell and ring-3 file reads / infected block and output scrub / suspicious durable audit / internal policy namespaces excluded"' $(BUILD)/build-manifest.json
+ 	@grep -q '"zrwp_schema": 1' $(BUILD)/build-manifest.json
+ 	@grep -q '"zrwp_compiled_floor": 1' $(BUILD)/build-manifest.json
+ 	@grep -q '"zrwp_root_key_id": "7186b2bd819e47dc"' $(BUILD)/build-manifest.json
+@@ -464,7 +466,7 @@ qemu: all $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zen
+ 	$(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zenov-data-runtime.img --require-nonempty --emit-tampered $(BUILD)/qemu/zenov-data-audit-tampered.img
+ 	@if $(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zenov-data-audit-tampered.img --require-nonempty; then echo 'tampered ZGAL1 fixture unexpectedly verified' >&2; exit 1; fi
+ 	bash tools/check_antimalware.sh $(BUILD)/qemu/serial.log $(BUILD)/qemu/zenov-data-runtime.img $(BUILD)/zenovfs-antimalware-verify $(BUILD)/qemu/antimalware-evidence.txt
+-	@echo 'persistent audit and antimalware verification: OK (runtime chain valid; signed ZMID update; prevention/quarantine state verified)'
++	@echo 'persistent audit and antimalware verification: OK (runtime chain valid; signed ZMID update; on-access/read-write prevention and quarantine state verified)'
+ 
+ test: check qemu deterministic
+ 
+diff --git a/README.md b/README.md
+index 9b70426..55f9b7f 100644
+--- a/README.md
++++ b/README.md
+@@ -94,7 +94,7 @@ guard log verify
+ 
+ Signed ZGDB2, ZCAP1, ZMID1 and ZRWP1 updates are verified twice before activation, must be exactly version `N+1`, and are stored through ZenovFS copy-on-write replacement. Each active policy object is committed before its corresponding version file. Boot reconciles a newer valid signed policy with older version state, while an active policy older than stored state is rejected.
+ 
+-Every BOOT, SCAN, EXEC, QUARANTINE, write-prevention and ransomware-policy event replaces the complete 8,288-byte journal through the same copy-on-write mechanism. If an audit append fails, ZenovGuard restores the prior in-memory state, marks the journal unavailable and locks subsequent application execution.
++Every BOOT, SCAN, EXEC, QUARANTINE, write-prevention, on-access read and ransomware-policy event replaces the complete 8,288-byte journal through the same copy-on-write mechanism. If an audit append fails, ZenovGuard restores the prior in-memory state, marks the journal unavailable and locks subsequent application execution.
+ 
+ The audit transaction is now exercised against two exact transitions: empty journal to one record and full 64-record ring rotation. Across 1,662 deterministic fault cases, the only accepted outcomes are the exact previous journal, the exact new journal or explicit fail-closed rejection. A synthetic journal must also pass a SHA-256 known-answer test and a fixed ZGAL1 record-hash vector before crash images are generated.
+ 
+@@ -102,6 +102,8 @@ Three complete data images are booted by QEMU: a pre-commit interruption that re
+ 
+ The trusted applications, active ZGDB2/ZCAP1/ZMID1/ZRWP1 policies, their version state, the audit journal and quarantine payload/metadata are protected from ordinary shell and userspace write, append, remove, rename and copy-over operations.
+ 
++User-visible shell and ring-3 file reads pass through synchronous ZMID1 classification after ZenovFS checksum verification. Infected reads are recorded as `READ-BLOCK`, their destination bytes are scrubbed, and the operation fails. Suspicious reads are released only after a durable `READ-AUDIT`. Internal signed-policy, repository-state and quarantine reads remain on their dedicated parsers to prevent recursive appraisal.
++
+ Quarantine uses an atomic ZenovFS metadata rename plus a protected sidecar:
+ 
+ ```text
+@@ -127,6 +129,8 @@ ZENOV_GUARD_TRUST_BASELINE_OK
+ ZENOV_GUARD_READY
+ ZENOV_GUARD_DETECTED
+ ZENOV_GUARD_QUARANTINE_OK
++ZENOV_GUARD_READ_BLOCKED
++ZENOV_GUARD_READ_AUDIT
+ ZENOV_GUARD_UNTRUSTED_BLOCKED
+ ZENOV_GUARD_EXEC_ALLOWED
+ ZGDB_ROOT_KEY_OK id=6f788074c018f5aa
+@@ -156,8 +160,8 @@ ZMID_ROLLBACK_REJECTED
+ ZMID_DATABASE_VERSION_OK version=2
+ ZENOV_GUARD_WRITE_BLOCKED
+ ZENOV_GUARD_WRITE_AUDIT
+-ZENOV_ANTIMALWARE_RUNTIME_IMAGE_OK
+-ZENOV_ANTIMALWARE_GATE_OK
++ZENOV_SECURITY_RUNTIME_IMAGE_OK
++ZENOV_SECURITY_GATE_OK
+ ```
+ 
+ ## Memory and isolation
+diff --git a/docs/ANTIMALWARE_0.1.1.md b/docs/ANTIMALWARE_0.1.1.md
+index ab6f722..04e08ef 100644
+--- a/docs/ANTIMALWARE_0.1.1.md
++++ b/docs/ANTIMALWARE_0.1.1.md
+@@ -2,7 +2,7 @@
+ 
+ ## Scope
+ 
+-ZenovOS 0.1.1 extends ZenovGuard with a separate signed malware-intelligence domain named `ZMID1`. The implementation is intentionally bounded and auditable. It provides deterministic SHA-256 and byte-pattern detection, prevention before persistent writes, protected quarantine, monotonic intelligence updates and fail-closed boot. It does not claim cloud reputation, machine-learning classification, archive unpacking or complete commercial antivirus coverage.
++ZenovOS 0.1.1 extends ZenovGuard with a separate signed malware-intelligence domain named `ZMID1`. The implementation is intentionally bounded and auditable. It provides deterministic SHA-256 and byte-pattern detection, synchronous on-access read mediati
