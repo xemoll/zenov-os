@@ -15,9 +15,9 @@ bool query(const char* input, FileInfo& info) {
 bool sync_metadata() {
     if (!zfs_mounted || !recover_transactions()) return false;
     const uint8_t* source = reinterpret_cast<const uint8_t*>(zfs_entries);
-    for (uint32_t sector = 0; sector < zfs_super.entry_sectors; ++sector) if (!ata0.write_sector(1U + sector, source + sector * sector_size)) return false;
+    for (uint32_t sector = 0; sector < zfs_super.entry_sectors; ++sector) if (!zfs_write_sector(1U + sector, source + sector * sector_size).ok()) return false;
     ZfsSuperblock committed = zfs_super; ++committed.generation;
-    if (!ata0.write_sector(0, reinterpret_cast<const uint8_t*>(&committed))) return false;
+    if (!zfs_write_sector(0U, reinterpret_cast<const uint8_t*>(&committed)).ok()) return false;
     zfs_super = committed;
     return true;
 }
