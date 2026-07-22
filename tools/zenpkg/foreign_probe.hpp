@@ -20,6 +20,36 @@ struct StreamingForeignProbe final {
     std::size_t sampled_bytes = 0;
 };
 
+struct StreamingFileDigest final {
+    std::string sha256;
+    std::uint64_t file_size = 0;
+};
+
+inline StreamingFileDigest sha256_file_streaming(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) throw Error("cannot open file for hashing: " + path.string());
+
+    Sha256 hasher;
+    std::array<std::uint8_t, foreign_probe_chunk_bytes> chunk{};
+    std::uint64_t consumed = 0;
+    while (stream) {
+        stream.read(reinterpret_cast<char*>(chunk.data()),
+                    static_cast<std::streamsize>(chunk.size()));
+        const std::streamsize got_stream = stream.gcount();
+        if (got_stream <= 0) break;
+        const auto got = static_cast<std::size_t>(got_stream);
+        hasher.update(chunk.data(), got);
+        consumed += static_cast<std::uint64_t>(got);
+    }
+    if (!stream.eof()) throw Error("hash read failed: " + path.string());
+
+    const auto digest = hasher.final();
+    return StreamingFileDigest{
+        hex_encode(digest.data(), digest.size()),
+        consumed
+    };
+}
+
 inline StreamingForeignProbe probe_foreign_streaming(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) throw Error("cannot open file for probing: " + path.string());
