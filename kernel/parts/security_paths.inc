@@ -11,6 +11,10 @@ static constexpr const char* protected_paths[] = {
     "/security/zenovguard.version",
     "/security/syscall-capabilities.zcap",
     "/security/syscall-capabilities.version",
+    "/security/zenovguard-intelligence.zmid",
+    "/security/zenovguard-intelligence.version",
+    "/security/ransomware-policy.zrwp",
+    "/security/ransomware-policy.version",
     "/security/zenovguard.audit",
 };
 
@@ -71,7 +75,8 @@ bool protected_path(const char* input) {
     if (string_starts_with(normalized, "/apps/pkg-") || string_starts_with(normalized, "/repo/") ||
         string_equal(normalized, "/var/lib/zenpkg/state.v1") || string_equal(normalized, "/var/lib/zenpkg/repo.v1") ||
         string_equal(normalized, "/var/lib/zenpkg/transport.v1") ||
-        string_equal(normalized, "/var/cache/zp") || string_starts_with(normalized, "/var/cache/zp/")) return true;
+        string_equal(normalized, "/var/cache/zp") || string_starts_with(normalized, "/var/cache/zp/") ||
+        string_equal(normalized, "/quarantine") || string_starts_with(normalized, "/quarantine/")) return true;
     for (const char* path : protected_paths) if (string_equal(normalized, path)) return true;
     return false;
 }
@@ -90,6 +95,8 @@ bool guarded_write_file(const char* path, const uint8_t* data, uint32_t size, bo
         security_policy::report_protected_path("write", path);
         return false;
     }
+    if (!security_guard::allow_persistent_write(path, data, size, append)) return false;
+    if (!zrwp::authorize_write(path, size)) return false;
     return write_file(path, data, size, append);
 }
 
@@ -98,6 +105,7 @@ bool guarded_remove(const char* path) {
         security_policy::report_protected_path("remove", path);
         return false;
     }
+    if (!zrwp::authorize_remove(path)) return false;
     return remove(path);
 }
 
@@ -106,6 +114,8 @@ bool guarded_rename_entry(const char* source, const char* destination) {
         security_policy::report_protected_path("rename", security_policy::protected_path(source) ? source : destination);
         return false;
     }
+    if (!security_guard::allow_persistent_transfer(source, destination)) return false;
+    if (!zrwp::authorize_rename(source, destination)) return false;
     return rename_entry(source, destination);
 }
 
@@ -114,6 +124,14 @@ bool guarded_copy_file(const char* source, const char* destination) {
         security_policy::report_protected_path("copy-destination", destination);
         return false;
     }
+    if (!security_guard::allow_persistent_transfer(source, destination)) return false;
+    char normalized_source[48]{};
+    uint32_t source_size = 0U;
+    if (!security_policy::normalize_for_policy(source, normalized_source)) return false;
+    const int32_t source_index = find_entry(normalized_source);
+    if (source_index < 0 || zfs_entries[source_index].type != zfs_type_file) return false;
+    source_size = zfs_entries[source_index].size;
+    if (!zrwp::authorize_copy(destination, source_size)) return false;
     return copy_file(source, destination);
 }
 
@@ -122,6 +140,7 @@ bool package_write_file(const char* path, const uint8_t* data, uint32_t size, bo
         security_policy::report_protected_path("package-write-rejected", path);
         return false;
     }
+    if (!security_guard::allow_persistent_write(path, data, size, false)) return false;
     return write_file(path, data, size, false);
 }
 
@@ -130,6 +149,7 @@ bool package_cache_write_partial(const char* path, const uint8_t* data, uint32_t
         security_policy::report_protected_path("package-cache-partial-write-rejected", path);
         return false;
     }
+    if (!security_guard::allow_persistent_write(path, data, size, append)) return false;
     return write_file(path, data, size, append);
 }
 
@@ -163,6 +183,48 @@ bool package_cache_rename(const char* source, const char* destination) {
             security_policy::package_cache_object_path(source) ? destination : source);
         return false;
     }
+    if (!security_guard::allow_persistent_transfer(source, destination)) return false;
     return rename_entry(source, destination);
+}
+
+bool quarantine_rename(const char* source, const char* destination) {
+    char normalized_source[48]{}, normalized_destination[48]{};
+    if (!security_policy::normalize_for_policy(source, normalized_source) ||
+        !security_policy::normalize_for_policy(destination, normalized_destination) ||
+        security_policy::protected_path(normalized_source) || !string_starts_with(normalized_destination, "/quarantine/")) {
+        security_policy::report_protected_path("quarantine-rename-rejected", source);
+        return false;
+    }
+    return rename_entry(normalized_source, normalized_destination);
+}
+
+bool quarantine_restore(const char* source, const char* destination) {
+    char normalized_source[48]{}, normalized_destination[48]{};
+    if (!security_policy::normalize_for_policy(source, normalized_source) ||
+        !security_policy::normalize_for_policy(destination, normalized_destination) ||
+        !string_starts_with(normalized_source, "/quarantine/") || security_policy::protected_path(normalized_destination)) {
+        security_policy::report_protected_path("quarantine-restore-rejected", destination);
+        return false;
+    }
+    return rename_entry(normalized_source, normalized_destination);
+}
+
+bool quarantine_write_metadata(const char* path, const uint8_t* data, uint32_t size) {
+    char normalized[48]{};
+    if (!security_policy::normalize_for_policy(path, normalized) || !string_starts_with(normalized, "/quarantine/") ||
+        !string_starts_with(normalized + (string_length(normalized) > 5U ? string_length(normalized) - 5U : 0U), ".meta")) {
+        security_policy::report_protected_path("quarantine-metadata-rejected", path);
+        return false;
+    }
+    return write_file(normalized, data, size, false);
+}
+
+bool quarantine_remove(const char* path) {
+    char normalized[48]{};
+    if (!security_policy::normalize_for_policy(path, normalized) || !string_starts_with(normalized, "/quarantine/")) {
+        security_policy::report_protected_path("quarantine-remove-rejected", path);
+        return false;
+    }
+    return remove(normalized);
 }
 } // namespace storage

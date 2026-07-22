@@ -20,6 +20,29 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/storage_bytes.inc"
 #include "parts/storage_tools.inc"
 #include "parts/storage_browser.inc"
+namespace security_guard {
+struct ScanResult;
+bool allow_persistent_write(const char*, const uint8_t*, uint32_t, bool);
+bool allow_persistent_transfer(const char*, const char*);
+}
+namespace zmid {
+extern bool ready;
+extern uint32_t active_record_count;
+bool classify(const char*, const uint8_t*, uint32_t, const uint8_t[32], security_guard::ScanResult&);
+bool self_test();
+}
+namespace process { bool active_security_actor(char[48], uint8_t[32]); }
+namespace zrwp {
+bool authorize_write(const char*, uint32_t);
+bool authorize_copy(const char*, uint32_t);
+bool authorize_rename(const char*, const char*);
+bool authorize_remove(const char*);
+}
+namespace storage {
+bool quarantine_rename(const char*, const char*);
+bool quarantine_write_metadata(const char*, const uint8_t*, uint32_t);
+bool quarantine_remove(const char*);
+}
 #include "parts/security_paths.inc"
 namespace package_manager {
 bool allow_execution(const char*, const uint8_t*, uint32_t);
@@ -50,8 +73,10 @@ namespace security_audit { bool append(uint32_t, uint8_t, uint8_t, const char*, 
 #include "parts/security_audit.inc"
 #include "parts/zgdb_policy.inc"
 #include "parts/zcap_policy.inc"
+#include "parts/zmid_policy.inc"
 #include "parts/process_capabilities.inc"
 #include "parts/process_package_capabilities.inc"
+#include "parts/zrwp_policy.inc"
 namespace crypto {
 constexpr uint32_t sha256_bytes = security_guard::sha256_bytes;
 void sha256(const uint8_t* data, uint32_t size, uint8_t output[sha256_bytes]) { security_guard::sha256(data, size, output); }
@@ -112,9 +137,11 @@ extern "C" void kernel_main() {
     storage::init();
     process::init();
     if (!security_audit::init()) panic("Persistent ZenovGuard audit journal validation failed.");
-    if (!security_guard::init()) panic("ZenovGuard cryptographic or audit self-test failed.");
     if (!zgdb::init()) panic("Signed ZenovGuard database validation failed.");
     if (!zcap::init()) panic("Signed syscall capability policy validation failed.");
+    if (!zmid::init()) panic("Signed malware intelligence validation failed.");
+    if (!zrwp::init()) panic("Signed ransomware policy validation failed.");
+    if (!security_guard::init()) panic("ZenovGuard cryptographic, intelligence or audit self-test failed.");
     if (!process::capability_init()) panic("Per-application syscall capability policy validation failed.");
     if (!package_repository::init()) panic("Signed ZenRepo metadata validation failed.");
     package_manager::init();
@@ -123,6 +150,11 @@ extern "C" void kernel_main() {
     if (storage::guarded_write_file("/security/zenovguard.zgdb", &mutation_probe, 1U, false)) panic("Active security database mutation guard failed.");
     if (storage::guarded_write_file("/security/syscall-capabilities.zcap", &mutation_probe, 1U, false)) panic("Active capability policy mutation guard failed.");
     if (storage::guarded_write_file("/security/syscall-capabilities.version", &mutation_probe, 1U, false)) panic("Capability policy version mutation guard failed.");
+    if (storage::guarded_write_file("/security/zenovguard-intelligence.zmid", &mutation_probe, 1U, false)) panic("Active malware intelligence mutation guard failed.");
+    if (storage::guarded_write_file("/security/zenovguard-intelligence.version", &mutation_probe, 1U, false)) panic("Malware intelligence version mutation guard failed.");
+    if (storage::guarded_write_file("/security/ransomware-policy.zrwp", &mutation_probe, 1U, false)) panic("Active ransomware policy mutation guard failed.");
+    if (storage::guarded_write_file("/security/ransomware-policy.version", &mutation_probe, 1U, false)) panic("Ransomware policy version mutation guard failed.");
+    if (storage::guarded_write_file("/quarantine/security-probe.qtn", &mutation_probe, 1U, false)) panic("Quarantine mutation guard failed.");
     if (storage::guarded_write_file("/security/zenovguard.audit", &mutation_probe, 1U, false)) panic("Persistent security audit mutation guard failed.");
     if (storage::guarded_write_file("/repo/timestamp.zrm", &mutation_probe, 1U, false)) panic("Signed repository metadata mutation guard failed.");
     if (storage::guarded_write_file("/apps/pkg-security-probe.zex", &mutation_probe, 1U, false)) panic("Managed package payload mutation guard failed.");
@@ -131,6 +163,9 @@ extern "C" void kernel_main() {
     if (storage::guarded_write_file("/var/cache/zp/security-probe.part", &mutation_probe, 1U, false)) panic("Package cache mutation guard failed.");
     if (!security_audit::verify_active()) panic("Persistent security audit final-read verification failed.");
     serial::line("ZENOV_GUARD_PROTECTED_PATH_TEST_OK");
+    serial::line("ZENOV_GUARD_INTELLIGENCE_PROTECTED_PATH_TEST_OK");
+    serial::line("ZRWP_PROTECTED_PATH_TEST_OK");
+    serial::line("ZENOV_GUARD_QUARANTINE_PROTECTED_PATH_TEST_OK");
     serial::line("ZENREPO_PROTECTED_PATH_TEST_OK");
     serial::line("ZENPKG_PROTECTED_PATH_TEST_OK");
     serial::line("ZENPKG_CACHE_PROTECTED_PATH_TEST_OK");
@@ -147,7 +182,7 @@ extern "C" void kernel_main() {
     if (graphical && mouse_ready && !mouse_decoder_regression()) panic("PS/2 mouse decoder regression failed.");
     if (graphical && mouse_ready) serial::line("PS2_MOUSE_DECODER_OK");
 
-    serial::line("Kernel online. Desktop, signed policies, persistent audit, syscall capabilities, signed packages, security, storage and ring-3 services ready.");
+    serial::line("Kernel online. Desktop, signed policies, persistent audit, syscall capabilities, signed malware intelligence, controlled-folder defense, packages, security, storage and ring-3 services ready.");
     console::show_home();
     if (graphical) graphics::sync_terminal_from_console();
     serial::line("ZENOVOS_UI_READY");

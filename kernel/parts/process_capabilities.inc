@@ -99,6 +99,13 @@ void clear_capability_profile() {
     capability_audit_failed = false;
 }
 
+bool active_security_actor(char path[48], uint8_t digest[32]) {
+    if (!active_capabilities.valid || !path || !digest) return false;
+    if (!storage::path_copy(path, active_capabilities.path, 48U)) return false;
+    memcpy(digest, active_capabilities.digest, security_guard::sha256_bytes);
+    return true;
+}
+
 bool exact_scope_allows(const char* path, const char* scope) {
     if (!path || !scope || !*scope) return false;
     char normalized[48];
