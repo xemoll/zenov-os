@@ -48,8 +48,10 @@ jobs:
       - name: Verify typed source contract
         run: |
           set -euo pipefail
-          grep -Fq 'BlockResult (*read_sector)(uint32_t, uint8_t*);' kernel/parts/storage_block_device.inc
-          grep -Fq 'BlockResult (*write_sector)(uint32_t, const uint8_t*);' kernel/parts/storage_block_device.inc
+          grep -Fq 'using BlockReadSector = BlockResult (*)(uint32_t, uint8_t*);' kernel/parts/storage_block_device.inc
+          grep -Fq 'using BlockWriteSector = BlockResult (*)(uint32_t, const uint8_t*);' kernel/parts/storage_block_device.inc
+          grep -Fq 'BlockReadSector read_sector;' kernel/parts/storage_block_device.inc
+          grep -Fq 'BlockWriteSector write_sector;' kernel/parts/storage_block_device.inc
           grep -Fq 'BlockIoState zfs_io_state = block_io_state_initial();' kernel/parts/storage_block_device_state.inc
           grep -Fq 'ata0.read_sector = ata2_read_result;' kernel/parts/storage_ata_deadline_init.inc
           grep -Fq 'ata0.write_sector = ata2_write_result;' kernel/parts/storage_ata_deadline_init.inc
