@@ -26,21 +26,28 @@ jobs:
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
-          fetch-depth: 2
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Verify tested source revision
         run: |
+          set -euo pipefail
           [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
-          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
-          echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
+          actual_revision="$(git rev-parse HEAD)"
+          test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
+          git cat-file -e "$actual_revision^{commit}"
+          test -z "$(git status --porcelain)"
+          echo "tested-source-revision=$actual_revision"
 
       - name: Install native toolchain and QEMU
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
 
       - name: Run ATA policy under sanitizers
         run: |
+          set -euo pipefail
           mkdir -p ci-logs/ata
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
@@ -48,10 +55,20 @@ jobs:
           ci-logs/ata/storage-ata-policy-sanitized | tee ci-logs/ata/policy-sanitized.log
           grep -Fq 'ATA_POLICY_TEST_OK cases=22' ci-logs/ata/policy-sanitized.log
 
+      - name: Run reset revalidation policy under sanitizers
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs/ata
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/storage_ata_recovery_policy_test.cpp -o ci-logs/ata/storage-ata-recovery-policy-sanitized
+          ci-logs/ata/storage-ata-recovery-policy-sanitized | tee ci-logs/ata/recovery-policy-sanitized.log
+          grep -Fq 'ATA_RECOVERY_POLICY_TEST_OK cases=9' ci-logs/ata/recovery-policy-sanitized.log
+
       - name: Build native system and policy gate
         run: |
+          set -euo pipefail
           mkdir -p ci-logs/ata
-          set -o pipefail
           make clean check 2>&1 | tee ci-logs/ata/native-check.log
           grep -Fq 'ATA_POLICY_TEST_OK cases=22' ci-logs/ata/native-check.log
           grep -Fq 'ATA_RECOVERY_POLICY_TEST_OK cases=9' ci-logs/ata/native-check.log
@@ -59,11 +76,12 @@ jobs:
 
       - name: Boot deadline-driven storage phases
         run: |
-          set -o pipefail
+          set -euo pipefail
           make qemu 2>&1 | tee ci-logs/ata/qemu.log
 
       - name: Verify ATA and input boot evidence
         run: |
+          set -euo pipefail
           success_logs=(
             build/qemu/serial-phase1.log
             build/qemu/serial-phase2.log
