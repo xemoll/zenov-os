@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 using uint8_t = std::uint8_t;
 using uint32_t = std::uint32_t;
@@ -52,6 +53,9 @@ int main() {
 
     expect(block_device_contract_valid(device), "valid-device-contract");
     expect(block_io_counters_valid(state), "initial-counters-valid");
+    expect(std::strcmp(block_status_name(BlockStatus::read_only), "read-only") == 0,
+           "read-only-status-name");
+    expect(!block_retryable(BlockStatus::read_only), "read-only-not-retryable");
 
     BlockResult result = block_device_read(device, state, 3U, sector);
     expect(result.ok() && result.operation == BlockOperation::read && result.lba == 3U,
