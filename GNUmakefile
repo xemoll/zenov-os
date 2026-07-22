@@ -34,7 +34,7 @@ $(ZENPKG_FOREIGN_CHECK_STAMP): $(ZENPKG_FOREIGN_FORMAT_TEST) $(BUILD)/zenpkg $(B
 	@rm -rf $(ZENPKG_FOREIGN_CHECK_OUT)
 	@mkdir -p $(ZENPKG_FOREIGN_CHECK_OUT)
 	$(ZENPKG_FOREIGN_FORMAT_TEST)
-	bash tests/zenpkg_foreign_test.sh $(BUILD)/zenpkg $(BUILD)/HELLO.ZEX $(ZENPKG_FOREIGN_CHECK_OUT)
+	bash -x tests/zenpkg_foreign_test.sh $(BUILD)/zenpkg $(BUILD)/HELLO.ZEX $(ZENPKG_FOREIGN_CHECK_OUT)
 	@touch $@
 
 zenpkg-foreign-check: $(ZENPKG_FOREIGN_CHECK_STAMP)
