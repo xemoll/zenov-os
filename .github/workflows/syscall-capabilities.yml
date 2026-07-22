@@ -2,8 +2,19 @@ name: ZenovOS 0.1.1 Syscall Capabilities
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -15,21 +26,28 @@ jobs:
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 2
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Verify exact tested source revision
         run: |
+          set -euo pipefail
           [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
-          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
-          echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
+          actual_revision="$(git rev-parse HEAD)"
+          test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
+          git cat-file -e "$actual_revision^{commit}"
+          test -z "$(git status --porcelain)"
+          echo "tested-source-revision=$actual_revision"
 
       - name: Install strict native toolchain and QEMU
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86 zip unzip
 
       - name: Verify source hygiene
         run: |
+          set -euo pipefail
           test -z "$(find . -name '*.py' -print)"
           while IFS= read -r file; do
             iconv -f UTF-8 -t UTF-8 "$file" >/dev/null
@@ -37,8 +55,8 @@ jobs:
 
       - name: Run strict build and storage security matrix
         run: |
+          set -euo pipefail
           mkdir -p ci-logs
-          set -o pipefail
           make clean check 2>&1 | tee ci-logs/capability-native-build.log
 
       - name: Boot all QEMU phases
@@ -46,6 +64,7 @@ jobs:
 
       - name: Verify syscall capability evidence
         run: |
+          set -euo pipefail
           bash tools/check_syscall_capabilities.sh \
             build/qemu/serial.log \
             build/qemu/zenov-data-runtime.img \
@@ -69,6 +88,7 @@ jobs:
 
       - name: Verify signed policy source contract
         run: |
+          set -euo pipefail
           grep -Fq 'using CapabilityProfile = zcap::Record;' kernel/parts/process_capabilities.inc
           grep -Fq 'return zcap::find(normalized_path);' kernel/parts/process_capabilities.inc
           ! grep -Fq 'constexpr CapabilityProfile capability_profiles' kernel/parts/process_capabilities.inc
@@ -86,9 +106,9 @@ jobs:
 
       - name: Upload syscall capability evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: zenov-os-0.1.1-syscall-capabilities-ci
+          name: zenov-os-0.1.1-syscall-capabilities-ci-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           path: |
             build/BOOT.BIN

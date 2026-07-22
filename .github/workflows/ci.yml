@@ -2,8 +2,19 @@ name: ZenovOS 0.1.1 CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -15,15 +26,21 @@ jobs:
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 2
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Verify tested source revision
         run: |
+          set -euo pipefail
           [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
-          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
-          echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
+          actual_revision="$(git rev-parse HEAD)"
+          test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
+          git cat-file -e "$actual_revision^{commit}"
+          test -z "$(git status --porcelain)"
+          echo "tested-source-revision=$actual_revision"
 
       - name: Install native toolchain and QEMU
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86 zip unzip
@@ -33,14 +50,15 @@ jobs:
 
       - name: Verify source encoding
         run: |
+          set -euo pipefail
           while IFS= read -r file; do
             iconv -f UTF-8 -t UTF-8 "$file" >/dev/null
           done < <(find kernel user tools boot packaging security -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.inc' -o -name '*.S' -o -name '*.zv' -o -name '*.ld' -o -name '*.sh' -o -name '*.txt' -o -name '*.pem' \) -print)
 
       - name: Run native checks and audit COW fault matrix
         run: |
+          set -euo pipefail
           mkdir -p ci-logs
-          set -o pipefail
           make clean check 2>&1 | tee ci-logs/native-build.log
 
       - name: Boot desktop and nine recovery/fail-closed phases
@@ -51,6 +69,7 @@ jobs:
 
       - name: Verify deterministic installation package and provenance
         run: |
+          set -euo pipefail
           bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
           bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist-rebuild package-rebuild
           cmp dist/ZenovOS-0.1.1-x86.img dist-rebuild/ZenovOS-0.1.1-x86.img
@@ -66,6 +85,7 @@ jobs:
 
       - name: Inspect audit fault-injection and runtime evidence
         run: |
+          set -euo pipefail
           readelf -h build/kernel.elf
           for app in build/FILEIO.ELF build/ARGS.ELF build/CONSOLE.ELF build/PROTECT.ELF build/KACCESS.ELF; do
             readelf -h "$app"
@@ -237,9 +257,9 @@ jobs:
 
       - name: Upload verified 0.1.1 audit-fault evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: zenov-os-0.1.1-audit-cow-ci
+          name: zenov-os-0.1.1-audit-cow-ci-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           path: |
             build/BOOT.BIN

@@ -2,8 +2,19 @@ name: ZenovOS 0.1.1 Adaptive Display
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -15,14 +26,21 @@ jobs:
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 2
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Verify tested source revision
         run: |
+          set -euo pipefail
           [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
-          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+          actual_revision="$(git rev-parse HEAD)"
+          test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
+          git cat-file -e "$actual_revision^{commit}"
+          test -z "$(git status --porcelain)"
+          echo "tested-source-revision=$actual_revision"
 
       - name: Install native toolchain and QEMU
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
@@ -35,6 +53,7 @@ jobs:
 
       - name: Inspect adaptive display evidence
         run: |
+          set -euo pipefail
           grep -q UI_ADAPTIVE_DISPLAY_OK build/qemu-display-ui/serial.log
           grep -q UI_HYBRID_SCALER_OK build/qemu-display-ui/serial.log
           grep -q 'UI_DISPLAY_MODE_COUNT 22' build/qemu-display-ui/serial.log
@@ -75,9 +94,9 @@ jobs:
 
       - name: Upload adaptive display evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: zenov-os-0.1.1-adaptive-display-ci
+          name: zenov-os-0.1.1-adaptive-display-ci-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           path: |
             build/zenov-os.img
