@@ -2,26 +2,19 @@ name: ZenovOS Block Results
 
 on:
   push:
-    paths:
-      - 'GNUmakefile'
-      - 'kernel/kernel.cpp'
-      - 'kernel/parts/storage_block_result.inc'
-      - 'kernel/parts/storage_diagnostics.inc'
-      - 'kernel/parts/storage_ata_deadline*.inc'
-      - 'tests/storage_block_result_test.cpp'
-      - 'tests/qemu_block_status.sh'
-      - '.github/workflows/block-results.yml'
+    branches:
+      - main
   pull_request:
-    paths:
-      - 'GNUmakefile'
-      - 'kernel/kernel.cpp'
-      - 'kernel/parts/storage_block_result.inc'
-      - 'kernel/parts/storage_diagnostics.inc'
-      - 'kernel/parts/storage_ata_deadline*.inc'
-      - 'tests/storage_block_result_test.cpp'
-      - 'tests/qemu_block_status.sh'
-      - '.github/workflows/block-results.yml'
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
