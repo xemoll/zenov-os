@@ -1,6 +1,17 @@
 name: ZenovOS Typed Block Device ABI
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'GNUmakefile'
+      - 'kernel/kernel.cpp'
+      - 'kernel/parts/storage*.inc'
+      - 'tests/storage_block_result_test.cpp'
+      - 'tests/storage_block_device_test.cpp'
+      - 'tests/qemu_block_status.sh'
+      - '.github/workflows/block-device-abi.yml'
   pull_request:
     branches:
       - main
@@ -12,6 +23,9 @@ on:
       - 'tests/storage_block_device_test.cpp'
       - 'tests/qemu_block_status.sh'
       - '.github/workflows/block-device-abi.yml'
+  merge_group:
+    types:
+      - checks_requested
   workflow_dispatch:
 
 concurrency:
