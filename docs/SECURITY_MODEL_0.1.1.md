@@ -12,6 +12,12 @@
 - Every trusted application receives a syscall capability mask from the independently signed ZCAP1 policy; file access additionally requires an exact normalized path scope.
 - Capability authority is installed only after final-read ZGDB2, path-plus-SHA-256 appraisal and signature-valid ZCAP1 lookup, and is cleared at both launch boundaries.
 - Capability and file-scope denials are committed to the persistent ZGAL1 audit journal; audit failure retains the fail-closed execution lock.
+- Independently signed ZMID1 intelligence classifies bounded SHA-256 and byte-pattern rules without granting executable trust or syscall authority.
+- Ordinary write, append, copy, rename and package-cache mutations are scanned before persistence; block rules reject the candidate before storage changes, while audit-only rules require a successful persistent record.
+- Active ZMID state and quarantine payload/metadata are protected from ordinary mutation. A cryptographically invalid active ZMID stops boot before UI readiness.
+- Independently signed ZRWP1 policy protects selected files/directories with exact writer path-plus-SHA-256 identities and bounded write, rename, remove and byte budgets.
+- ZRWP1 supports signed audit and block modes. A violation is allowed or denied only after its persistent ZGAL1 record succeeds; block mode locks the actor for the current window.
+- ZRWP policy updates require sequential versioning, final-storage read-back, persistent audit, explicit metadata synchronization and rollback to the prior policy on failure. A cryptographically invalid active ZRWP stops boot before UI readiness.
 - Ring-3 faults terminate the application and return through the common scrub-and-authority-clear path; ring-0 faults panic.
 - ZenovFS1 verifies metadata structure and payload checksums and uses a copy-on-write replacement protocol.
 
@@ -23,4 +29,4 @@ The syscall capability layer reduces the authority of already trusted code. It d
 
 Version 0.1.1 does not claim concurrent-process isolation, per-process page directories, ASLR, secure boot, DMA protection, speculative-execution mitigations, authenticated storage, dynamic-linker hardening, transferable capabilities, handle-based delegation, in-process capability revocation or a user-space policy service.
 
-Executable authenticity is limited to the current bundled path-and-SHA-256 trust baseline plus RSA-PSS-signed ZGDB2 threat/revocation policy. Syscall profiles are held in a separate RSA-PSS-signed ZCAP1 policy constrained to that same path set. ZCAP1 can be updated sequentially without rebuilding the kernel, but root rotation and a stronger offline rollback boundary still require a verified OS build or external monotonic state.
+Executable authenticity is limited to the current bundled path-and-SHA-256 trust baseline plus RSA-PSS-signed ZGDB2 trust/revocation policy. Syscall profiles are held in a separate RSA-PSS-signed ZCAP1 policy constrained to that same path set. Malware hash/pattern rules are held in a third RSA-PSS-signed ZMID1 domain. Controlled-folder paths, exact writer identities and mutation budgets are held in a fourth RSA-PSS-signed ZRWP1 domain. Each can be updated sequentially without rebuilding the kernel, but root rotation and a stronger offline rollback boundary still require a verified OS build or external monotonic state. ZMID1 and ZRWP1 provide bounded prevention, not cloud antivirus, full EDR, archive analysis or machine-learning classification.

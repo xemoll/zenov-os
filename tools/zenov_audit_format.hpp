@@ -162,7 +162,7 @@ inline bool verify(const Journal& journal,bool require_nonempty=false) {
     std::array<std::uint8_t,32> previous{};std::memcpy(previous.data(),h.anchor_hash,32U);
     for(std::uint32_t i=0;i<h.count;++i){
         const Record& record=journal.records[(first+i)%kCapacity];
-        if(record.sequence!=first_sequence+i||record.action>3U||record.verdict>5U||!record.path_length||record.path_length>=sizeof(record.path)||
+        if(record.sequence!=first_sequence+i||record.action>7U||record.verdict>5U||!record.path_length||record.path_length>=sizeof(record.path)||
            record.path[record.path_length]!=0||!all_zero(record.reserved,sizeof(record.reserved)))return false;
         for(std::size_t p=record.path_length+1U;p<sizeof(record.path);++p)if(record.path[p]!=0)return false;
         const auto computed=record_hash(record,previous.data());if(!same_hash(computed.data(),record.record_hash))return false;previous=computed;

@@ -7,6 +7,8 @@
 - [`ZCAP_0.1.1.md`](ZCAP_0.1.1.md) — canonical ZCAP1 binary format, RSA-PSS root, sequential update and rollback boundary.
 - [`SECURITY_MODEL_0.1.1.md`](SECURITY_MODEL_0.1.1.md) — enforced trust boundaries and explicit non-goals.
 - [`ZENOVGUARD_0.1.1.md`](ZENOVGUARD_0.1.1.md) — SHA-256 appraisal, signed policy, persistent audit and quarantine contract.
+- [`ANTIMALWARE_0.1.1.md`](ANTIMALWARE_0.1.1.md) — signed ZMID1 intelligence, bounded hash/pattern rules, pre-write prevention, protected quarantine and fail-closed update evidence.
+- [`RANSOMWARE_DEFENSE_0.1.1.md`](RANSOMWARE_DEFENSE_0.1.1.md) — signed ZRWP1 controlled-folder policy, exact writer identities, mutation budgets, audit/block transition and durability evidence.
 - [`ZGDB_0.1.1.md`](ZGDB_0.1.1.md) — signed database format, RSA-PSS policy update, revocation and anti-rollback boundary.
 - [`AUDIT_JOURNAL_0.1.1.md`](AUDIT_JOURNAL_0.1.1.md) — ZGAL1 format, hash chain, COW fault matrix, recovery images and offline-attacker boundary.
 - [`ZENPKG_FORMAT_1.md`](ZENPKG_FORMAT_1.md) — deterministic package container and canonical manifest contract.
