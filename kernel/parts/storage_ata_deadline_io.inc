@@ -50,8 +50,6 @@ BlockResult ata2_read_result(uint32_t lba, uint8_t* output) {
     return ata2_complete_request(block_result(BlockOperation::read, BlockStatus::device_error, lba, 0U, 0U, 0U));
 }
 
-bool ata2_read_sector(uint32_t lba, uint8_t* output) { return ata2_read_result(lba, output).ok(); }
-
 AtaOperationResult ata2_write_once(uint32_t lba, const uint8_t* input, uint8_t attempts) {
     ata_policy::Result result = ata2_wait(false, ata2_command_timeout_ms, attempts);
     if (!result.ok()) return AtaOperationResult{result, BlockOperation::write};
@@ -106,5 +104,3 @@ BlockResult ata2_write_result(uint32_t lba, const uint8_t* input) {
     }
     return ata2_complete_request(block_result(BlockOperation::write, BlockStatus::device_error, lba, 0U, 0U, 0U));
 }
-
-bool ata2_write_sector(uint32_t lba, const uint8_t* input) { return ata2_write_result(lba, input).ok(); }
