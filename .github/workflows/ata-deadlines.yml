@@ -26,7 +26,7 @@ jobs:
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           ref: ${{ env.ZENOV_SOURCE_REVISION }}
           fetch-depth: 1
@@ -110,9 +110,9 @@ jobs:
 
       - name: Upload ATA evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: ata-deadlines-${{ github.run_id }}
+          name: ata-deadlines-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ci-logs/ata/**
             build/qemu/serial*.log
