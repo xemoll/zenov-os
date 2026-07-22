@@ -5,6 +5,7 @@ on:
     paths:
       - 'GNUmakefile'
       - 'kernel/kernel.cpp'
+      - 'kernel/parts/hardware_irq_staging.inc'
       - 'kernel/parts/storage*.inc'
       - 'tests/storage_ata_policy_test.cpp'
       - '.github/workflows/ata-deadlines.yml'
@@ -12,6 +13,7 @@ on:
     paths:
       - 'GNUmakefile'
       - 'kernel/kernel.cpp'
+      - 'kernel/parts/hardware_irq_staging.inc'
       - 'kernel/parts/storage*.inc'
       - 'tests/storage_ata_policy_test.cpp'
       - '.github/workflows/ata-deadlines.yml'
@@ -61,15 +63,19 @@ jobs:
           set -o pipefail
           make qemu 2>&1 | tee ci-logs/ata/qemu.log
 
-      - name: Verify ATA boot evidence
+      - name: Verify ATA and input boot evidence
         run: |
           serial=build/qemu/serial.log
-          grep -Fq 'MONOTONIC_TICK_READY hz=100' "$serial"
+          grep -Fq 'MONOTONIC_TICK_READY hz=100 irq-mask=timer-only' "$serial"
           grep -Fq 'ATA_IDENTIFY_OK deadline=3000ms retry-limit=1' "$serial"
           grep -Fq 'ATA_DEADLINE_DRIVER_READY clock=pit100 timeout=3000ms reset=5000ms attempts=2' "$serial"
           grep -Fq 'ZENOVFS_MOUNT_OK' "$serial"
+          grep -Fq 'INPUT_IRQS_READY keyboard=1 mouse=12' "$serial"
+          grep -Fq 'PS2_MOUSE_OK' "$serial"
+          grep -Fq 'PS2_MOUSE_IRQ_ROUTE_OK' "$serial"
           grep -Fq 'ZENOVOS_UI_READY' "$serial"
-          ! grep -Eq 'ATA_IO_ERROR|KERNEL PANIC|DOUBLE FAULT|ASSERT' "$serial"
+          grep -Fq 'zenov> ' "$serial"
+          ! grep -Eq 'ATA_IO_ERROR|PS2_MOUSE_UNAVAILABLE|KERNEL PANIC|DOUBLE FAULT|ASSERT' "$serial"
 
       - name: Upload ATA evidence
         if: always()
