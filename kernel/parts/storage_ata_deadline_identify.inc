@@ -33,6 +33,7 @@ bool ata2_identify() {
         if (result.ok()) {
             ata_present = true;
             ata2_record_success(result);
+            if (attempt > 1U) serial::line("ATA_RECOVERY_RETRY_OK op=identify attempts=2");
             serial::line("ATA_IDENTIFY_OK deadline=3000ms retry-limit=1");
             return true;
         }
