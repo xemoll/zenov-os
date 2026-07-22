@@ -61,6 +61,7 @@ controller() {
   wait_for_serial "$serial" "$PROMPT" || { echo quit; return 1; }
 
   send_command "write $PROOF_PATH $PROOF_TEXT"
+  wait_for_serial "$serial" 'ATA_RECOVERY_REVALIDATE_OK command=identify capacity=stable' || { echo quit; return 1; }
   wait_for_serial "$serial" 'WRITE_OK' || { echo quit; return 1; }
   send_command "cat $PROOF_PATH"
   wait_for_serial "$serial" "$PROOF_TEXT" || { echo quit; return 1; }
@@ -119,6 +120,10 @@ fi
   echo 'qemu-ata-eio: expected exactly one successful ATA reset' >&2
   exit 1
 }
+[[ "$(grep -Fc 'ATA_RECOVERY_REVALIDATE_OK command=identify capacity=stable' "$OUT/serial.log")" -eq 1 ]] || {
+  echo 'qemu-ata-eio: expected exactly one successful IDENTIFY revalidation' >&2
+  exit 1
+}
 [[ "$(grep -Fc 'ATA_RECOVERY_RETRY_OK op=write attempts=2' "$OUT/serial.log")" -eq 1 ]] || {
   echo 'qemu-ata-eio: expected exactly one successful write retry' >&2
   exit 1
@@ -127,9 +132,9 @@ fi
 grep -Fq "$PROOF_TEXT" "$OUT/serial.log"
 grep -Fq 'ZENOVFS_FSCK_OK' "$OUT/serial.log"
 grep -Fq 'ZENOVOS_UI_READY' "$OUT/serial.log"
-! grep -Eq 'KERNEL PANIC|DOUBLE FAULT|ASSERT|PS2_MOUSE_UNAVAILABLE' "$OUT/serial.log"
+! grep -Eq 'ATA_RECOVERY_REVALIDATE_FAILED|KERNEL PANIC|DOUBLE FAULT|ASSERT|PS2_MOUSE_UNAVAILABLE' "$OUT/serial.log"
 
 reason="$(grep -F 'ATA_IO_ERROR op=write reason=' "$OUT/serial.log" | head -n 1 | sed 's/.*reason=//' | tr -d '\r')"
 [[ -n "$reason" ]] || { echo 'qemu-ata-eio: empty normalized ATA reason' >&2; exit 1; }
-printf 'ATA_EIO_RETRY_QEMU_OK injected=EIO operation=write reason=%s resets=1 attempts=2 proof=%s\n' \
+printf 'ATA_EIO_RETRY_QEMU_OK injected=EIO operation=write reason=%s resets=1 revalidations=1 attempts=2 proof=%s\n' \
   "$reason" "$PROOF_TEXT" | tee "$OUT/summary.log"
