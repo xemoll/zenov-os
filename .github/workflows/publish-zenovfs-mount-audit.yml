@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/zenovfs-mount-audit-publication
+  pull_request:
 
 permissions:
   contents: write
@@ -22,12 +23,15 @@ jobs:
           set -euo pipefail
           cp .github/agent/zenovfs-mount-hardening.patch /tmp/zenovfs-mount-hardening.patch
           cp .github/agent/zenovfs-mount-hardening-fix.patch /tmp/zenovfs-mount-hardening-fix.patch
+          cp .github/agent/zenovfs-mount-hardening-count.patch /tmp/zenovfs-mount-hardening-count.patch
           git switch --detach 199f98d478a7515c927c97d8fd61bdf5679e7e99
           test "$(git rev-parse HEAD)" = 199f98d478a7515c927c97d8fd61bdf5679e7e99
           git apply --check /tmp/zenovfs-mount-hardening.patch
           git apply /tmp/zenovfs-mount-hardening.patch
           git apply --check /tmp/zenovfs-mount-hardening-fix.patch
           git apply /tmp/zenovfs-mount-hardening-fix.patch
+          git apply --check /tmp/zenovfs-mount-hardening-count.patch
+          git apply /tmp/zenovfs-mount-hardening-count.patch
           git diff --check
           git diff --name-only | sort > /tmp/actual-files
           cat > /tmp/expected-files <<'EOF'
@@ -54,7 +58,7 @@ jobs:
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
           UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
             build/sanitized/zenovfs-mount-validation-test | tee ci-logs/zenovfs-mount-validation.log
-          grep -Fq 'ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=18 shared-kernel-validator=yes' ci-logs/zenovfs-mount-validation.log
+          grep -Fq 'ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=23 shared-kernel-validator=yes' ci-logs/zenovfs-mount-validation.log
           make clean check 2>&1 | tee ci-logs/zenovfs-mount-strict-build.log
 
       - name: Derive and upload exact production blobs
