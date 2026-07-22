@@ -44,7 +44,7 @@ jobs:
         run: |
           bash -n tests/qemu_ata_eio_retry.sh
           test "$(grep -Fc '[inject-error]' tests/blkdebug/ata-write-eio-once.conf)" -eq 1
-          grep -Fq 'event = "write_aio"' tests/blkdebug/ata-write-eio-once.conf
+          grep -Fq 'event = "pwritev"' tests/blkdebug/ata-write-eio-once.conf
           grep -Fq 'errno = "5"' tests/blkdebug/ata-write-eio-once.conf
           grep -Fq 'once = "on"' tests/blkdebug/ata-write-eio-once.conf
 
