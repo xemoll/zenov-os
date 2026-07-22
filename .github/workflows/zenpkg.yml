@@ -13,6 +13,7 @@ on:
       - 'tools/zenpkg_blkdebug_qemu_test.cpp'
       - 'tests/zenpkg_test.sh'
       - 'tests/zenpkg_foreign_test.sh'
+      - 'tests/zenpkg_streaming_test.sh'
       - 'tests/zenrepo_test.sh'
       - 'tests/package_foreign_format_test.cpp'
       - 'tests/package_repository_kernel_test.cpp'
@@ -56,6 +57,7 @@ on:
       - 'tools/zenpkg_blkdebug_qemu_test.cpp'
       - 'tests/zenpkg_test.sh'
       - 'tests/zenpkg_foreign_test.sh'
+      - 'tests/zenpkg_streaming_test.sh'
       - 'tests/zenrepo_test.sh'
       - 'tests/package_foreign_format_test.cpp'
       - 'tests/package_repository_kernel_test.cpp'
@@ -87,6 +89,10 @@ on:
       - 'docs/PACKAGE_COMPATIBILITY_ARCHITECTURE.md'
       - '.github/workflows/zenpkg.yml'
       - '.github/workflows/zenrepo.yml'
+  merge_group:
+    types:
+      - checks_requested
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -120,6 +126,7 @@ jobs:
       - name: Validate shell harnesses
         run: |
           bash -n tests/zenpkg_foreign_test.sh
+          bash -n tests/zenpkg_streaming_test.sh
           bash -n tests/qemu_zenpkg_foreign.sh
           bash -n tests/qemu_zenpkg_blkdebug_breakpoints.sh
       - name: Build signed-package image and host regressions
@@ -144,9 +151,11 @@ jobs:
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             tools/zenpkg/main.cpp -o build/sanitized/zenpkg
-          rm -rf build/sanitized/zenpkg-foreign-test
+          rm -rf build/sanitized/zenpkg-foreign-test build/sanitized/zenpkg-streaming-test
           bash tests/zenpkg_foreign_test.sh \
             build/sanitized/zenpkg build/HELLO.ZEX build/sanitized/zenpkg-foreign-test
+          bash tests/zenpkg_streaming_test.sh \
+            build/sanitized/zenpkg build/sanitized/zenpkg-streaming-test
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             tests/package_repository_kernel_test.cpp -o build/sanitized/package-repository-kernel-test
@@ -237,6 +246,7 @@ jobs:
           blkdebug=build/qemu/zenpkg-blkdebug
           grep -Fq 'PACKAGE_FOREIGN_FORMAT_TEST_OK cases=46 generations=legacy-current' /tmp/zenpkg-check.log
           grep -Fq 'ZENPKG_FOREIGN_TEST_OK probes=39 native-import=zex1,elf32 deterministic=2 rejection=7 generations=legacy-current streaming=1' /tmp/zenpkg-check.log
+          grep -Fq 'ZENPKG_STREAMING_TEST_OK cases=2 hash=full probe=head65536+tail512 overlap=none' /tmp/zenpkg-check.log
           grep -Fq 'ZENPKG_FOREIGN_QEMU_OK formats=1 probe=zenpkg install=1 run=1 fsck=1' "$foreign/summary.log"
           grep -Fq 'ZENPKG_TRANSPORT_COW_FAULT_MATRIX_OK cases=3173 writes=167' /tmp/zenpkg-check.log
           grep -Fq 'ZENPKG_TRANSPORT_OLD_OR_RESUMABLE_OR_NEW_OR_FAIL_CLOSED_ONLY' /tmp/zenpkg-check.log
@@ -273,6 +283,8 @@ jobs:
             if [[ -f /tmp/zenpkg-check.log ]]; then
               marker="$(grep -F 'ZENPKG_FOREIGN_TEST_OK' /tmp/zenpkg-check.log | tail -n 1 || true)"
               [[ -z "$marker" ]] || echo "- Host intake: \`$marker\`"
+              marker="$(grep -F 'ZENPKG_STREAMING_TEST_OK' /tmp/zenpkg-check.log | tail -n 1 || true)"
+              [[ -z "$marker" ]] || echo "- Streaming: \`$marker\`"
             fi
             if [[ -f build/qemu/zenpkg-foreign/summary.log ]]; then
               marker="$(tail -n 1 build/qemu/zenpkg-foreign/summary.log)"
@@ -285,6 +297,9 @@ jobs:
         with:
           name: zenpkg-qemu-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            build/zenpkg-foreign-test/**
+            build/sanitized/zenpkg-foreign-test/**
+            build/sanitized/zenpkg-streaming-test/**
             build/qemu/zenpkg/serial.log
             build/qemu/zenpkg/serial-*.log
             build/qemu/zenpkg/monitor-*.log
@@ -318,6 +333,9 @@ jobs:
             /tmp/zenpkg-transport-qemu.log
             /tmp/zenpkg-transport-fault-qemu.log
             /tmp/zenpkg-blkdebug-qemu.log
+            build/zenpkg-foreign-test/**
+            build/sanitized/zenpkg-foreign-test/**
+            build/sanitized/zenpkg-streaming-test/**
             build/qemu/zenpkg/**
             build/qemu/zenpkg-foreign/**
             build/qemu/zenpkg-transport/**
