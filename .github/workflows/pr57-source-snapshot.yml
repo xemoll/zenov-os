@@ -18,15 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 3
-      - name: Verify exact merge source
+          fetch-depth: 1
+      - name: Fetch and verify exact merge source
         run: |
           set -euo pipefail
-          git cat-file -e 9b6ff0dd700f51d3ccb927662db9383a12c805c8^{commit}
+          git fetch --no-tags --depth=1 origin refs/pull/57/merge
+          test "$(git rev-parse FETCH_HEAD)" = "9b6ff0dd700f51d3ccb927662db9383a12c805c8"
       - name: Archive exact merged source
         run: |
           set -euo pipefail
-          git archive --format=zip --output=zenov-os-pr57-merge-source.zip 9b6ff0dd700f51d3ccb927662db9383a12c805c8
+          git archive --format=zip --output=zenov-os-pr57-merge-source.zip FETCH_HEAD
           sha256sum zenov-os-pr57-merge-source.zip > zenov-os-pr57-merge-source.zip.sha256
       - uses: actions/upload-artifact@v4
         with:
