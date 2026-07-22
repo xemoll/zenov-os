@@ -35,6 +35,7 @@ jobs:
             zenovfs-mount-hardening-count.patch
             zenovfs-mount-qemu.patch
             zenovfs-mount-qemu-fix.patch
+            zenovfs-path-depth-consistency.patch
             zenovfs-read-failure-scrub.patch
             zmid-update-rollback.patch
             quarantine-digest-prefix.patch
@@ -91,7 +92,7 @@ jobs:
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
           UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
             build/sanitized/zenovfs-mount-validation-test | tee ci-logs/zenovfs-mount-validation.log
-          grep -Fq 'ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=23 shared-kernel-validator=yes' ci-logs/zenovfs-mount-validation.log
+          grep -Fq 'ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=24 shared-kernel-validator=yes' ci-logs/zenovfs-mount-validation.log
 
       - name: Run strict build, runtime and determinism gates
         run: |
@@ -109,7 +110,7 @@ jobs:
           bash tests/qemu_zenovfs_mount_reject.sh \
             build/zenov-os.img build/zenov-data.img build/zenovfs-mount-corrupt \
             build/qemu/zenovfs-mount-reject
-          grep -Fq 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=6 ui_reached=0' build/qemu/zenovfs-mount-reject/summary.log
+          grep -Fq 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=7 ui_reached=0' build/qemu/zenovfs-mount-reject/summary.log
 
       - name: Derive and publish exact production tree
         env:
