@@ -1,0 +1,89 @@
+name: Publish exact on-access buffer fix
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/publish-on-access-buffer-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-fixed-blobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_COMMIT: 7ad32c5e073cb64b931ff1d6993fef1118f6bfca
+      BASE_TREE: 88801d29406bbc2c0e633125836d7c27203076fe
+      TARGET_TREE: 10ad27f0e104554c276bdcc2e1e410dd21a96e91
+      PATCH_BLOB: 1c2f29b48a5f7e0855d88589f33f05c59630aa56
+      GZIP_SHA256: fe572515218f9a0054589f1ca18fc3205d1f45370245e5be4b6a95ebef168f65
+      PATCH_SHA256: 866cebf08d492fee24f4c95ca7ced65701a44646a3b5640439fe13bbab5d3136
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Reconstruct and verify exact fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/blobs/${PATCH_BLOB}" > /tmp/blob.json
+          test "$(jq -r '.encoding' /tmp/blob.json)" = base64
+          jq -r '.content' /tmp/blob.json | tr -d '\n' | base64 -d > /tmp/fix.patch.gz
+          test "$(git hash-object /tmp/fix.patch.gz)" = "$PATCH_BLOB"
+          test "$(wc -c < /tmp/fix.patch.gz)" -eq 2056
+          echo "$GZIP_SHA256  /tmp/fix.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/fix.patch.gz > /tmp/fix.patch
+          test "$(wc -c < /tmp/fix.patch)" -eq 7390
+          echo "$PATCH_SHA256  /tmp/fix.patch" | sha256sum -c -
+
+      - name: Derive exact fixed tree
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_COMMIT"
+          git reset --hard "$BASE_COMMIT"
+          test "$(git rev-parse HEAD^{tree})" = "$BASE_TREE"
+          git apply --check /tmp/fix.patch
+          git apply --index /tmp/fix.patch
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" -eq 4
+          test "$(git write-tree)" = "$TARGET_TREE"
+
+      - name: Upload exact fixed blobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : > on-access-buffer-fix-map.tsv
+          while IFS= read -r path; do
+            mode="$(git ls-files -s -- "$path" | awk '{print $1}')"
+            expected="$(git hash-object "$path")"
+            encoded="$(base64 -w0 "$path")"
+            payload="$(jq -n --arg content "$encoded" '{content:$content,encoding:"base64"}')"
+            response="$(curl --fail-with-body -sS -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'Content-Type: application/json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/blobs" \
+              -d "$payload")"
+            actual="$(jq -er '.sha' <<<"$response")"
+            test "$actual" = "$expected"
+            printf '%s\t%s\t%s\n' "$mode" "$actual" "$path" >> on-access-buffer-fix-map.tsv
+          done < <(git diff --cached --name-only)
+          test "$(wc -l < on-access-buffer-fix-map.tsv)" -eq 4
+          printf 'ON_ACCESS_BUFFER_FIX_BLOBS_OK tree=%s files=4\n' "$TARGET_TREE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-on-access-buffer-fix-map
+          path: on-access-buffer-fix-map.tsv
+          if-no-files-found: error
+          retention-days: 7
