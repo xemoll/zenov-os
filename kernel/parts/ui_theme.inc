@@ -36,39 +36,59 @@ bool runtime_large_pointer = false;
 uint32_t runtime_base_accent = desktop_accent;
 
 bool is_hovered(HoverTarget target) { return hovered_target == target; }
-bool text_contains(const char* text, uint32_t size, const char* needle) {
-    const uint32_t needle_size = static_cast<uint32_t>(string_length(needle));
-    if (!needle_size || size < needle_size) return false;
-    for (uint32_t i = 0; i + needle_size <= size; ++i) {
-        bool match = true;
-        for (uint32_t j = 0; j < needle_size; ++j) if (text[i + j] != needle[j]) { match = false; break; }
-        if (match) return true;
-    }
-    return false;
-}
 
 const char* config_value(const char* text, uint32_t size, const char* key) {
     const uint32_t key_size = static_cast<uint32_t>(string_length(key));
-    if (!key_size || size <= key_size) return nullptr;
+    if (!text || !key_size || size <= key_size) return nullptr;
+    const char* found = nullptr;
     for (uint32_t i = 0; i + key_size + 1U <= size; ++i) {
         if (i && text[i - 1U] != '\n' && text[i - 1U] != '\r') continue;
         bool match = true;
         for (uint32_t j = 0; j < key_size; ++j) if (text[i + j] != key[j]) { match = false; break; }
-        if (match && text[i + key_size] == '=') return text + i + key_size + 1U;
+        if (!match || text[i + key_size] != '=') continue;
+        if (found) return nullptr;
+        found = text + i + key_size + 1U;
     }
-    return nullptr;
+    return found;
+}
+
+bool config_value_equal(const char* text, uint32_t size, const char* key, const char* expected) {
+    const char* value = config_value(text, size, key);
+    if (!value || !expected) return false;
+    const uint32_t offset = static_cast<uint32_t>(value - text);
+    uint32_t index = 0U;
+    while (expected[index]) {
+        if (offset + index >= size || value[index] != expected[index]) return false;
+        ++index;
+    }
+    return offset + index == size || value[index] == 0 || value[index] == '\n' || value[index] == '\r';
 }
 
 bool parse_decimal_value(const char* value, uint32_t& result) {
     if (!value || *value < '0' || *value > '9') return false;
     uint32_t parsed = 0, digits = 0;
     while (*value >= '0' && *value <= '9' && digits < 10U) {
-        parsed = parsed * 10U + static_cast<uint32_t>(*value - '0');
+        const uint32_t digit = static_cast<uint32_t>(*value - '0');
+        if (parsed > (0xFFFFFFFFU - digit) / 10U) return false;
+        parsed = parsed * 10U + digit;
         ++value; ++digits;
     }
     if (*value && *value != '\n' && *value != '\r') return false;
     result = parsed;
     return true;
+}
+
+bool config_parser_contract_ok() {
+    static constexpr char valid[] = "theme=graphite\nradius=12\n";
+    static constexpr char unrelated[] = "not_theme=graphite\n";
+    static constexpr char overflow[] = "radius=4294967296\n";
+    static constexpr char duplicate[] = "theme=graphite\ntheme=amber\n";
+    uint32_t parsed = 0U;
+    return config_value_equal(valid, sizeof(valid) - 1U, "theme", "graphite") &&
+        parse_decimal_value(config_value(valid, sizeof(valid) - 1U, "radius"), parsed) && parsed == 12U &&
+        !config_value_equal(unrelated, sizeof(unrelated) - 1U, "theme", "graphite") &&
+        !config_value(duplicate, sizeof(duplicate) - 1U, "theme") &&
+        !parse_decimal_value(config_value(overflow, sizeof(overflow) - 1U, "radius"), parsed);
 }
 
 bool parse_hex_color(const char* value, uint32_t& result) {
@@ -128,7 +148,7 @@ bool parse_display_mode(const char* text, uint32_t size, uint8_t& mode) {
 
 uint32_t accent_palette_color(uint8_t slot) {
     static constexpr uint32_t colors[accent_palette_size] = {
-        0U, rgb(80, 142, 255), rgb(133, 103, 255), rgb(35, 184, 190), rgb(70, 183, 123), rgb(230, 113, 103)
+        0U, rgb(104, 146, 255), rgb(151, 122, 255), rgb(68, 191, 184), rgb(88, 188, 132), rgb(229, 126, 118)
     };
     return slot == 0U || slot >= accent_palette_size ? runtime_base_accent : colors[slot];
 }
@@ -160,9 +180,9 @@ void apply_accessibility_personalization() {
 bool apply_config_text(const char* text, uint32_t size, bool& custom_colors) {
     if (!text || !size) return false;
     bool recognized = false;
-    if (text_contains(text, size, "theme=graphite")) { desktop_theme = "graphite"; recognized = true; }
-    else if (text_contains(text, size, "theme=amber")) { desktop_theme = "amber"; recognized = true; }
-    else if (text_contains(text, size, "theme=midnight") || text_contains(text, size, "theme=zen-dark")) { desktop_theme = "midnight"; recognized = true; }
+    if (config_value_equal(text, size, "theme", "graphite")) { desktop_theme = "graphite"; recognized = true; }
+    else if (config_value_equal(text, size, "theme", "amber")) { desktop_theme = "amber"; recognized = true; }
+    else if (config_value_equal(text, size, "theme", "midnight") || config_value_equal(text, size, "theme", "zen-dark")) { desktop_theme = "midnight"; recognized = true; }
 
     uint8_t parsed_mode = requested_display_mode;
     if (parse_display_mode(text, size, parsed_mode)) { requested_display_mode = parsed_mode; recognized = true; }
@@ -177,9 +197,9 @@ bool apply_config_text(const char* text, uint32_t size, bool& custom_colors) {
     if (parse_decimal_value(config_value(text, size, "accent_slot"), parsed) && parsed < accent_palette_size) {
         runtime_accent_slot = static_cast<uint8_t>(parsed); recognized = true;
     }
-    if (text_contains(text, size, "wallpaper=calm")) { runtime_wallpaper_style = 1U; recognized = true; }
-    else if (text_contains(text, size, "wallpaper=plain")) { runtime_wallpaper_style = 2U; recognized = true; }
-    else if (text_contains(text, size, "wallpaper=flow")) { runtime_wallpaper_style = 0U; recognized = true; }
+    if (config_value_equal(text, size, "wallpaper", "calm")) { runtime_wallpaper_style = 1U; recognized = true; }
+    else if (config_value_equal(text, size, "wallpaper", "plain")) { runtime_wallpaper_style = 2U; recognized = true; }
+    else if (config_value_equal(text, size, "wallpaper", "flow")) { runtime_wallpaper_style = 0U; recognized = true; }
 
     if (parse_decimal_value(config_value(text, size, "radius"), parsed) && parsed >= 6U && parsed <= 20U) {
         desktop_radius = static_cast<uint8_t>(parsed); recognized = true;
@@ -190,17 +210,17 @@ bool apply_config_text(const char* text, uint32_t size, bool& custom_colors) {
     if (parse_decimal_value(config_value(text, size, "animations"), parsed) && parsed <= 1U) {
         desktop_animations = parsed != 0U; recognized = true;
     }
-    if (text_contains(text, size, "cursor=block")) { terminal_cursor = "block"; recognized = true; }
-    else if (text_contains(text, size, "cursor=underline")) { terminal_cursor = "underline"; recognized = true; }
-    else if (text_contains(text, size, "cursor=beam")) { terminal_cursor = "beam"; recognized = true; }
-    if (text_contains(text, size, "density=compact")) { runtime_compact_density = true; recognized = true; }
-    else if (text_contains(text, size, "density=comfortable")) { runtime_compact_density = false; recognized = true; }
-    if (text_contains(text, size, "taskbar=left")) { runtime_taskbar_left = true; recognized = true; }
-    else if (text_contains(text, size, "taskbar=center")) { runtime_taskbar_left = false; recognized = true; }
-    if (text_contains(text, size, "contrast=high")) { runtime_high_contrast = true; recognized = true; }
-    else if (text_contains(text, size, "contrast=normal")) { runtime_high_contrast = false; recognized = true; }
-    if (text_contains(text, size, "pointer=large")) { runtime_large_pointer = true; recognized = true; }
-    else if (text_contains(text, size, "pointer=normal")) { runtime_large_pointer = false; recognized = true; }
+    if (config_value_equal(text, size, "cursor", "block")) { terminal_cursor = "block"; recognized = true; }
+    else if (config_value_equal(text, size, "cursor", "underline")) { terminal_cursor = "underline"; recognized = true; }
+    else if (config_value_equal(text, size, "cursor", "beam")) { terminal_cursor = "beam"; recognized = true; }
+    if (config_value_equal(text, size, "density", "compact")) { runtime_compact_density = true; recognized = true; }
+    else if (config_value_equal(text, size, "density", "comfortable")) { runtime_compact_density = false; recognized = true; }
+    if (config_value_equal(text, size, "taskbar", "left")) { runtime_taskbar_left = true; recognized = true; }
+    else if (config_value_equal(text, size, "taskbar", "center")) { runtime_taskbar_left = false; recognized = true; }
+    if (config_value_equal(text, size, "contrast", "high")) { runtime_high_contrast = true; recognized = true; }
+    else if (config_value_equal(text, size, "contrast", "normal")) { runtime_high_contrast = false; recognized = true; }
+    if (config_value_equal(text, size, "pointer", "large")) { runtime_large_pointer = true; recognized = true; }
+    else if (config_value_equal(text, size, "pointer", "normal")) { runtime_large_pointer = false; recognized = true; }
     return recognized;
 }
 
@@ -305,26 +325,23 @@ bool persist_runtime_preferences() {
 
 void draw_wallpaper() {
     vertical_gradient(0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height), current_theme.canvas_top, current_theme.canvas_bottom);
-    if (runtime_wallpaper_style == 2U) {
-        fill_rect_alpha(0, 0, static_cast<int32_t>(width), 1, current_theme.accent, 40);
-        return;
-    }
+    fill_rect_alpha(0, 0, static_cast<int32_t>(width), 1, current_theme.accent, 24);
+    if (runtime_wallpaper_style == 2U) return;
     if (runtime_wallpaper_style == 1U) {
-        fill_circle_alpha(684, 100, 180, current_theme.glow_secondary, 8);
-        fill_circle_alpha(118, 520, 220, current_theme.glow_primary, 7);
+        fill_circle_alpha(690, 112, 154, current_theme.glow_secondary, 5);
+        fill_circle_alpha(110, 508, 190, current_theme.glow_primary, 4);
         return;
     }
-    fill_circle_alpha(112, 70, 230, current_theme.glow_primary, 12);
-    fill_circle_alpha(716, 522, 286, current_theme.glow_secondary, 10);
-    fill_circle_alpha(666, 82, 145, current_theme.accent, 5);
-    fill_rect_alpha(0, 0, static_cast<int32_t>(width), 1, current_theme.accent, 46);
+    fill_circle_alpha(104, 72, 196, current_theme.glow_primary, 7);
+    fill_circle_alpha(714, 520, 244, current_theme.glow_secondary, 6);
+    fill_circle_alpha(664, 96, 118, current_theme.accent, 3);
 }
 
 void draw_topbar() {
-    draw_text(topbar_x, topbar_y + 8, "ZENOVOS", current_theme.text_muted, 1);
-    fill_circle_alpha(topbar_x + 58, topbar_y + 11, 2, current_theme.success, 255);
-    draw_text(topbar_x + 68, topbar_y + 8, "LOCAL", current_theme.text_muted, 1);
-    draw_text_right(topbar_x + topbar_width, topbar_y + 8, zenov_generated::kVersion, current_theme.text_muted, 1);
+    fill_round_rect_alpha(topbar_x, topbar_y + 2, 78, 20, 6, current_theme.surface_low, 208);
+    fill_circle_alpha(topbar_x + 12, topbar_y + 12, 2, current_theme.success, 255);
+    draw_text(topbar_x + 22, topbar_y + 9, "ZENOV", current_theme.text_muted, 1);
+    draw_text_right(topbar_x + topbar_width, topbar_y + 9, zenov_generated::kVersion, current_theme.text_muted, 1);
 }
 
 enum class ShellIcon : uint8_t { start, terminal, files, settings, apps, display };
@@ -355,16 +372,18 @@ void draw_shell_icon(ShellIcon icon, int32_t x, int32_t y, uint32_t color) {
 void draw_window_chrome(const char* title, const char* subtitle) {
     const int32_t radius = static_cast<int32_t>(desktop_radius);
     draw_shadow(window_x, window_y, window_width, window_height, radius);
-    fill_round_rect(window_x, window_y, window_width, window_height, radius, current_theme.surface);
+    fill_round_rect_alpha(window_x, window_y, window_width, window_height, radius, current_theme.surface, desktop_opacity);
     draw_round_border(window_x, window_y, window_width, window_height, radius, current_theme.border);
-    fill_round_rect(window_x + 1, window_y + 1, window_width - 2, titlebar_height + 7, radius > 1 ? radius - 1 : 0, current_theme.surface_high);
-    fill_rect(window_x + 1, window_y + titlebar_height, window_width - 2, 8, current_theme.surface_high);
-    fill_round_rect(window_x + 14, window_y + 11, 24, 24, 6, current_theme.accent_soft);
+    fill_round_rect(window_x + 1, window_y + 1, window_width - 2, titlebar_height + 3, radius > 1 ? radius - 1 : 0, current_theme.surface_low);
+    fill_rect(window_x + 1, window_y + titlebar_height + 1, window_width - 2, 1, current_theme.border);
+    fill_round_rect(window_x + 14, window_y + 10, 24, 24, 7, current_theme.accent_soft);
     draw_shell_icon(active_view == View::terminal ? ShellIcon::terminal : (active_view == View::files ? ShellIcon::files : ShellIcon::settings),
-                    window_x + 16, window_y + 13, current_theme.accent);
-    draw_text(window_x + 50, window_y + 17, title, current_theme.text, 1);
-    draw_text_right(window_x + window_width - 18, window_y + 17, subtitle, current_theme.text_muted, 1);
-    fill_rect(window_x + 16, window_y + titlebar_height, window_width - 32, 1, current_theme.border);
+                    window_x + 16, window_y + 12, current_theme.accent);
+    const int32_t subtitle_width = 142;
+    draw_text_ellipsis(window_x + 50, window_y + 16, window_width - 50 - subtitle_width - 26,
+                       title, current_theme.text, 1);
+    draw_text_right_ellipsis(window_x + window_width - 18, window_y + 16, subtitle_width,
+                             subtitle, current_theme.text_muted, 1);
 }
 
 constexpr uint32_t vga_colors[16] = {
