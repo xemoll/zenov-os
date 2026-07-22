@@ -1,0 +1,126 @@
+onst uint8_t* data, uint32_t size) {
++    ++read_scans;
++    char normalized[48]{};
++    if (!path || !storage::normalize_path(path, normalized) || !enforcement_ready || !zmid::ready || (!data && size)) {
++        ++read_blocked;
++        serial::write("ZENOV_GUARD_READ_BLOCKED path="); serial::write(path ? path : "<null>");
++        serial::line(" reason=security-not-ready-or-invalid-path");
++        return false;
++    }
++    if (on_access_excluded(normalized)) { ++read_skipped; return true; }
++    ScanResult result = scan_memory(normalized, data, size, false);
++    if (result.verdict == Verdict::infected) {
++        ++read_blocked;
++        if (!record(AuditAction::read_block, result)) return false;
++        serial_decision("ZENOV_GUARD_READ_BLOCKED", result);
++        return false;
++    }
++    if (result.verdict == Verdict::suspicious) {
++        ++read_audited;
++        if (!record(AuditAction::read_audit, result)) return false;
++        serial_decision("ZENOV_GUARD_READ_AUDIT", result);
++    }
++    return true;
++}
++
+ bool allow_persistent_write(const char* path, const uint8_t* data, uint32_t size, bool append) {
+     ++write_scans;
+     char normalized[48]{};
+@@ -382,6 +418,10 @@ bool sha256_self_test() {
+     uint8_t digest[sha256_bytes]; sha256(abc, sizeof(abc), digest); return digest_equal(digest, expected);
+ }
+ bool self_test() {
++    if (!on_access_excluded("/security") || !on_access_excluded("/security/policy") ||
++        !on_access_excluded("/repo/timestamp.zrm") || !on_access_excluded("/var/lib/zenpkg/state.v1") ||
++        !on_access_excluded("/quarantine/q-test.qtn") || on_access_excluded("/security-copy") ||
++        on_access_excluded("/repository") || on_access_excluded("/quarantine-copy")) return false;
+     static constexpr char test_vector[] = "ZENOV_GUARD_SAFE_TEST_VECTOR_V1";
+     static constexpr char clean_vector[] = "ZENOV_GUARD_CLEAN_VECTOR_V1";
+     if (!sha256_self_test() || !zmid::ready || !zmid::self_test()) return false;
+@@ -437,6 +477,10 @@ void print_status() {
+     console::write("  Write scans   "); console::unsigned_dec(write_scans); console::put('\n');
+     console::write("  Write blocks  "); console::unsigned_dec(write_blocked); console::put('\n');
+     console::write("  Audit-only    "); console::unsigned_dec(audit_only_findings); console::put('\n');
++    console::write("  Read scans    "); console::unsigned_dec(read_scans); console::put('\n');
++    console::write("  Read blocks   "); console::unsigned_dec(read_blocked); console::put('\n');
++    console::write("  Read audits   "); console::unsigned_dec(read_audited); console::put('\n');
++    console::write("  Read skipped  "); console::unsigned_dec(read_skipped); console::put('\n');
+     serial::line("ZENOV_GUARD_STATUS_OK");
+ }
+ void print_audit() {
+diff --git a/kernel/parts/security_io.inc b/kernel/parts/security_io.inc
+index 31b4499..89cce33 100644
+--- a/kernel/parts/security_io.inc
++++ b/kernel/parts/security_io.inc
+@@ -1,20 +1,46 @@
+ namespace storage {
++bool security_read_blocked = false;
++bool security_read_was_blocked() { return security_read_blocked; }
++
++bool guarded_read_file(const char* input, uint8_t* output, uint32_t capacity, uint32_t& actual_size) {
++    security_read_blocked = false;
++    if (!read_file(input, output, capacity, actual_size)) return false;
++    if (security_guard::allow_persistent_read(input, output, actual_size)) return true;
++    security_read_blocked = true;
++    if (output && actual_size) memset(output, 0, actual_size);
++    actual_size = 0U;
++    return false;
++}
++
+ bool security_read_file(const char* input, uint8_t* output, uint32_t capacity, uint32_t& actual_size) {
++    security_read_blocked = false;
++    if (output != process::application_buffer) return guarded_read_file(input, output, capacity, actual_size);
+     if (!read_file(input, output, capacity, actual_size)) return false;
+-    if (output != process::application_buffer) return true;
+-    if (!zgdb::precheck(input, output, actual_size)) return false;
++    if (!zgdb::precheck(input, output, actual_size)) { memset(output, 0, actual_size); actual_size = 0U; return false; }
+     if (package_manager::allow_execution(input, output, actual_size)) {
+         if (!package_manager::activate_capabilities(input, output, actual_size)) {
+             serial::line("ZENPKG_SYSCALL_CAPABILITY_ACTIVATION_FAILED");
++            memset(output, 0, actual_size); actual_size = 0U;
+             return false;
+         }
+         return true;
+     }
+-    if (!security_guard::allow_execution(input, output, actual_size)) return false;
++    if (!security_guard::allow_execution(input, output, actual_size)) { memset(output, 0, actual_size); actual_size = 0U; return false; }
+     if (!process::activate_capability_profile(input, output, actual_size)) {
+         serial::line("SYSCALL_CAPABILITY_ACTIVATION_FAILED");
++        memset(output, 0, actual_size); actual_size = 0U;
+         return false;
+     }
+     return true;
+ }
++
++void guarded_cat(const char* input) {
++    uint32_t size = 0U;
++    if (!guarded_read_file(input, file_buffer, max_file_bytes(), size)) {
++        console::warning("File unavailable or blocked by ZenovGuard on-access scanning.");
++        return;
++    }
++    for (uint32_t i = 0U; i < size; ++i) console::put(static_cast<char>(file_buffer[i]));
++    if (!size || file_buffer[size - 1U] != '\n') console::put('\n');
++}
+ } // namespace storage
+diff --git a/kernel/parts/storage.inc b/kernel/parts/storage.inc
+index 8cff281..72a24d0 100644
+--- a/kernel/parts/storage.inc
++++ b/kernel/parts/storage.inc
+@@ -244,7 +244,6 @@ void list(const char* input) {
+     }
+     if (!shown) console::line("  <empty>");
+ }
+-void cat(const char* input) { uint32_t size = 0; if (!read_file(input, file_buffer, max_file_bytes(), size)) { console::warning("File not found or checksum failed."); return; } for (uint32_t i = 0; i < size; ++i) console::put(static_cast<char>(file_buffer[i])); if (!size || file_buffer[size - 1] != '\n') console::put('\n'); }
+ void stat(const char* input) { char path[48]; if (!normalize_path(input, path)) { console::warning("Invalid path."); return; } if (string_equal(path, "/")) { console::line("  Path          /data"); console::line("  Type          directory"); return; } const int32_t index = find_entry(path); if (index < 0) { console::warning("Path not found."); return; } console::write("  Path          /data"); console::line(path); console::write("  Type          "); console::line(zfs_entries[index].type == zfs_type_directory ? "directory" : "file"); if (zfs_entries[index].type == zfs_type_file) { console::write("  Size          "); console::unsigned_dec(zfs_entries[index].size); console::line(" bytes"); console::write("  Checksum      "); console::hex(zfs_entries[index].checksum); console::put('\n'); } }
+ void print_working_directory() { console::write("/data"); if (!string_equal(current_directory, "/")) console::write(current_directory); console::put('\n'); }
+ void print_mounts() { console::line("  SOURCE        TARGET   FILESYSTEM  ACCESS"); console::line(zfs_mounted ? "  /dev/ata0     /data    ZenovFS1    transactional" : "  /dev/ata0     /data    unavailable -"); }
+diff --git a/tests/qemu_smoke.sh b/tests/qemu_smoke.sh
+index dc70a90..1ec4d76 100755
+--- a/tests/qemu_smoke.sh
++++ b/tests/qemu_smoke.sh
+@@ -123,6 +123,8 @@ controller_first() {
+   send_command "guard intelligence"; wait_for_serial "$serial" "ZMID_STATUS_OK" || { echo quit; return 1; }
+   send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 2 || { echo quit; return 1; }
+   send_command "guard selftest"; wait_for_count "$serial" "ZENOV_GUARD_SELFTEST_OK" 2 || { echo quit; return 1; }
++  send_command "cat /data/samples/pua-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_READ_AUDIT path=/samples/pua-test.bin verdict=SUSPICIOUS signature=PUA.Zenov.Test" || { echo quit; return 1; }
++  send_command "cat /data/sampl
