@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/zenovfs-security-publication-clean
+  pull_request:
 
 concurrency:
   group: zenovfs-security-publication-clean
