@@ -32,13 +32,13 @@ bool ata2_identify() {
         const ata_policy::Result result = ata2_identify_once(attempt);
         if (result.ok()) {
             ata_present = true;
-            ata2_record_success(result);
-            if (attempt > 1U) serial::line("ATA_RECOVERY_RETRY_OK op=identify attempts=2");
+            ata_last_result = result;
+            ata_last_block_result = ata2_block_result(BlockOperation::identify, 0U, result);
             serial::line("ATA_IDENTIFY_OK deadline=3000ms retry-limit=1");
             return true;
         }
-        ata2_record_failure("identify", result);
-        if (attempt == ata2_max_attempts || !ata_policy::retryable(result.error)) return false;
+        ata2_record_attempt_failure("identify", BlockOperation::identify, 0U, result);
+        if (attempt == ata2_max_attempts || !block_retryable(ata2_block_status(result.error))) return false;
         ++ata_diagnostics.retries;
         if (!ata2_soft_reset(attempt).ok()) return false;
     }
