@@ -3,11 +3,10 @@ name: Publish exact ZenovFS mount audit tree
 on:
   push:
     branches:
-      - agent/zenovfs-mount-audit-publication
-  pull_request:
+      - agent/zenovfs-security-publication-clean
 
 concurrency:
-  group: zenovfs-mount-publication
+  group: zenovfs-security-publication-clean
   cancel-in-progress: true
 
 permissions:
