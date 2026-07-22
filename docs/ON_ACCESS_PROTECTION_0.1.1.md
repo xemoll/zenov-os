@@ -27,6 +27,8 @@ A suspicious read is not reported as allowed until the ZGAL1 append succeeds. An
 
 The denied output buffer is zeroed for the exact number of bytes already read and the returned size is reset to zero. This prevents a caller from using bytes that were loaded before the verdict was known.
 
+Before appraisal, ordinary read bytes are copied into the dedicated 64 KiB supervisor-only scan workspace. Persistent audit I/O is then allowed to reuse ZenovFS scratch storage without corrupting the pending user result. Clean or successfully audited suspicious bytes are copied back only after the decision completes; blocked bytes are never restored.
+
 ## Internal exclusions
 
 The following normalized namespaces are excluded from ordinary on-access classification:

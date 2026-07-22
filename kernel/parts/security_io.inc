@@ -5,11 +5,21 @@ bool security_read_was_blocked() { return security_read_blocked; }
 bool guarded_read_file(const char* input, uint8_t* output, uint32_t capacity, uint32_t& actual_size) {
     security_read_blocked = false;
     if (!read_file(input, output, capacity, actual_size)) return false;
-    if (security_guard::allow_persistent_read(input, output, actual_size)) return true;
-    security_read_blocked = true;
-    if (output && actual_size) memset(output, 0, actual_size);
-    actual_size = 0U;
-    return false;
+    if (!security_guard::write_scan_buffer || actual_size > security_guard::write_scan_workspace_bytes) {
+        security_read_blocked = true;
+        if (output && actual_size) memset(output, 0, actual_size);
+        actual_size = 0U;
+        return false;
+    }
+    if (actual_size) memcpy(security_guard::write_scan_buffer, output, actual_size);
+    if (!security_guard::allow_persistent_read(input, security_guard::write_scan_buffer, actual_size)) {
+        security_read_blocked = true;
+        if (output && actual_size) memset(output, 0, actual_size);
+        actual_size = 0U;
+        return false;
+    }
+    if (actual_size) memcpy(output, security_guard::write_scan_buffer, actual_size);
+    return true;
 }
 
 bool security_read_file(const char* input, uint8_t* output, uint32_t capacity, uint32_t& actual_size) {
