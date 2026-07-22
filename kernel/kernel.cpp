@@ -13,6 +13,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/core.inc"
 #include "parts/memory_compare.inc"
 #include "parts/hardware.inc"
+#include "parts/hardware_irq_staging.inc"
 #include "parts/memory.inc"
 #include "parts/graphics_mapping.inc"
 #include "parts/user_window.inc"
@@ -130,9 +131,10 @@ extern "C" void kernel_main() {
     console::set_color(zenov_generated::kForeground, zenov_generated::kBackground);
     idt_init();
     pic_remap();
+    pic_timer_only();
     pit_init(100);
     enable_interrupts();
-    serial::line("MONOTONIC_TICK_READY hz=100");
+    serial::line("MONOTONIC_TICK_READY hz=100 irq-mask=timer-only");
     pmm::init();
     paging::init();
     if (!paging::scrub_process_window(true)) panic("User process window scrub self-test failed.");
@@ -177,7 +179,11 @@ extern "C" void kernel_main() {
     const bool graphical = graphics::init();
     if (graphical) { console::activate_shadow(); serial::line("CONSOLE_SHADOW_OK"); }
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
+    disable_interrupts();
+    pic_enable_input_irqs();
     const bool mouse_ready = mouse_init();
+    enable_interrupts();
+    serial::line("INPUT_IRQS_READY keyboard=1 mouse=12");
     if (!mouse_ready) serial::line("PS2_MOUSE_UNAVAILABLE");
     if (mouse_ready && !mouse_irq_route_ready()) panic("PS/2 mouse IRQ route validation failed.");
     if (mouse_ready) serial::line("PS2_MOUSE_IRQ_ROUTE_OK");
