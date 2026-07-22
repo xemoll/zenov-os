@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct exact reviewed tree
+      - name: Prepare exact reviewed base
         run: |
           set -euo pipefail
           cp .github/agent/zenovfs-mount-hardening.patch /tmp/zenovfs-mount-hardening.patch
@@ -28,15 +28,25 @@ jobs:
           cp .github/agent/zenovfs-mount-qemu-fix.patch /tmp/zenovfs-mount-qemu-fix.patch
           git switch --detach 199f98d478a7515c927c97d8fd61bdf5679e7e99
           test "$(git rev-parse HEAD)" = 199f98d478a7515c927c97d8fd61bdf5679e7e99
-          for patch in \
-            /tmp/zenovfs-mount-hardening.patch \
-            /tmp/zenovfs-mount-hardening-fix.patch \
-            /tmp/zenovfs-mount-hardening-count.patch \
-            /tmp/zenovfs-mount-qemu.patch \
-            /tmp/zenovfs-mount-qemu-fix.patch; do
-            git apply --check "$patch"
-            git apply "$patch"
-          done
+
+      - name: Apply core mount validator
+        run: git apply --check /tmp/zenovfs-mount-hardening.patch && git apply /tmp/zenovfs-mount-hardening.patch
+
+      - name: Apply host compile fix
+        run: git apply --check /tmp/zenovfs-mount-hardening-fix.patch && git apply /tmp/zenovfs-mount-hardening-fix.patch
+
+      - name: Apply exact test count
+        run: git apply --check /tmp/zenovfs-mount-hardening-count.patch && git apply /tmp/zenovfs-mount-hardening-count.patch
+
+      - name: Apply malformed-image QEMU tests
+        run: git apply --check /tmp/zenovfs-mount-qemu.patch && git apply /tmp/zenovfs-mount-qemu.patch
+
+      - name: Apply robust fixture allocation
+        run: git apply --check /tmp/zenovfs-mount-qemu-fix.patch && git apply /tmp/zenovfs-mount-qemu-fix.patch
+
+      - name: Verify exact production file set
+        run: |
+          set -euo pipefail
           git diff --check
           git diff --name-only | sort > /tmp/actual-files
           cat > /tmp/expected-files <<'EOF'
