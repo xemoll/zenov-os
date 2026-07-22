@@ -53,7 +53,7 @@ bool command_token_equal(const char*, const char*);
 bool dispatch_line(char*);
 int version_compare(const char*, const char*);
 }
-namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uint32_t&); }
+namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uint32_t&); bool security_read_was_blocked(); }
 #define read_file security_read_file
 #define write_file guarded_write_file
 #define remove guarded_remove
@@ -64,6 +64,7 @@ namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uin
 #include "parts/process.inc"
 #undef run
 #undef syscall_dispatch
+#undef cat
 #undef copy_file
 #undef rename_entry
 #undef remove
@@ -98,6 +99,7 @@ bool sha256_self_test() { return security_guard::sha256_self_test(); }
 #define remove guarded_remove
 #define rename_entry guarded_rename_entry
 #define copy_file guarded_copy_file
+#define cat guarded_cat
 #define history shell_history
 #define history_count shell_history_count
 #define shell_run shell_run_legacy_80

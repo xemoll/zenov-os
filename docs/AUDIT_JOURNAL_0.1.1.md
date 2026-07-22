@@ -22,7 +22,7 @@ Header (96 bytes)
 Records (64 × 128 bytes)
 ├── monotonic sequence
 ├── PIT tick
-├── action: BOOT / SCAN / EXEC / QUARANTINE / WRITE-BLOCK / INTELLIGENCE-UPDATE / RANSOMWARE / RANSOMWARE-POLICY
+├── action: BOOT / SCAN / EXEC / QUARANTINE / WRITE-BLOCK / INTELLIGENCE-UPDATE / RANSOMWARE / RANSOMWARE-POLICY / READ-BLOCK / READ-AUDIT
 ├── verdict
 ├── canonical path length and zero-padded path
 ├── full SHA-256 object digest
@@ -67,7 +67,7 @@ A factory image contains a canonical empty journal. ZenovGuard appends the boot-
 
 ## Append and crash behavior
 
-Each BOOT, SCAN, EXEC, QUARANTINE, WRITE-BLOCK, INTELLIGENCE-UPDATE, RANSOMWARE and RANSOMWARE-POLICY event updates the in-memory journal and writes the complete journal through ZenovFS1 copy-on-write replacement.
+Each BOOT, SCAN, EXEC, QUARANTINE, WRITE-BLOCK, INTELLIGENCE-UPDATE, RANSOMWARE, RANSOMWARE-POLICY, READ-BLOCK and READ-AUDIT event updates the in-memory journal and writes the complete journal through ZenovFS1 copy-on-write replacement.
 
 The normal write order is:
 

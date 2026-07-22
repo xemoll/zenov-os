@@ -86,7 +86,7 @@ void initialize_empty(Journal& target) {
 }
 
 bool record_valid(const Record& record) {
-    if (record.action > static_cast<uint8_t>(security_guard::AuditAction::ransomware_policy) ||
+    if (record.action > static_cast<uint8_t>(security_guard::AuditAction::read_audit) ||
         record.verdict > static_cast<uint8_t>(security_guard::Verdict::error) ||
         !record.path_length || record.path_length >= sizeof(record.path) || record.path[record.path_length] != 0 ||
         !zero_bytes(record.reserved, sizeof(record.reserved))) return false;
