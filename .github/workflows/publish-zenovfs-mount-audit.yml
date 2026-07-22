@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/zenovfs-security-publication-clean
+  pull_request:
 
 concurrency:
   group: zenovfs-security-publication-clean
@@ -42,32 +43,32 @@ jobs:
       - name: Apply core mount validator
         run: |
           set +e
-          git apply --check --verbose /tmp/zenovfs-mount-hardening.patch >ci-logs/core-apply.log 2>&1
+          git apply --check --recount --inaccurate-eof --verbose /tmp/zenovfs-mount-hardening.patch >ci-logs/core-apply.log 2>&1
           status=$?
           cat ci-logs/core-apply.log
           if [[ $status -ne 0 ]]; then exit $status; fi
-          git apply /tmp/zenovfs-mount-hardening.patch
+          git apply --recount --inaccurate-eof /tmp/zenovfs-mount-hardening.patch
 
       - name: Apply host compile fix
-        run: git apply --check /tmp/zenovfs-mount-hardening-fix.patch && git apply /tmp/zenovfs-mount-hardening-fix.patch
+        run: git apply --check --recount --inaccurate-eof /tmp/zenovfs-mount-hardening-fix.patch && git apply --recount --inaccurate-eof /tmp/zenovfs-mount-hardening-fix.patch
 
       - name: Apply exact test count
-        run: git apply --check /tmp/zenovfs-mount-hardening-count.patch && git apply /tmp/zenovfs-mount-hardening-count.patch
+        run: git apply --check --recount --inaccurate-eof /tmp/zenovfs-mount-hardening-count.patch && git apply --recount --inaccurate-eof /tmp/zenovfs-mount-hardening-count.patch
 
       - name: Apply malformed-image QEMU tests
-        run: git apply --check /tmp/zenovfs-mount-qemu.patch && git apply /tmp/zenovfs-mount-qemu.patch
+        run: git apply --check --recount --inaccurate-eof /tmp/zenovfs-mount-qemu.patch && git apply --recount --inaccurate-eof /tmp/zenovfs-mount-qemu.patch
 
       - name: Apply robust fixture allocation
-        run: git apply --check /tmp/zenovfs-mount-qemu-fix.patch && git apply /tmp/zenovfs-mount-qemu-fix.patch
+        run: git apply --check --recount --inaccurate-eof /tmp/zenovfs-mount-qemu-fix.patch && git apply --recount --inaccurate-eof /tmp/zenovfs-mount-qemu-fix.patch
 
       - name: Apply failed-read disclosure fix
-        run: git apply --check /tmp/zenovfs-read-failure-scrub.patch && git apply /tmp/zenovfs-read-failure-scrub.patch
+        run: git apply --check --recount --inaccurate-eof /tmp/zenovfs-read-failure-scrub.patch && git apply --recount --inaccurate-eof /tmp/zenovfs-read-failure-scrub.patch
 
       - name: Apply atomic ZMID update rollback
-        run: git apply --check /tmp/zmid-update-rollback.patch && git apply /tmp/zmid-update-rollback.patch
+        run: git apply --check --recount --inaccurate-eof /tmp/zmid-update-rollback.patch && git apply --recount --inaccurate-eof /tmp/zmid-update-rollback.patch
 
       - name: Apply quarantine collision hardening
-        run: git apply --check /tmp/quarantine-digest-prefix.patch && git apply /tmp/quarantine-digest-prefix.patch
+        run: git apply --check --recount --inaccurate-eof /tmp/quarantine-digest-prefix.patch && git apply --recount --inaccurate-eof /tmp/quarantine-digest-prefix.patch
 
       - name: Verify exact production file set
         run: |
