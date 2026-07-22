@@ -12,16 +12,20 @@ on:
       - 'tools/zenpkg_blkdebug_seed.cpp'
       - 'tools/zenpkg_blkdebug_qemu_test.cpp'
       - 'tests/zenpkg_test.sh'
+      - 'tests/zenpkg_foreign_test.sh'
       - 'tests/zenrepo_test.sh'
+      - 'tests/package_foreign_format_test.cpp'
       - 'tests/package_repository_kernel_test.cpp'
       - 'tests/package_transport_journal_test.cpp'
       - 'tests/qemu_zenpkg.sh'
+      - 'tests/qemu_zenpkg_foreign.sh'
       - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'tests/qemu_zenpkg_transport_faults.sh'
       - 'tests/qemu_zenpkg_blkdebug_breakpoints.sh'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
+      - 'kernel/parts/package_foreign_format.inc'
       - 'kernel/parts/package_repository.inc'
       - 'kernel/parts/package_repository/**'
       - 'kernel/parts/package_manager.inc'
@@ -50,16 +54,20 @@ on:
       - 'tools/zenpkg_blkdebug_seed.cpp'
       - 'tools/zenpkg_blkdebug_qemu_test.cpp'
       - 'tests/zenpkg_test.sh'
+      - 'tests/zenpkg_foreign_test.sh'
       - 'tests/zenrepo_test.sh'
+      - 'tests/package_foreign_format_test.cpp'
       - 'tests/package_repository_kernel_test.cpp'
       - 'tests/package_transport_journal_test.cpp'
       - 'tests/qemu_zenpkg.sh'
+      - 'tests/qemu_zenpkg_foreign.sh'
       - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'tests/qemu_zenpkg_transport_faults.sh'
       - 'tests/qemu_zenpkg_blkdebug_breakpoints.sh'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
+      - 'kernel/parts/package_foreign_format.inc'
       - 'kernel/parts/package_repository.inc'
       - 'kernel/parts/package_repository/**'
       - 'kernel/parts/package_manager.inc'
@@ -202,9 +210,13 @@ jobs:
       - name: Verify crash-consistency evidence
         run: |
           lifecycle=build/qemu/zenpkg/serial.log
+          foreign=build/qemu/zenpkg-foreign
           recovery=build/qemu/zenpkg-transport/serial.log
           faults=build/qemu/zenpkg-faults/serial.log
           blkdebug=build/qemu/zenpkg-blkdebug
+          grep -Fq 'PACKAGE_FOREIGN_FORMAT_TEST_OK cases=16' /tmp/zenpkg-check.log
+          grep -Fq 'ZENPKG_FOREIGN_TEST_OK probes=13 native-import=deterministic rejection=3' /tmp/zenpkg-check.log
+          grep -Fq 'ZENPKG_FOREIGN_QEMU_OK formats=1 probe=zenpkg install=1 run=1 fsck=1' "$foreign/summary.log"
           grep -Fq 'ZENPKG_TRANSPORT_COW_FAULT_MATRIX_OK cases=3173 writes=167' /tmp/zenpkg-check.log
           grep -Fq 'ZENPKG_TRANSPORT_OLD_OR_RESUMABLE_OR_NEW_OR_FAIL_CLOSED_ONLY' /tmp/zenpkg-check.log
           grep -Fq 'ZENPKG_TRANSPORT_BEGIN name=hello-native version=0.2.0 offset=0' "$lifecycle"
@@ -229,7 +241,7 @@ jobs:
           test "$(grep -Fl 'ZENPKG_CACHE_VERIFY_OK objects=1 partials=0' "$blkdebug"/serial-*-recovery.log | wc -l)" -eq 2
           test "$(grep -Fl 'ZENOVFS_FSCK_OK' "$blkdebug"/serial-*-recovery.log | wc -l)" -eq 2
           test "$(find "$blkdebug" -name 'qemu-*.stderr' -type f -size +0c | wc -l)" -eq 0
-          ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$lifecycle" "$recovery" "$faults" "$blkdebug"/serial-*.log
+          ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$lifecycle" "$foreign"/serial.log "$recovery" "$faults" "$blkdebug"/serial-*.log
       - name: Upload ZenPkg QEMU evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -240,6 +252,7 @@ jobs:
             build/qemu/zenpkg/serial-*.log
             build/qemu/zenpkg/monitor-*.log
             build/qemu/zenpkg/qemu-*.stderr
+            build/qemu/zenpkg-foreign/**
             build/qemu/zenpkg-transport/serial.log
             build/qemu/zenpkg-transport/serial-*.log
             build/qemu/zenpkg-transport/monitor-*.log
@@ -253,6 +266,7 @@ jobs:
             build/qemu/zenpkg-blkdebug/**
             build/qemu/zenpkg-blkdebug-fixtures/**
             /tmp/zenpkg-check.log
+            /tmp/zenpkg-qemu.log
             /tmp/zenpkg-blkdebug-qemu.log
           if-no-files-found: warn
           retention-days: 14
@@ -268,6 +282,7 @@ jobs:
             /tmp/zenpkg-transport-fault-qemu.log
             /tmp/zenpkg-blkdebug-qemu.log
             build/qemu/zenpkg/**
+            build/qemu/zenpkg-foreign/**
             build/qemu/zenpkg-transport/**
             build/qemu/zenpkg-faults/**
             build/qemu/zenpkg-fault-*.img
