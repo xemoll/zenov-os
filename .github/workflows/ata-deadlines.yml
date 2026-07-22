@@ -65,17 +65,31 @@ jobs:
 
       - name: Verify ATA and input boot evidence
         run: |
-          serial=build/qemu/serial.log
-          grep -Fq 'MONOTONIC_TICK_READY hz=100 irq-mask=timer-only' "$serial"
-          grep -Fq 'ATA_IDENTIFY_OK deadline=3000ms retry-limit=1' "$serial"
-          grep -Fq 'ATA_DEADLINE_DRIVER_READY clock=pit100 timeout=3000ms reset=5000ms attempts=2' "$serial"
-          grep -Fq 'ZENOVFS_MOUNT_OK' "$serial"
-          grep -Fq 'INPUT_IRQS_READY keyboard=1 mouse=12' "$serial"
-          grep -Fq 'PS2_MOUSE_OK' "$serial"
-          grep -Fq 'PS2_MOUSE_IRQ_ROUTE_OK' "$serial"
-          grep -Fq 'ZENOVOS_UI_READY' "$serial"
-          grep -Fq 'zenov> ' "$serial"
-          ! grep -Eq 'ATA_IO_ERROR|PS2_MOUSE_UNAVAILABLE|KERNEL PANIC|DOUBLE FAULT|ASSERT' "$serial"
+          success_logs=(
+            build/qemu/serial-phase1.log
+            build/qemu/serial-phase2.log
+            build/qemu/serial-recovery.log
+            build/qemu/serial-audit-old-recovery.log
+            build/qemu/serial-audit-new-recovery.log
+          )
+          for serial in "${success_logs[@]}"; do
+            test -s "$serial"
+            grep -Fq 'MONOTONIC_TICK_READY hz=100 irq-mask=timer-only' "$serial"
+            grep -Fq 'ATA_IDENTIFY_OK deadline=3000ms retry-limit=1' "$serial"
+            grep -Fq 'ATA_DEADLINE_DRIVER_READY clock=pit100 timeout=3000ms reset=5000ms attempts=2' "$serial"
+            grep -Fq 'ZENOVFS_MOUNT_OK' "$serial"
+            grep -Fq 'INPUT_IRQS_READY keyboard=1 mouse=12' "$serial"
+            grep -Fq 'PS2_MOUSE_OK' "$serial"
+            grep -Fq 'PS2_MOUSE_IRQ_ROUTE_OK' "$serial"
+            grep -Fq 'ZENOVOS_UI_READY' "$serial"
+            grep -Fq 'zenov> ' "$serial"
+            ! grep -Eq 'ATA_IO_ERROR|PS2_MOUSE_UNAVAILABLE|KERNEL PANIC|DOUBLE FAULT|ASSERT' "$serial"
+          done
+          ! grep -Eq 'ATA_IO_ERROR|DOUBLE FAULT|ASSERT' build/qemu/serial*.log
+          grep -Fq 'Persistent ZenovGuard audit journal validation failed.' build/qemu/serial-audit-corrupt.log
+          grep -Fq 'Signed syscall capability policy validation failed.' build/qemu/serial-zcap-corrupt.log
+          grep -Fq 'Signed malware intelligence validation failed.' build/qemu/serial-zmid-corrupt.log
+          grep -Fq 'Signed ransomware policy validation failed.' build/qemu/serial-zrwp-corrupt.log
 
       - name: Upload ATA evidence
         if: always()
