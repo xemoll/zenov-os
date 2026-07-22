@@ -1,0 +1,110 @@
+name: Publish exact on-access security tree
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/publish-on-access-tree.yml'
+      - '.github/agent/on-access/**'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-content-addressed-blobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_COMMIT: a38379b493ddeb0916047cc70c3183cb404f1872
+      BASE_TREE: bee72d41302b43f225211494f52dfcd4835fd67c
+      TARGET_TREE: 88801d29406bbc2c0e633125836d7c27203076fe
+      GZIP_SHA256: 7214bc80e6f739b4f40cca14f51abdd8ea9226d892b4209186a4f606ed48ebd5
+      PATCH_SHA256: 8b5518b035ac40da5d881332228786701c4b6661b2cc21a70fda3ca7c52766e6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Reconstruct and verify exact reviewed patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          blobs=(
+            5116ec6f87f8bebebcd445d61bb74649b5addfc8
+            384fdfbbf12e9b7032e2b89b84821c08389bb296
+            df71ffd4616eb285e67c480ead5f5b7b11304929
+            03bb6ed2a74495c43c63efba13b73f82f6866a97
+            c59b2ce08a46f89b61fdaa7a2c36148c3ec7fdb4
+            9a90bed1684ed69c24363a64dd2caeca5844a4c4
+            5a6adbdc6814428a30537369f3180e16e056f326
+            900828c65055bcc69d32cbde886faa14484c876a
+            b09181518bacdf83f15dd95f1a93307c421f64fd
+            051eb27da9941819d77b62b51377b72b1af283f9
+            af4e8ac064449ba2c4c725ebd133926ece9c4ffd
+            dfcb8934e6bee03a12808a53c2a7cca42dbb484b
+            3364eecdd2cbfb5cea51b1741ce00c75077af099
+            1b6aeef217416c64aa866b2484a0bfad4db3c098
+          )
+          : > /tmp/onaccess.patch.gz
+          for sha in "${blobs[@]}"; do
+            curl --fail-with-body -sS \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/blobs/${sha}" > /tmp/blob.json
+            test "$(jq -r '.encoding' /tmp/blob.json)" = base64
+            jq -r '.content' /tmp/blob.json | tr -d '\n' | base64 -d > /tmp/chunk.bin
+            test "$(git hash-object /tmp/chunk.bin)" = "$sha"
+            cat /tmp/chunk.bin >> /tmp/onaccess.patch.gz
+          done
+          test "$(wc -c < /tmp/onaccess.patch.gz)" -eq 13886
+          echo "$GZIP_SHA256  /tmp/onaccess.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/onaccess.patch.gz > /tmp/onaccess.patch
+          test "$(wc -c < /tmp/onaccess.patch)" -eq 50591
+          echo "$PATCH_SHA256  /tmp/onaccess.patch" | sha256sum -c -
+
+      - name: Derive exact implementation tree
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_COMMIT"
+          git reset --hard "$BASE_COMMIT"
+          test "$(git rev-parse HEAD^{tree})" = "$BASE_TREE"
+          git apply --check /tmp/onaccess.patch
+          git apply --index /tmp/onaccess.patch
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" -eq 18
+          ! git diff --cached --name-only | grep -Eq '^\.github/agent/|publish-on-access-tree'
+          test "$(git write-tree)" = "$TARGET_TREE"
+
+      - name: Upload exact implementation blobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : > on-access-blob-map.tsv
+          while IFS= read -r path; do
+            mode="$(git ls-files -s -- "$path" | awk '{print $1}')"
+            expected="$(git hash-object "$path")"
+            encoded="$(base64 -w0 "$path")"
+            payload="$(jq -n --arg content "$encoded" '{content:$content,encoding:"base64"}')"
+            response="$(curl --fail-with-body -sS -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'Content-Type: application/json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/blobs" \
+              -d "$payload")"
+            actual="$(jq -er '.sha' <<<"$response")"
+            test "$actual" = "$expected"
+            printf '%s\t%s\t%s\n' "$mode" "$actual" "$path" >> on-access-blob-map.tsv
+          done < <(git diff --cached --name-only)
+          test "$(wc -l < on-access-blob-map.tsv)" -eq 18
+          printf 'ON_ACCESS_BLOB_PUBLICATION_OK tree=%s files=18\n' "$TARGET_TREE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenov-os-on-access-verified-blob-map
+          path: on-access-blob-map.tsv
+          if-no-files-found: error
+          retention-days: 7
