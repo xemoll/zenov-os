@@ -123,6 +123,8 @@ controller_first() {
   send_command "guard intelligence"; wait_for_serial "$serial" "ZMID_STATUS_OK" || { echo quit; return 1; }
   send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 2 || { echo quit; return 1; }
   send_command "guard selftest"; wait_for_count "$serial" "ZENOV_GUARD_SELFTEST_OK" 2 || { echo quit; return 1; }
+  send_command "cat /data/samples/pua-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_READ_AUDIT path=/samples/pua-test.bin verdict=SUSPICIOUS signature=PUA.Zenov.Test" || { echo quit; return 1; }
+  send_command "cat /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_READ_BLOCKED path=/samples/ransomware-test.bin verdict=INFECTED signature=Pattern.Ransomware.Test" || { echo quit; return 1; }
   send_command "write /data/ransomware-write.bin ZENOV_RANSOMWARE_TEST_V1"; wait_for_serial "$serial" "ZENOV_GUARD_WRITE_BLOCKED path=/ransomware-write.bin" || { echo quit; return 1; }
   send_command "write /data/pua-audit.bin ZENOV_PUA_TEST_V1"; wait_for_serial "$serial" "ZENOV_GUARD_WRITE_AUDIT path=/pua-audit.bin" || { echo quit; return 1; }; wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
   send_command "write /data/split.bin prefix-ZENOV_RANSOMWARE_"; wait_for_count "$serial" "WRITE_OK" 2 || { echo quit; return 1; }
@@ -170,6 +172,8 @@ controller_first() {
   wait_for_serial "$serial" "ZMID_TAMPER_REJECTED reason=payload-digest" || { echo quit; return 1; }
   send_command "guard intelligence-update /security/updates/zmid-v2.zmid"
   wait_for_serial "$serial" "ZMID_ATOMIC_UPDATE_OK version=2" || { echo quit; return 1; }
+  send_command "cat /data/samples/malware-v2.bin"
+  wait_for_serial "$serial" "ZENOV_GUARD_READ_BLOCKED path=/samples/malware-v2.bin verdict=INFECTED signature=Malware.Zenov.V2" || { echo quit; return 1; }
   send_command "guard scan /data/samples/malware-v2.bin"
   wait_for_serial "$serial" "ZENOV_GUARD_DETECTED path=/samples/malware-v2.bin" || { echo quit; return 1; }
   send_command "guard intelligence-update /security/updates/zmid-v1.zmid"
@@ -398,7 +402,7 @@ for marker in \
   "ZMID_KEY_REJECTED reason=unknown-key" "ZMID_TAMPER_REJECTED reason=payload-digest" "ZMID_ATOMIC_UPDATE_OK version=2" "ZMID_ROLLBACK_REJECTED reason=rollback" \
   "ZRWP_ROOT_KEY_OK id=7186b2bd819e47dc" "ZRWP_PSS_SIGNATURE_OK" "ZRWP_POLICY_VERSION_OK version=1" "ZRWP_POLICY_VERSION_OK version=2" "ZRWP_READY" \
   "ZRWP_KEY_REJECTED reason=unknown-key" "ZRWP_TAMPER_REJECTED reason=payload-digest" "ZRWP_ATOMIC_UPDATE_OK version=2" "ZRWP_ROLLBACK_REJECTED reason=rollback" "ZRWP_AUDIT" "ZRWP_BLOCKED" \
-  "ZENOV_GUARD_WRITE_BLOCKED" "ZENOV_GUARD_WRITE_AUDIT" "ZENOV_GUARD_QUARANTINE_LIST_OK" "ZENOV_GUARD_DETECTED" "ZENOV_GUARD_QUARANTINE_OK" "ZENOV_GUARD_UNTRUSTED_BLOCKED" "ZENOV_GUARD_FULL_SCAN_OK" "ZENOV_GUARD_EXEC_ALLOWED" \
+  "ZENOV_GUARD_WRITE_BLOCKED" "ZENOV_GUARD_WRITE_AUDIT" "ZENOV_GUARD_READ_BLOCKED" "ZENOV_GUARD_READ_AUDIT" "ZENOV_GUARD_QUARANTINE_LIST_OK" "ZENOV_GUARD_DETECTED" "ZENOV_GUARD_QUARANTINE_OK" "ZENOV_GUARD_UNTRUSTED_BLOCKED" "ZENOV_GUARD_FULL_SCAN_OK" "ZENOV_GUARD_EXEC_ALLOWED" \
   "GRAPHICS_PCI_OK" "FRAMEBUFFER_MAPPED_OK" "GRAPHICS_MODE_OK" "BACKBUFFER_PRESENT_OK" \
   "CLIPPING_OK" "ALPHA_BLEND_OK" "FONT_RENDER_OK" "DESKTOP_SCENE_OK" "GRAPHICAL_DESKTOP_READY" "PS2_MOUSE_OK" "PS2_MOUSE_IRQ_ROUTE_OK" \
   "MOUSE_PACKET_OK" "WINDOW_DRAG_OK" "PS2_MOUSE_DECODER_OK" "$UI_MARKER" "$LONG_INPUT_MARKER" "WRITE_OK" "HELLO_ZEX_0_1_1_OK" \

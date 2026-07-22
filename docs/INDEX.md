@@ -8,6 +8,7 @@
 - [`SECURITY_MODEL_0.1.1.md`](SECURITY_MODEL_0.1.1.md) — enforced trust boundaries and explicit non-goals.
 - [`ZENOVGUARD_0.1.1.md`](ZENOVGUARD_0.1.1.md) — SHA-256 appraisal, signed policy, persistent audit and quarantine contract.
 - [`ANTIMALWARE_0.1.1.md`](ANTIMALWARE_0.1.1.md) — signed ZMID1 intelligence, bounded hash/pattern rules, pre-write prevention, protected quarantine and fail-closed update evidence.
+- [`ON_ACCESS_PROTECTION_0.1.1.md`](ON_ACCESS_PROTECTION_0.1.1.md) — synchronous shell/ring-3 read mediation, READ-BLOCK/READ-AUDIT evidence, output scrubbing and internal verification exclusions.
 - [`RANSOMWARE_DEFENSE_0.1.1.md`](RANSOMWARE_DEFENSE_0.1.1.md) — signed ZRWP1 controlled-folder policy, exact writer identities, mutation budgets, audit/block transition and durability evidence.
 - [`ZGDB_0.1.1.md`](ZGDB_0.1.1.md) — signed database format, RSA-PSS policy update, revocation and anti-rollback boundary.
 - [`AUDIT_JOURNAL_0.1.1.md`](AUDIT_JOURNAL_0.1.1.md) — ZGAL1 format, hash chain, COW fault matrix, recovery images and offline-attacker boundary.
