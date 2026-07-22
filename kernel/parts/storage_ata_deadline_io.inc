@@ -41,16 +41,17 @@ BlockResult ata2_read_result(uint32_t lba, uint8_t* output) {
         }
         ata2_record_attempt_failure("read", result.operation, lba, result.transport);
         const BlockResult failure = ata2_block_result(result.operation, lba, result.transport);
-        if (attempt == ata2_max_attempts || !block_retryable(failure.status)) return ata2_complete_request(failure);
+        if (attempt == ata2_max_attempts || !block_retryable(failure.status)) {
+            return ata2_complete_request(failure);
+        }
         ++ata_diagnostics.retries;
         if (!ata2_soft_reset(attempt).ok()) {
             return ata2_complete_request(ata2_block_result(BlockOperation::reset, lba, ata_last_result));
         }
     }
-    return ata2_complete_request(block_result(BlockOperation::read, BlockStatus::device_error, lba, 0U, 0U, 0U));
+    return ata2_complete_request(block_result(BlockOperation::read, BlockStatus::device_error,
+                                             lba, 0U, 0U, 0U));
 }
-
-bool ata2_read_sector(uint32_t lba, uint8_t* output) { return ata2_read_result(lba, output).ok(); }
 
 AtaOperationResult ata2_write_once(uint32_t lba, const uint8_t* input, uint8_t attempts) {
     ata_policy::Result result = ata2_wait(false, ata2_command_timeout_ms, attempts);
@@ -98,13 +99,14 @@ BlockResult ata2_write_result(uint32_t lba, const uint8_t* input) {
         }
         ata2_record_attempt_failure("write", result.operation, lba, result.transport);
         const BlockResult failure = ata2_block_result(result.operation, lba, result.transport);
-        if (attempt == ata2_max_attempts || !block_retryable(failure.status)) return ata2_complete_request(failure);
+        if (attempt == ata2_max_attempts || !block_retryable(failure.status)) {
+            return ata2_complete_request(failure);
+        }
         ++ata_diagnostics.retries;
         if (!ata2_soft_reset(attempt).ok()) {
             return ata2_complete_request(ata2_block_result(BlockOperation::reset, lba, ata_last_result));
         }
     }
-    return ata2_complete_request(block_result(BlockOperation::write, BlockStatus::device_error, lba, 0U, 0U, 0U));
+    return ata2_complete_request(block_result(BlockOperation::write, BlockStatus::device_error,
+                                             lba, 0U, 0U, 0U));
 }
-
-bool ata2_write_sector(uint32_t lba, const uint8_t* input) { return ata2_write_result(lba, input).ok(); }
