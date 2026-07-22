@@ -73,7 +73,7 @@ psp_pkg = bytearray(b"\x7fPKG\x80\0\0\x02")
 (out / "sample-ps3.self").write_bytes(b"SCE\0" + bytes(60))
 (out / "sample-ps4.self").write_bytes(bytes.fromhex("4f153d1d") + bytes(60))
 (out / "sample.vpk").write_bytes(b"PK\x03\x04" + bytes(60))
-(out / "java-class.bin").write_bytes(bytes.fromhex("cafebabe0000003d"))
+(out / "java-class.class").write_bytes(bytes.fromhex("cafebabe0000003d"))
 (out / "unknown.dat").write_bytes(b"unknown fixture")
 (out / "static.elf").write_bytes(static_elf())
 (out / "wx.elf").write_bytes(static_elf(7))
@@ -143,7 +143,7 @@ probe_expect "$OUT/fixtures/sample-ps4.self" playstation-self partner-only signa
 probe_expect "$OUT/fixtures/sample.vpk" playstation-pkg runtime-required signature
 probe_expect "$OUT/fixtures/game.iso" disc-image runtime-required signature
 probe_expect "$OUT/fixtures/game.chd" chd runtime-required signature
-probe_expect "$OUT/fixtures/java-class.bin" unknown unsupported signature
+probe_expect "$OUT/fixtures/java-class.class" unknown unsupported signature
 probe_expect "$OUT/fixtures/unknown.dat" unknown unsupported signature
 
 echo ZENPKG_FOREIGN_PROBE_OK cases=37 generations=legacy-current
