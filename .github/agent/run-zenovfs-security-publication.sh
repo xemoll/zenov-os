@@ -38,7 +38,7 @@ apply_patch() {
 apply_patch zenovfs-mount-hardening.patch
 apply_patch zenovfs-mount-hardening-fix.patch
 apply_patch zenovfs-mount-hardening-count.patch --include=tests/zenovfs_mount_validation_test.cpp
-apply_patch zenovfs-mount-qemu.patch --include=Makefile --include=tools/zenovfs_mount_corrupt.cpp --include=tests/qemu_zenovfs_mount_reject.sh
+apply_patch zenovfs-mount-qemu.patch --include=tools/zenovfs_mount_corrupt.cpp --include=tests/qemu_zenovfs_mount_reject.sh
 apply_patch zenovfs-mount-qemu-fix.patch --include=tools/zenovfs_mount_corrupt.cpp
 apply_patch zenovfs-path-depth-consistency.patch --include=kernel/parts/storage_format.inc --include=tools/zenovfs_mount_corrupt.cpp
 
@@ -62,6 +62,27 @@ assert text.count(anchor) == 1 and addition not in text
 text = text.replace(anchor, anchor + addition, 1)
 assert text.count('ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=6 ui_reached=0') == 1
 script.write_text(text.replace('ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=6 ui_reached=0', 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=7 ui_reached=0', 1))
+
+makefile = Path('Makefile')
+text = makefile.read_text()
+builder = '$(BUILD)/zenovfs-builder: tools/zenovfs_builder.cpp | $(BUILD)\n\t$(HOST_CXX) $(HOST_FLAGS) $< -o $@\n\n'
+targets = (
+    '$(BUILD)/zenovfs-mount-validation-test: tests/zenovfs_mount_validation_test.cpp kernel/parts/storage_format.inc | $(BUILD)\n'
+    '\t$(HOST_CXX) $(HOST_FLAGS) tests/zenovfs_mount_validation_test.cpp -o $@\n\n'
+    '$(BUILD)/zenovfs-mount-corrupt: tools/zenovfs_mount_corrupt.cpp | $(BUILD)\n'
+    '\t$(HOST_CXX) $(HOST_FLAGS) $< -o $@\n\n'
+)
+assert text.count(builder) == 1 and targets not in text
+text = text.replace(builder, builder + targets, 1)
+old_check = 'check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(BUILD)/zcap-verify $(BUILD)/zmid-verify $(BUILD)/zrwp-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE)'
+new_check = 'check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-mount-validation-test $(BUILD)/zenovfs-mount-corrupt $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(BUILD)/zcap-verify $(BUILD)/zmid-verify $(BUILD)/zrwp-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE)'
+assert text.count(old_check) == 1
+text = text.replace(old_check, new_check, 1)
+image_line = '\t$(BUILD)/image-verify $(BUILD)/zenov-os.img\n'
+validation_line = '\t$(BUILD)/zenovfs-mount-validation-test\n'
+assert text.count(image_line) == 1 and validation_line not in text
+text = text.replace(image_line, image_line + validation_line, 1)
+makefile.write_text(text)
 PY
 
 apply_patch zenovfs-read-failure-scrub.patch --include=kernel/parts/storage.inc
@@ -113,6 +134,9 @@ UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
   2>&1 | tee ci-logs/zenovfs-mount-validation.log
 grep -Fq 'ZENOVFS_MOUNT_VALIDATION_TEST_OK cases=24 shared-kernel-validator=yes' ci-logs/zenovfs-mount-validation.log
 
+make -n check >ci-logs/make-check-dry-run.log
+grep -Fxq 'build/zenovfs-audit-verify build/zenov-data.img' ci-logs/make-check-dry-run.log
+grep -Fxq 'build/zenovfs-fault-test build/zenov-data.img' ci-logs/make-check-dry-run.log
 make clean check 2>&1 | tee ci-logs/zenovfs-mount-strict-build.log
 make qemu 2>&1 | tee ci-logs/zenovfs-security-qemu.log
 make deterministic 2>&1 | tee ci-logs/zenovfs-deterministic.log
