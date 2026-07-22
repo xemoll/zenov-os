@@ -21,7 +21,7 @@ constexpr BlockIoState block_io_state_initial() {
                         block_success(BlockOperation::none, 0U, 0U)};
 }
 
-BlockResult block_io_complete(BlockIoState& state, const BlockResult& result) {
+inline BlockResult block_io_complete(BlockIoState& state, const BlockResult& result) {
     ++state.requests;
     state.last_result = result;
     if (result.ok()) {
@@ -33,8 +33,8 @@ BlockResult block_io_complete(BlockIoState& state, const BlockResult& result) {
     return result;
 }
 
-BlockResult block_device_read(BlockDevice& device, BlockIoState& state,
-                              uint32_t lba, uint8_t* output) {
+inline BlockResult block_device_read(BlockDevice& device, BlockIoState& state,
+                                     uint32_t lba, uint8_t* output) {
     if (!device.present) {
         return block_io_complete(state, block_result(BlockOperation::read, BlockStatus::no_device,
                                                      lba, 0U, 0U, 0U));
@@ -54,8 +54,8 @@ BlockResult block_device_read(BlockDevice& device, BlockIoState& state,
     return block_io_complete(state, device.read_sector(lba, output));
 }
 
-BlockResult block_device_write(BlockDevice& device, BlockIoState& state,
-                               uint32_t lba, const uint8_t* input) {
+inline BlockResult block_device_write(BlockDevice& device, BlockIoState& state,
+                                      uint32_t lba, const uint8_t* input) {
     if (!device.present) {
         return block_io_complete(state, block_result(BlockOperation::write, BlockStatus::no_device,
                                                      lba, 0U, 0U, 0U));
