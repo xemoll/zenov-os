@@ -96,7 +96,11 @@ iso[0x8001:0x8006] = b"CD001"
 PY
 
 probe_expect() {
-  local file="$1" format="$2" support="$3" confidence="$4" log="$OUT/$(basename "$file").probe.log"
+  local file="$1"
+  local format="$2"
+  local support="$3"
+  local confidence="$4"
+  local log="$OUT/$(basename "$file").probe.log"
   "$ZENPKG" probe "$file" > "$log"
   grep -Fqx "format: $format" "$log"
   grep -Fqx "support: $support" "$log"
