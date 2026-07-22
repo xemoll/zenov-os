@@ -25,13 +25,15 @@ jobs:
           cp .github/agent/zenovfs-mount-hardening-fix.patch /tmp/zenovfs-mount-hardening-fix.patch
           cp .github/agent/zenovfs-mount-hardening-count.patch /tmp/zenovfs-mount-hardening-count.patch
           cp .github/agent/zenovfs-mount-qemu.patch /tmp/zenovfs-mount-qemu.patch
+          cp .github/agent/zenovfs-mount-qemu-fix.patch /tmp/zenovfs-mount-qemu-fix.patch
           git switch --detach 199f98d478a7515c927c97d8fd61bdf5679e7e99
           test "$(git rev-parse HEAD)" = 199f98d478a7515c927c97d8fd61bdf5679e7e99
           for patch in \
             /tmp/zenovfs-mount-hardening.patch \
             /tmp/zenovfs-mount-hardening-fix.patch \
             /tmp/zenovfs-mount-hardening-count.patch \
-            /tmp/zenovfs-mount-qemu.patch; do
+            /tmp/zenovfs-mount-qemu.patch \
+            /tmp/zenovfs-mount-qemu-fix.patch; do
             git apply --check "$patch"
             git apply "$patch"
           done
