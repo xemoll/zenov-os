@@ -115,9 +115,13 @@ bool sha256_self_test() { return security_guard::sha256_self_test(); }
 
 void execute(char* line) {
     const bool help = package_manager::command_token_equal(line, "help");
+    if (storage::dispatch_storage_command(line)) return;
     if (package_manager::dispatch_line(line)) return;
     execute_without_packages(line);
-    if (help) console::line("  Packages     pkg status|list|search|plan|verify|fetch|install|upgrade|repair|policy|info|rollback|remove|run|cache|repo");
+    if (help) {
+        console::line("  Packages     pkg status|list|search|plan|verify|fetch|install|upgrade|repair|policy|info|rollback|remove|run|cache|repo");
+        console::line("  Storage I/O  disk status");
+    }
 }
 
 #include "parts/shell_runtime.inc"

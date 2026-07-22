@@ -1,0 +1,90 @@
+name: ZenovOS Block Results
+
+on:
+  push:
+    paths:
+      - 'GNUmakefile'
+      - 'kernel/kernel.cpp'
+      - 'kernel/parts/storage_block_result.inc'
+      - 'kernel/parts/storage_diagnostics.inc'
+      - 'kernel/parts/storage_ata_deadline*.inc'
+      - 'tests/storage_block_result_test.cpp'
+      - 'tests/qemu_block_status.sh'
+      - '.github/workflows/block-results.yml'
+  pull_request:
+    paths:
+      - 'GNUmakefile'
+      - 'kernel/kernel.cpp'
+      - 'kernel/parts/storage_block_result.inc'
+      - 'kernel/parts/storage_diagnostics.inc'
+      - 'kernel/parts/storage_ata_deadline*.inc'
+      - 'tests/storage_block_result_test.cpp'
+      - 'tests/qemu_block_status.sh'
+      - '.github/workflows/block-results.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  block-results:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verify tested source revision
+        run: |
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+          echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
+
+      - name: Install native toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
+
+      - name: Run block result contract under sanitizers
+        run: |
+          mkdir -p ci-logs/block-results
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/storage_block_result_test.cpp -o ci-logs/block-results/storage-block-result-sanitized
+          ci-logs/block-results/storage-block-result-sanitized | tee ci-logs/block-results/contract.log
+          grep -Fq 'BLOCK_RESULT_TEST_OK cases=17' ci-logs/block-results/contract.log
+
+      - name: Build strict native system
+        run: |
+          mkdir -p ci-logs/block-results
+          set -o pipefail
+          make clean check 2>&1 | tee ci-logs/block-results/native-check.log
+          grep -Fq 'BLOCK_RESULT_TEST_OK cases=17' ci-logs/block-results/native-check.log
+          grep -Fq 'ATA_POLICY_TEST_OK cases=22' ci-logs/block-results/native-check.log
+
+      - name: Boot and inspect block diagnostics
+        run: |
+          set -o pipefail
+          make block-status-qemu 2>&1 | tee ci-logs/block-results/qemu.log
+
+      - name: Verify exact runtime evidence
+        run: |
+          out=build/qemu/block-status
+          grep -Fq 'BLOCK_STATUS_QEMU_OK command="disk status" typed-results=1 counters=consistent' "$out/summary.log"
+          grep -Fq 'BLOCK_DEVICE_COUNTERS_OK' "$out/serial.log"
+          grep -Fq 'BLOCK_DEVICE_STATUS_OK' "$out/serial.log"
+          grep -Fq 'BLOCK_RESULT_API_OK version=1' "$out/serial.log"
+          ! grep -Eq 'BLOCK_DEVICE_COUNTERS_INVALID|KERNEL PANIC|DOUBLE FAULT|ASSERT|PS2_MOUSE_UNAVAILABLE' "$out/serial.log"
+          test ! -s "$out/qemu.stderr"
+
+      - name: Upload block result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: block-results-${{ github.run_id }}
+          path: |
+            ci-logs/block-results/**
+            build/qemu/block-status/**
+          if-no-files-found: warn
+          retention-days: 14

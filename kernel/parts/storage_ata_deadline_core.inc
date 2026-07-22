@@ -27,20 +27,57 @@ inline uint16_t ata2_in16(uint16_t port) {
 inline void ata2_out16(uint16_t port, uint16_t value) { asm volatile("outw %0, %1" : : "a"(value), "Nd"(port)); }
 
 struct AtaDiagnostics {
+    uint32_t requests;
+    uint32_t completed;
+    uint32_t failed;
+    uint32_t read_requests;
+    uint32_t write_requests;
     uint32_t commands;
     uint32_t retries;
     uint32_t resets;
     uint32_t reset_failures;
     uint32_t timeouts;
-    uint32_t errors;
+    uint32_t attempt_errors;
+};
+
+struct AtaOperationResult {
+    ata_policy::Result transport;
+    BlockOperation operation;
 };
 
 AtaDiagnostics ata_diagnostics{};
 ata_policy::Result ata_last_result{ata_policy::Error::none, 0U, 0U, 0U};
+BlockResult ata_last_block_result = block_success(BlockOperation::none, 0U, 0U);
+BlockResult ata_last_block_failure = block_success(BlockOperation::none, 0U, 0U);
 
 ata_policy::Result ata2_result(ata_policy::Error error, uint8_t status, uint8_t error_register, uint8_t attempts) {
     return ata_policy::Result{error, status, error_register, attempts};
 }
+
+constexpr BlockStatus ata2_block_status(ata_policy::Error error) {
+    switch (error) {
+        case ata_policy::Error::none: return BlockStatus::ok;
+        case ata_policy::Error::no_device: return BlockStatus::no_device;
+        case ata_policy::Error::invalid_argument: return BlockStatus::invalid_argument;
+        case ata_policy::Error::out_of_range: return BlockStatus::out_of_range;
+        case ata_policy::Error::timeout_busy: return BlockStatus::timeout_busy;
+        case ata_policy::Error::timeout_drq: return BlockStatus::timeout_drq;
+        case ata_policy::Error::device_fault: return BlockStatus::device_fault;
+        case ata_policy::Error::command_aborted: return BlockStatus::command_aborted;
+        case ata_policy::Error::id_not_found: return BlockStatus::id_not_found;
+        case ata_policy::Error::uncorrectable: return BlockStatus::uncorrectable;
+        case ata_policy::Error::interface_crc: return BlockStatus::interface_crc;
+        case ata_policy::Error::device_error: return BlockStatus::device_error;
+        case ata_policy::Error::reset_failed: return BlockStatus::reset_failed;
+    }
+    return BlockStatus::device_error;
+}
+
+BlockResult ata2_block_result(BlockOperation operation, uint32_t lba, const ata_policy::Result& result) {
+    return block_result(operation, ata2_block_status(result.error), lba, result.attempts,
+                        result.status, result.error_register);
+}
+
 void ata2_pause() { asm volatile("pause"); }
 uint32_t ata2_deadline(uint32_t timeout_ms) { return ata_policy::deadline_after(timer_ticks, timeout_ms, ata2_clock_hz); }
 
@@ -62,14 +99,33 @@ ata_policy::Result ata2_wait(bool require_drq, uint32_t timeout_ms, uint8_t atte
     }
 }
 
-void ata2_record_failure(const char* operation, const ata_policy::Result& result) {
-    ata_last_result = result;
-    if (result.error == ata_policy::Error::timeout_busy || result.error == ata_policy::Error::timeout_drq) ++ata_diagnostics.timeouts;
-    else ++ata_diagnostics.errors;
-    serial::write("ATA_IO_ERROR op="); serial::write(operation); serial::write(" reason=");
-    serial::line(ata_policy::error_name(result.error));
+void ata2_begin_request(BlockOperation operation) {
+    ++ata_diagnostics.requests;
+    if (operation == BlockOperation::read) ++ata_diagnostics.read_requests;
+    if (operation == BlockOperation::write) ++ata_diagnostics.write_requests;
 }
-void ata2_record_success(const ata_policy::Result& result) { ata_last_result = result; }
+
+void ata2_record_attempt_failure(const char* operation_name, BlockOperation operation, uint32_t lba,
+                                 const ata_policy::Result& result) {
+    ata_last_result = result;
+    const BlockResult block = ata2_block_result(operation, lba, result);
+    ata_last_block_result = block;
+    ata_last_block_failure = block;
+    if (block.status == BlockStatus::timeout_busy || block.status == BlockStatus::timeout_drq) ++ata_diagnostics.timeouts;
+    else ++ata_diagnostics.attempt_errors;
+    serial::write("ATA_IO_ERROR op="); serial::write(operation_name); serial::write(" reason=");
+    serial::line(block_status_name(block.status));
+}
+
+BlockResult ata2_complete_request(BlockResult result) {
+    ata_last_block_result = result;
+    if (result.ok()) ++ata_diagnostics.completed;
+    else {
+        ++ata_diagnostics.failed;
+        ata_last_block_failure = result;
+    }
+    return result;
+}
 
 ata_policy::Result ata2_soft_reset(uint8_t attempts) {
     out8(ata2_control, static_cast<uint8_t>(ata2_control_nien | ata2_control_srst));
@@ -80,7 +136,7 @@ ata_policy::Result ata2_soft_reset(uint8_t attempts) {
     if (!result.ok()) {
         ++ata_diagnostics.reset_failures;
         result.error = ata_policy::Error::reset_failed;
-        ata2_record_failure("reset", result);
+        ata2_record_attempt_failure("reset", BlockOperation::reset, 0U, result);
         return result;
     }
     ++ata_diagnostics.resets;
