@@ -30,7 +30,11 @@ bool ata2_read_sector(uint32_t lba, uint8_t* output) {
     for (uint8_t attempt = 1U; attempt <= ata2_max_attempts; ++attempt) {
         ++ata_diagnostics.commands;
         const ata_policy::Result result = ata2_read_once(lba, output, attempt);
-        if (result.ok()) { ata2_record_success(result); return true; }
+        if (result.ok()) {
+            ata2_record_success(result);
+            if (attempt > 1U) serial::line("ATA_RECOVERY_RETRY_OK op=read attempts=2");
+            return true;
+        }
         ata2_record_failure("read", result);
         if (attempt == ata2_max_attempts || !ata_policy::retryable(result.error)) return false;
         ++ata_diagnostics.retries;
@@ -74,7 +78,11 @@ bool ata2_write_sector(uint32_t lba, const uint8_t* input) {
     for (uint8_t attempt = 1U; attempt <= ata2_max_attempts; ++attempt) {
         ++ata_diagnostics.commands;
         const ata_policy::Result result = ata2_write_once(lba, input, attempt);
-        if (result.ok()) { ata2_record_success(result); return true; }
+        if (result.ok()) {
+            ata2_record_success(result);
+            if (attempt > 1U) serial::line("ATA_RECOVERY_RETRY_OK op=write attempts=2");
+            return true;
+        }
         ata2_record_failure("write", result);
         if (attempt == ata2_max_attempts || !ata_policy::retryable(result.error)) return false;
         ++ata_diagnostics.retries;
