@@ -33,7 +33,7 @@ void command_disk_status() {
     console::line("");
     console::write("  Device          "); console::line(ata0.present ? "ata0 online" : "ata0 unavailable");
     console::line("  Driver          ATA PIO / LBA28 / PIT deadlines");
-    console::line("  Block ABI       typed BlockResult callbacks");
+    console::line("  Block ABI       typed BlockResult boundary");
     console::write("  Capacity        "); console::unsigned_dec(ata0.sectors); console::line(" sectors");
     storage_print_counter("Requests", ata_diagnostics.requests);
     storage_print_counter("Completed", ata_diagnostics.completed);
@@ -50,13 +50,19 @@ void command_disk_status() {
     storage_print_counter("Attempt errors", ata_diagnostics.attempt_errors);
     storage_print_result("Last result", ata_last_block_result);
     storage_print_result("Last failure", ata_last_block_failure);
-    const bool counters_valid = ata_diagnostics.requests == ata_diagnostics.completed + ata_diagnostics.failed &&
-                                ata_diagnostics.requests == ata_diagnostics.read_requests + ata_diagnostics.write_requests &&
-                                ata_diagnostics.requests > 0U;
-    if (counters_valid) console::success("BLOCK_DEVICE_COUNTERS_OK");
+    storage_print_counter("FS requests", zfs_io_state.requests);
+    storage_print_counter("FS completed", zfs_io_state.completed);
+    storage_print_counter("FS failed", zfs_io_state.failed);
+    storage_print_result("FS last result", zfs_io_state.last_result);
+    storage_print_result("FS last failure", zfs_io_state.last_failure);
+    const bool ata_counters_valid = ata_diagnostics.requests == ata_diagnostics.completed + ata_diagnostics.failed &&
+                                    ata_diagnostics.requests == ata_diagnostics.read_requests + ata_diagnostics.write_requests &&
+                                    ata_diagnostics.requests > 0U;
+    const bool filesystem_counters_valid = block_io_counters_valid(zfs_io_state) && zfs_io_state.requests > 0U;
+    if (ata_counters_valid && filesystem_counters_valid) console::success("BLOCK_DEVICE_COUNTERS_OK");
     else console::warning("BLOCK_DEVICE_COUNTERS_INVALID");
     console::success("BLOCK_DEVICE_STATUS_OK");
-    serial::line("BLOCK_RESULT_API_OK version=1");
+    serial::line("BLOCK_RESULT_API_OK version=2");
     serial::line("BLOCK_DEVICE_TYPED_ABI_OK version=1");
 }
 
