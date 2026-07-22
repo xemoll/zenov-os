@@ -51,7 +51,8 @@ void formats() {
     console::line("  PKG/DMG/Mach-O                runtime-required; Darwin ABI is absent");
     console::line("  XBE/XEX/STFS                  legacy Xbox runtime-required");
     console::line("  XVC/MSIXVC/MSIXVC2            partner-only; GDK identity/keys required");
-    console::line("  PS-X/PS2 ELF/PBP/disc images  legacy console runtime-required");
+    console::line("  PS-X/R5900 ELF/PBP/discs      legacy console runtime-required");
+    console::line("  Generic MIPS ELF              foreign runtime; not assumed to be PS2");
     console::line("  PlayStation PKG/PUP/SELF      signed/encrypted partner boundary");
     console::line("");
     console::line("  Detection never grants execution authority or bypasses ZenRepo policy.");
@@ -78,7 +79,7 @@ bool probe_format(const char* path) {
         return false;
     }
 
-    const package_foreign::Detection detection = package_foreign::detect(package_buffer, actual, path);
+    const package_foreign::Detection detection = package_foreign::classify(package_buffer, actual, path);
     console::write("  Format        ");
     console::line(foreign_format_text(detection.format));
     console::write("  Name          ");
