@@ -12,6 +12,7 @@ enum class BlockStatus : uint8_t {
     no_device,
     invalid_argument,
     out_of_range,
+    read_only,
     timeout_busy,
     timeout_drq,
     device_fault,
@@ -67,6 +68,7 @@ constexpr const char* block_status_name(BlockStatus status) {
         case BlockStatus::no_device: return "no-device";
         case BlockStatus::invalid_argument: return "invalid-argument";
         case BlockStatus::out_of_range: return "out-of-range";
+        case BlockStatus::read_only: return "read-only";
         case BlockStatus::timeout_busy: return "timeout-busy";
         case BlockStatus::timeout_drq: return "timeout-drq";
         case BlockStatus::device_fault: return "device-fault";
