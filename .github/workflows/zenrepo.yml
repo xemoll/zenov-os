@@ -1,64 +1,11 @@
-name: ZenRepo Trust Chain
+name: Publication staging — ZenRepo CI disabled
 
 on:
-  push:
-    paths:
-      - 'tools/zenrepo/**'
-      - 'tests/zenrepo_test.sh'
-      - 'tools/zenrepo/materialize_fixtures.sh'
-      - 'security/zenrepo_crypto_material.hpp'
-      - 'kernel/parts/package_repository.inc'
-      - 'kernel/parts/package_repository/**'
-      - 'kernel/parts/rsa_pss.inc'
-      - '.github/workflows/zenrepo.yml'
-  pull_request:
-    paths:
-      - 'tools/zenrepo/**'
-      - 'tests/zenrepo_test.sh'
-      - 'tools/zenrepo/materialize_fixtures.sh'
-      - 'security/zenrepo_crypto_material.hpp'
-      - 'kernel/parts/package_repository.inc'
-      - 'kernel/parts/package_repository/**'
-      - 'kernel/parts/rsa_pss.inc'
-      - '.github/workflows/zenrepo.yml'
-
-permissions:
-  contents: read
+  workflow_dispatch:
 
 jobs:
-  trust-chain:
+  staging-only:
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - name: Compile strict verifier
-        run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenrepo/main.cpp -o /tmp/zenrepo
-      - name: Verify current root rotation and delegated repository
-        run: |
-          bash tools/zenrepo/materialize_fixtures.sh /tmp/all-metadata >/dev/null
-          mkdir -p /tmp/current
-          for name in root-bootstrap root targets native-apps snapshot timestamp; do
-            cp "/tmp/all-metadata/$name.zrm" "/tmp/current/$name.zrm"
-          done
-          /tmp/zenrepo verify --metadata /tmp/current --time 1767225600 --state /tmp/zenrepo.state | \
-            grep -q 'ZENREPO_VERIFY_OK trust=verified packages=2'
-      - name: Run rollback freeze mix-and-match and signature negatives
-        run: bash tests/zenrepo_test.sh
-      - name: Compile and execute the kernel metadata parser
-        run: |
-          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tests/package_repository_kernel_test.cpp -o /tmp/package-repository-kernel-test
-          /tmp/package-repository-kernel-test build/zenrepo-test/fixtures
-      - name: Ensure no private key material is committed
-        run: |
-          if git grep -nE 'BEGIN (RSA )?PRIVATE KEY|BEGIN PRIVATE KEY' -- . \
-            ':(exclude)tests/**' ':(exclude).github/workflows/**'; then
-            echo 'private signing key material must not be committed' >&2
-            exit 1
-          fi
-      - name: Verify metadata inventory
-        run: |
-          bash tools/zenrepo/materialize_fixtures.sh /tmp/zenrepo-inventory >/dev/null
-          for name in root-bootstrap root targets native-apps snapshot timestamp; do
-            test -s "/tmp/zenrepo-inventory/$name.zrm"
-          done
-          sha256sum /tmp/zenrepo-inventory/*.zrm | sort
+      - run: echo staging-only
