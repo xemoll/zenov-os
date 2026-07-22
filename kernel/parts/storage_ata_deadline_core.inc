@@ -35,7 +35,9 @@ struct AtaDiagnostics {
     uint32_t commands;
     uint32_t retries;
     uint32_t resets;
+    uint32_t revalidations;
     uint32_t reset_failures;
+    uint32_t revalidation_failures;
     uint32_t timeouts;
     uint32_t attempt_errors;
 };
@@ -117,6 +119,8 @@ void ata2_record_attempt_failure(const char* operation_name, BlockOperation oper
     serial::line(block_status_name(block.status));
 }
 
+ata_policy::Result ata2_identify_once(uint8_t attempts);
+
 BlockResult ata2_complete_request(BlockResult result) {
     ata_last_block_result = result;
     if (result.ok()) ++ata_diagnostics.completed;
@@ -128,6 +132,7 @@ BlockResult ata2_complete_request(BlockResult result) {
 }
 
 ata_policy::Result ata2_soft_reset(uint8_t attempts) {
+    const uint32_t expected_sectors = ata_sector_total;
     out8(ata2_control, static_cast<uint8_t>(ata2_control_nien | ata2_control_srst));
     io_wait(); io_wait(); io_wait(); io_wait();
     out8(ata2_control, ata2_control_nien);
@@ -139,8 +144,28 @@ ata_policy::Result ata2_soft_reset(uint8_t attempts) {
         ata2_record_attempt_failure("reset", BlockOperation::reset, 0U, result);
         return result;
     }
+
     ++ata_diagnostics.resets;
+    ++ata_diagnostics.revalidations;
+    ++ata_diagnostics.commands;
+    result = ata2_identify_once(attempts);
+    const bool capacity_valid = ata_capacity_revalidated(expected_sectors, ata_sector_total);
+    const bool capacity_changed = expected_sectors != 0U && ata_sector_total != 0U && ata_sector_total != expected_sectors;
+    if (!result.ok() || !capacity_valid) {
+        ++ata_diagnostics.reset_failures;
+        ++ata_diagnostics.revalidation_failures;
+        ata_present = false;
+        ata_sector_total = 0U;
+        result.error = ata_policy::Error::reset_failed;
+        ata2_record_attempt_failure("revalidate", BlockOperation::reset, 0U, result);
+        serial::line(capacity_changed ? "ATA_RECOVERY_REVALIDATE_FAILED reason=capacity-changed" :
+                                       "ATA_RECOVERY_REVALIDATE_FAILED reason=identify");
+        return result;
+    }
+
+    ata_present = true;
     serial::line("ATA_RECOVERY_RESET_OK");
+    serial::line("ATA_RECOVERY_REVALIDATE_OK command=identify capacity=stable");
     return result;
 }
 
