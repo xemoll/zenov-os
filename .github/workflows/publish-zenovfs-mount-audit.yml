@@ -37,6 +37,8 @@ jobs:
           cp .github/agent/zenovfs-read-failure-scrub.patch /tmp/zenovfs-read-failure-scrub.patch
           cp .github/agent/zmid-update-rollback.patch /tmp/zmid-update-rollback.patch
           cp .github/agent/quarantine-digest-prefix.patch /tmp/quarantine-digest-prefix.patch
+          cp .github/agent/zenovfs-mount-index.patch /tmp/zenovfs-mount-index.patch
+          cp .github/agent/zenovfs-workflow-context7-hardening.patch /tmp/zenovfs-workflow-context7-hardening.patch
           git switch --detach 199f98d478a7515c927c97d8fd61bdf5679e7e99
           test "$(git rev-parse HEAD)" = 199f98d478a7515c927c97d8fd61bdf5679e7e99
 
@@ -69,6 +71,12 @@ jobs:
 
       - name: Apply quarantine collision hardening
         run: git apply --check --recount --inaccurate-eof /tmp/quarantine-digest-prefix.patch && git apply --recount --inaccurate-eof /tmp/quarantine-digest-prefix.patch
+
+      - name: Apply documentation index
+        run: git apply --check --recount --inaccurate-eof /tmp/zenovfs-mount-index.patch && git apply --recount --inaccurate-eof /tmp/zenovfs-mount-index.patch
+
+      - name: Apply Context7 production workflow hardening
+        run: git apply --check --recount --inaccurate-eof /tmp/zenovfs-workflow-context7-hardening.patch && git apply --recount --inaccurate-eof /tmp/zenovfs-workflow-context7-hardening.patch
 
       - name: Verify exact production file set
         run: |
