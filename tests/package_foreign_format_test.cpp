@@ -3,13 +3,14 @@
 #include <vector>
 
 #include "../kernel/parts/package_foreign_format.inc"
+#include "../kernel/parts/package_foreign_policy.inc"
 
 using package_foreign::Format;
 using package_foreign::Support;
 
 static bool expect(const char* label, const std::vector<std::uint8_t>& bytes, const char* path,
                    Format format, Support support, bool extension_only = false) {
-    const auto detected = package_foreign::detect(
+    const auto detected = package_foreign::classify(
         bytes.data(), static_cast<std::uint32_t>(bytes.size()), path);
     if (detected.format != format || detected.support != support ||
         detected.extension_only != extension_only) {
@@ -34,8 +35,8 @@ static std::vector<std::uint8_t> pe_fixture() {
 
 static std::vector<std::uint8_t> elf_fixture(std::uint8_t elf_class, std::uint8_t endian,
                                              std::uint8_t osabi, std::uint16_t type,
-                                             std::uint16_t machine) {
-    std::vector<std::uint8_t> bytes(20U, 0U);
+                                             std::uint16_t machine, std::uint32_t flags = 0U) {
+    std::vector<std::uint8_t> bytes(40U, 0U);
     bytes[0] = 0x7fU;
     bytes[1] = 'E';
     bytes[2] = 'L';
@@ -49,11 +50,19 @@ static std::vector<std::uint8_t> elf_fixture(std::uint8_t elf_class, std::uint8_
         bytes[17] = static_cast<std::uint8_t>(type >> 8U);
         bytes[18] = static_cast<std::uint8_t>(machine & 0xffU);
         bytes[19] = static_cast<std::uint8_t>(machine >> 8U);
+        bytes[36] = static_cast<std::uint8_t>(flags);
+        bytes[37] = static_cast<std::uint8_t>(flags >> 8U);
+        bytes[38] = static_cast<std::uint8_t>(flags >> 16U);
+        bytes[39] = static_cast<std::uint8_t>(flags >> 24U);
     } else {
         bytes[16] = static_cast<std::uint8_t>(type >> 8U);
         bytes[17] = static_cast<std::uint8_t>(type & 0xffU);
         bytes[18] = static_cast<std::uint8_t>(machine >> 8U);
         bytes[19] = static_cast<std::uint8_t>(machine & 0xffU);
+        bytes[36] = static_cast<std::uint8_t>(flags >> 24U);
+        bytes[37] = static_cast<std::uint8_t>(flags >> 16U);
+        bytes[38] = static_cast<std::uint8_t>(flags >> 8U);
+        bytes[39] = static_cast<std::uint8_t>(flags);
     }
     return bytes;
 }
@@ -92,8 +101,12 @@ int main() {
                   Format::elf, Support::host_import);
     okay &= check("elf-x86-64", elf_fixture(2U, 1U, 0U, 2U, 62U), "a.elf",
                   Format::elf_foreign, Support::runtime_required);
-    okay &= check("elf-ps2", elf_fixture(1U, 1U, 0U, 2U, 8U), "a.elf",
+    okay &= check("elf-ps2-r5900", elf_fixture(1U, 1U, 0U, 2U, 8U, 0x20924001U), "a.elf",
                   Format::playstation_ps2_elf, Support::runtime_required);
+    okay &= check("elf-mips-generic", elf_fixture(1U, 1U, 0U, 2U, 8U), "a.elf",
+                  Format::elf_foreign, Support::runtime_required);
+    okay &= check("elf-mips-big-endian", elf_fixture(1U, 2U, 0U, 2U, 8U, 0x20924001U), "a.elf",
+                  Format::elf_foreign, Support::runtime_required);
     okay &= check("elf-ps4", elf_fixture(2U, 1U, 9U, 0xfe00U, 62U), "a.elf",
                   Format::playstation_self, Support::runtime_required);
     okay &= check("appimage", {0x7f,'E','L','F'}, "a.AppImage",
