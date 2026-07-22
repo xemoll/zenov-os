@@ -1,0 +1,81 @@
+name: ZenovOS ATA Deadlines
+
+on:
+  push:
+    paths:
+      - 'GNUmakefile'
+      - 'kernel/kernel.cpp'
+      - 'kernel/parts/storage*.inc'
+      - 'tests/storage_ata_policy_test.cpp'
+      - '.github/workflows/ata-deadlines.yml'
+  pull_request:
+    paths:
+      - 'GNUmakefile'
+      - 'kernel/kernel.cpp'
+      - 'kernel/parts/storage*.inc'
+      - 'tests/storage_ata_policy_test.cpp'
+      - '.github/workflows/ata-deadlines.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ata-deadlines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verify tested source revision
+        run: |
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+          echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
+
+      - name: Install native toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
+
+      - name: Run ATA policy under sanitizers
+        run: |
+          mkdir -p build/ata-ci
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/storage_ata_policy_test.cpp -o build/ata-ci/storage-ata-policy-sanitized
+          build/ata-ci/storage-ata-policy-sanitized | tee build/ata-ci/policy-sanitized.log
+          grep -Fq 'ATA_POLICY_TEST_OK cases=22' build/ata-ci/policy-sanitized.log
+
+      - name: Build native system and policy gate
+        run: |
+          set -o pipefail
+          make clean check 2>&1 | tee build/ata-ci/native-check.log
+          grep -Fq 'ATA_POLICY_TEST_OK cases=22' build/ata-ci/native-check.log
+
+      - name: Boot deadline-driven storage phases
+        run: make qemu
+
+      - name: Verify ATA boot evidence
+        run: |
+          serial=build/qemu/serial.log
+          grep -Fq 'MONOTONIC_TICK_READY hz=100' "$serial"
+          grep -Fq 'ATA_IDENTIFY_OK deadline=3000ms retry-limit=1' "$serial"
+          grep -Fq 'ATA_DEADLINE_DRIVER_READY clock=pit100 timeout=3000ms reset=5000ms attempts=2' "$serial"
+          grep -Fq 'ZENOVFS_MOUNT_OK' "$serial"
+          grep -Fq 'ZENOVOS_UI_READY' "$serial"
+          ! grep -Eq 'ATA_IO_ERROR|KERNEL PANIC|DOUBLE FAULT|ASSERT' "$serial"
+
+      - name: Upload ATA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ata-deadlines-${{ github.run_id }}
+          path: |
+            build/ata-ci/**
+            build/qemu/serial*.log
+            build/qemu/qemu-*.stderr
+          if-no-files-found: warn
+          retention-days: 14
