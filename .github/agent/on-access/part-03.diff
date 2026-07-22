@@ -1,0 +1,114 @@
+ supports signed audit and block modes. A violation is allowed or denied only after its persistent ZGAL1 record succeeds; block mode locks the actor for the current window.
+@@ -29,4 +30,4 @@ The syscall capability layer reduces the authority of already trusted code. It d
+ 
+ Version 0.1.1 does not claim concurrent-process isolation, per-process page directories, ASLR, secure boot, DMA protection, speculative-execution mitigations, authenticated storage, dynamic-linker hardening, transferable capabilities, handle-based delegation, in-process capability revocation or a user-space policy service.
+ 
+-Executable authenticity is limited to the current bundled path-and-SHA-256 trust baseline plus RSA-PSS-signed ZGDB2 trust/revocation policy. Syscall profiles are held in a separate RSA-PSS-signed ZCAP1 policy constrained to that same path set. Malware hash/pattern rules are held in a third RSA-PSS-signed ZMID1 domain. Controlled-folder paths, exact writer identities and mutation budgets are held in a fourth RSA-PSS-signed ZRWP1 domain. Each can be updated sequentially without rebuilding the kernel, but root rotation and a stronger offline rollback boundary still require a verified OS build or external monotonic state. ZMID1 and ZRWP1 provide bounded prevention, not cloud antivirus, full EDR, archive analysis or machine-learning classification.
++Executable authenticity is limited to the current bundled path-and-SHA-256 trust baseline plus RSA-PSS-signed ZGDB2 trust/revocation policy. Syscall profiles are held in a separate RSA-PSS-signed ZCAP1 policy constrained to that same path set. Malware hash/pattern rules are held in a third RSA-PSS-signed ZMID1 domain. Controlled-folder paths, exact writer identities and mutation budgets are held in a fourth RSA-PSS-signed ZRWP1 domain. Each can be updated sequentially without rebuilding the kernel, but root rotation and a stronger offline rollback boundary still require a verified OS build or external monotonic state. ZMID1 and ZRWP1 provide bounded write and on-access read prevention, not authenticated Merkle-tree storage, cloud antivirus, full EDR, archive analysis or machine-learning classification.
+diff --git a/kernel/kernel.cpp b/kernel/kernel.cpp
+index c26e220..bd7ff23 100644
+--- a/kernel/kernel.cpp
++++ b/kernel/kernel.cpp
+@@ -51,7 +51,7 @@ bool command_token_equal(const char*, const char*);
+ bool dispatch_line(char*);
+ int version_compare(const char*, const char*);
+ }
+-namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uint32_t&); }
++namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uint32_t&); bool security_read_was_blocked(); }
+ #define read_file security_read_file
+ #define write_file guarded_write_file
+ #define remove guarded_remove
+@@ -62,6 +62,7 @@ namespace storage { bool security_read_file(const char*, uint8_t*, uint32_t, uin
+ #include "parts/process.inc"
+ #undef run
+ #undef syscall_dispatch
++#undef cat
+ #undef copy_file
+ #undef rename_entry
+ #undef remove
+@@ -96,6 +97,7 @@ bool sha256_self_test() { return security_guard::sha256_self_test(); }
+ #define remove guarded_remove
+ #define rename_entry guarded_rename_entry
+ #define copy_file guarded_copy_file
++#define cat guarded_cat
+ #define history shell_history
+ #define history_count shell_history_count
+ #define shell_run shell_run_legacy_80
+diff --git a/kernel/parts/process.inc b/kernel/parts/process.inc
+index 7c406fd..92155ce 100644
+--- a/kernel/parts/process.inc
++++ b/kernel/parts/process.inc
+@@ -10,7 +10,7 @@ constexpr uint32_t max_argument_bytes = 64U;
+ constexpr uint32_t syscall_exit = 0, syscall_console_write = 1, syscall_ticks = 2, syscall_file_read = 3, syscall_file_write = 4;
+ constexpr uint32_t syscall_file_stat = 5, syscall_version = 6, syscall_sync = 7, syscall_console_read = 8;
+ constexpr uint32_t error_invalid = 0xFFFFFFFFU, error_not_found = 0xFFFFFFFEU, error_no_space = 0xFFFFFFFDU;
+-constexpr uint32_t error_io = 0xFFFFFFFCU, error_fault = 0xFFFFFFFBU, error_unsupported = 0xFFFFFFFAU;
++constexpr uint32_t error_io = 0xFFFFFFFCU, error_fault = 0xFFFFFFFBU, error_unsupported = 0xFFFFFFFAU, error_denied = 0xFFFFFFF9U;
+ 
+ extern "C" uint8_t gdt_tss[];
+ extern "C" char __stack_top;
+@@ -112,7 +112,7 @@ extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
+     if (number == syscall_file_read) {
+         const char* path = user_string(frame->ebx); uint8_t* output = user_bytes(frame->ecx, frame->edx, true); uint32_t actual = 0;
+         if (!path || !output) frame->eax = error_fault;
+-        else if (!storage::read_file(path, output, frame->edx, actual)) frame->eax = error_not_found;
++        else if (!storage::read_file(path, output, frame->edx, actual)) frame->eax = storage::security_read_was_blocked() ? error_denied : error_not_found;
+         else frame->eax = actual;
+         return 0;
+     }
+diff --git a/kernel/parts/security_audit.inc b/kernel/parts/security_audit.inc
+index 331ecdb..053cc7a 100644
+--- a/kernel/parts/security_audit.inc
++++ b/kernel/parts/security_audit.inc
+@@ -86,7 +86,7 @@ void initialize_empty(Journal& target) {
+ }
+ 
+ bool record_valid(const Record& record) {
+-    if (record.action > static_cast<uint8_t>(security_guard::AuditAction::ransomware_policy) ||
++    if (record.action > static_cast<uint8_t>(security_guard::AuditAction::read_audit) ||
+         record.verdict > static_cast<uint8_t>(security_guard::Verdict::error) ||
+         !record.path_length || record.path_length >= sizeof(record.path) || record.path[record.path_length] != 0 ||
+         !zero_bytes(record.reserved, sizeof(record.reserved))) return false;
+diff --git a/kernel/parts/security_guard.inc b/kernel/parts/security_guard.inc
+index 5a88b01..4ec677a 100644
+--- a/kernel/parts/security_guard.inc
++++ b/kernel/parts/security_guard.inc
+@@ -5,7 +5,7 @@ constexpr uint32_t sha256_bytes = 32U;
+ constexpr uint32_t audit_capacity = 32U;
+ 
+ enum class Verdict : uint8_t { clean, trusted, untrusted, suspicious, infected, error };
+-enum class AuditAction : uint8_t { boot, scan, execute, quarantine, write_block, intelligence_update, ransomware, ransomware_policy };
++enum class AuditAction : uint8_t { boot, scan, execute, quarantine, write_block, intelligence_update, ransomware, ransomware_policy, read_block, read_audit };
+ 
+ struct ScanResult {
+     Verdict verdict = Verdict::error;
+@@ -60,6 +60,7 @@ AuditRecord audit_log[audit_capacity]{};
+ uint32_t audit_next = 0, audit_count = 0;
+ uint32_t scans = 0, blocked = 0, quarantined = 0, trusted_launches = 0;
+ uint32_t write_scans = 0, write_blocked = 0, audit_only_findings = 0;
++uint32_t read_scans = 0, read_blocked = 0, read_audited = 0, read_skipped = 0;
+ constexpr uintptr_t write_scan_workspace_address = 0x00300000U;
+ constexpr uint32_t write_scan_workspace_bytes = process::application_buffer_bytes;
+ static_assert(write_scan_workspace_address >= heap::limit_address);
+@@ -152,6 +153,8 @@ const char* action_name(AuditAction action) {
+         case AuditAction::intelligence_update: return "INTELLIGENCE-UPDATE";
+         case AuditAction::ransomware: return "RANSOMWARE";
+         case AuditAction::ransomware_policy: return "RANSOMWARE-POLICY";
++        case AuditAction::read_block: return "READ-BLOCK";
++        case AuditAction::read_audit: return "READ-AUDIT";
+         default: return "UNKNOWN";
+     }
+ }
+@@ -288,6 +291,39 @@ bool quarantine_path(const char* path) {
+     serial_decision("ZENOV_GUARD_QUARANTINE_OK", result); return true;
+ }
+ 
++bool on_access_excluded(const char* normalized) {
++    if (!normalized) return true;
++    return string_equal(normalized, "/security") || string_starts_with(normalized, "/security/") ||
++        string_equal(normalized, "/repo") || string_starts_with(normalized, "/repo/") ||
++        string_equal(normalized, "/var/lib/zenpkg") || string_starts_with(normalized, "/var/lib/zenpkg/") ||
++        string_equal(normalized, "/quarantine") || string_starts_with(normalized, "/quarantine/");
++}
++
++bool allow_persistent_read(const char* path, c
