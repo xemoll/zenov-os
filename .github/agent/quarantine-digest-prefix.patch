@@ -1,0 +1,45 @@
+diff --git a/kernel/parts/security_guard.inc b/kernel/parts/security_guard.inc
+--- a/kernel/parts/security_guard.inc
++++ b/kernel/parts/security_guard.inc
+@@ -258,7 +258,7 @@ void build_quarantine_path(const uint8_t digest[sha256_bytes], char output[48]) {
+     static constexpr char hex[] = "0123456789abcdef";
+     storage::path_copy(output, "/quarantine/q-", 48);
+     uint32_t position = static_cast<uint32_t>(string_length(output));
+-    for (uint32_t i = 0; i < 6U; ++i) { output[position++] = hex[digest[i] >> 4U]; output[position++] = hex[digest[i] & 0x0FU]; }
++    for (uint32_t i = 0; i < 12U; ++i) { output[position++] = hex[digest[i] >> 4U]; output[position++] = hex[digest[i] & 0x0FU]; }
+     output[position++] = '.'; output[position++] = 'q'; output[position++] = 't'; output[position++] = 'n'; output[position] = 0;
+ }
+@@ -421,6 +421,13 @@ bool self_test() {
+         on_access_excluded("/repository") || on_access_excluded("/quarantine-copy")) return false;
++    uint8_t quarantine_digest_a[sha256_bytes]{};
++    uint8_t quarantine_digest_b[sha256_bytes]{};
++    quarantine_digest_b[6] = 1U;
++    char quarantine_path_a[48]{}, quarantine_path_b[48]{};
++    build_quarantine_path(quarantine_digest_a, quarantine_path_a);
++    build_quarantine_path(quarantine_digest_b, quarantine_path_b);
++    if (string_equal(quarantine_path_a, quarantine_path_b) || string_length(quarantine_path_a) != 42U) return false;
+     static constexpr char test_vector[] = "ZENOV_GUARD_SAFE_TEST_VECTOR_V1";
+     static constexpr char clean_vector[] = "ZENOV_GUARD_CLEAN_VECTOR_V1";
+diff --git a/.github/workflows/antimalware.yml b/.github/workflows/antimalware.yml
+--- a/.github/workflows/antimalware.yml
++++ b/.github/workflows/antimalware.yml
+@@ -112,6 +112,9 @@ jobs:
+           grep -Fq 'bool guarded_rename_entry' kernel/parts/security_paths.inc
+           grep -Fq 'bool guarded_copy_file' kernel/parts/security_paths.inc
+           grep -Fq 'bool package_cache_write_partial' kernel/parts/security_paths.inc
++          grep -Fq 'for (uint32_t i = 0; i < 12U; ++i)' kernel/parts/security_guard.inc
++          grep -Fq 'quarantine_digest_b[6] = 1U;' kernel/parts/security_guard.inc
++          grep -Fq 'string_length(quarantine_path_a) != 42U' kernel/parts/security_guard.inc
+           grep -Fq 'bool active_security_actor' kernel/parts/process_capabilities.inc
+diff --git a/docs/ANTIMALWARE_0.1.1.md b/docs/ANTIMALWARE_0.1.1.md
+--- a/docs/ANTIMALWARE_0.1.1.md
++++ b/docs/ANTIMALWARE_0.1.1.md
+@@ -74,6 +74,10 @@ A quarantine operation is accepted only when all of the following complete:
+ 
+ The payload and sidecar paths are protected from ordinary write, append, rename, remove and copy-over operations.
+ 
++Quarantine object names encode the first 96 bits of the complete SHA-256 digest. The previous 48-bit prefix admitted practical birthday collisions at roughly `2^24` chosen payloads, allowing one quarantined object to occupy the destination of another. Ninety-six bits is the strongest prefix that still permits both the `.qtn` payload and `.qtn.meta` sidecar within the 48-byte ZenovFS1 path limit. A boot self-test proves that two digests sharing the former 48-bit prefix produce distinct paths.
++
++This naming hardening prevents collision-driven quarantine denial; it does not claim content-addressed storage against a full SHA-256 collision.
++
+ Deleting quarantine state is an explicit trusted shell action. Restore is reserved for rollback if metadata or audit commit fails.
