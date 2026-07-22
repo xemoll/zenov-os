@@ -159,15 +159,15 @@ ata_policy::Result ata2_soft_reset(uint8_t attempts) {
     ++ata_diagnostics.commands;
     result = ata2_identify_once(attempts);
     const uint32_t observed_sectors = ata_sector_total;
-    const bool capacity_valid = ata_capacity_revalidated(expected_sectors, observed_sectors);
-    const bool capacity_changed = expected_sectors != 0U && observed_sectors != 0U && observed_sectors != expected_sectors;
-    if (!result.ok() || !capacity_valid) {
+    const AtaRevalidationDecision decision =
+        ata_revalidation_decision(result.ok(), expected_sectors, observed_sectors);
+    if (decision != AtaRevalidationDecision::accept) {
         ++ata_diagnostics.revalidation_failures;
         ata2_publish_device_state(false, 0U);
         result.error = ata_policy::Error::reset_failed;
         ata2_record_attempt_failure("revalidate", BlockOperation::reset, 0U, result);
-        serial::line(capacity_changed ? "ATA_RECOVERY_REVALIDATE_FAILED reason=capacity-changed" :
-                                       "ATA_RECOVERY_REVALIDATE_FAILED reason=identify");
+        serial::write("ATA_RECOVERY_REVALIDATE_FAILED reason=");
+        serial::line(ata_revalidation_reason(decision));
         serial::line("ATA_DEVICE_OFFLINE reason=revalidation-failed");
         return result;
     }
