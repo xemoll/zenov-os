@@ -56,7 +56,8 @@ require_line "$PHASE1_TEXT" "ZCAP_TAMPER_REJECTED reason=payload-digest"
 require_line "$PHASE1_TEXT" "ZCAP_ATOMIC_UPDATE_OK version=2"
 require_line "$PHASE1_TEXT" "SYSCALL_CAPABILITY_PROFILE_ACTIVE app=/apps/hello.zex mask=0x00000000"
 require_line "$PHASE1_TEXT" "ZCAP_ROLLBACK_REJECTED reason=rollback"
-[[ "$(grep -Fc 'SYSCALL_CAPABILITY_PROFILE_ACTIVE app=' "$PHASE1_TEXT")" -eq 8 ]] || { echo "syscall-capability-check: primary phase must contain seven v1 activations and one post-update v2 activation" >&2; exit 1; }
+[[ "$(grep -Fc 'SYSCALL_CAPABILITY_PROFILE_ACTIVE app=' "$PHASE1_TEXT")" -eq 11 ]] || { echo "syscall-capability-check: primary phase must contain seven baseline, three ransomware-regression FILEIO and one post-update activation" >&2; exit 1; }
+[[ "$(grep -Fc 'SYSCALL_CAPABILITY_PROFILE_ACTIVE app=/apps/fileio.elf mask=0x0000007D' "$PHASE1_TEXT")" -eq 4 ]] || { echo "syscall-capability-check: primary phase must contain exactly four FILEIO activations" >&2; exit 1; }
 
 KACCESS_DENIAL="SYSCALL_CAPABILITY_DENIED app=/apps/kaccess.elf syscall=1 capability=console-write reason=missing-capability"
 HELLO_DENIAL="SYSCALL_CAPABILITY_DENIED app=/apps/hello.zex syscall=1 capability=console-write reason=missing-capability"
@@ -83,7 +84,8 @@ hello_denial="$(line_number "$PHASE1_TEXT" "$HELLO_DENIAL")"
 require_line "$PHASE2_TEXT" "ZCAP_POLICY_VERSION_OK version=2"
 require_line "$PHASE2_TEXT" "SYSCALL_CAPABILITY_PROFILE_ACTIVE app=/apps/hello.zex mask=0x00000000"
 require_line "$PHASE2_TEXT" "$HELLO_DENIAL"
-[[ "$(grep -Fc 'SYSCALL_CAPABILITY_PROFILE_ACTIVE app=' "$PHASE2_TEXT")" -eq 1 ]] || { echo "syscall-capability-check: reboot phase has unexpected profile activations" >&2; exit 1; }
+[[ "$(grep -Fc 'SYSCALL_CAPABILITY_PROFILE_ACTIVE app=' "$PHASE2_TEXT")" -eq 3 ]] || { echo "syscall-capability-check: reboot phase must contain HELLO plus two ransomware-regression FILEIO activations" >&2; exit 1; }
+[[ "$(grep -Fc 'SYSCALL_CAPABILITY_PROFILE_ACTIVE app=/apps/fileio.elf mask=0x0000007D' "$PHASE2_TEXT")" -eq 2 ]] || { echo "syscall-capability-check: reboot phase must contain exactly two FILEIO activations" >&2; exit 1; }
 [[ "$(grep -Fc 'SYSCALL_CAPABILITY_DENIED app=' "$PHASE2_TEXT")" -eq 1 ]] || { echo "syscall-capability-check: reboot phase has unexpected denials" >&2; exit 1; }
 
 require_line "$ZCAP_CORRUPT_TEXT" "ZCAP_INIT_FAILED reason=payload-digest"
@@ -120,6 +122,7 @@ persistent_records=EXEC:UNTRUSTED:/apps/kaccess.elf,EXEC:UNTRUSTED:/apps/hello.z
 rollback=blocked
 corrupt_policy_boot=fail-closed-before-ui
 authority_reactivation=/apps/zenovapp.zex:0x00000001
+ransomware_regression_profiles=phase1-fileio-4,phase2-fileio-2
 status=PASS
 EOF2
 
