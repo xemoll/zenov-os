@@ -1,6 +1,5 @@
 namespace storage {
 
-#include "storage_block_result.inc"
 #include "storage_ata_policy.inc"
 #include "storage_ata_recovery_policy.inc"
 #include "storage_ata_deadline_core.inc"
