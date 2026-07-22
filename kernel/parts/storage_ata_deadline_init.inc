@@ -1,19 +1,21 @@
 void init_deadline() {
-    // Keep the legacy entrypoint referenced while ZenovFS still uses its boolean
-    // BlockDevice ABI. The implementation is removed in the typed-I/O migration.
+    // Keep the legacy typed fallback referenced until its fixed-loop transport
+    // is removed in a dedicated compatibility cleanup.
     (void)&init;
     heap::init();
     serial::line("Storage: probing ATA primary master with monotonic deadlines...");
     ata_present = false;
     ata_sector_total = 0U;
-    ata0.read_sector = ata2_read_sector;
-    ata0.write_sector = ata2_write_sector;
+    ata0.read_sector = ata2_read_result;
+    ata0.write_sector = ata2_write_result;
     ata0.present = ata2_identify();
     ata0.sectors = ata_sector_total;
     if (!ata0.present) {
         serial::line("Storage: ATA device not found or recovery failed");
         return;
     }
+    if (!block_device_contract_valid(ata0)) panic("Typed block device contract validation failed.");
+    serial::line("BLOCK_DEVICE_TYPED_ABI_READY version=1");
     serial::line("ATA_DEADLINE_DRIVER_READY clock=pit100 timeout=3000ms reset=5000ms attempts=2");
     serial::line("Storage: ATA PIO device online");
     if (!mount()) {
