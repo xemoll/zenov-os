@@ -2,20 +2,19 @@ name: ZenovOS ATA EIO Retry
 
 on:
   push:
-    paths:
-      - 'GNUmakefile'
-      - 'kernel/parts/storage_ata_deadline*.inc'
-      - 'tests/qemu_ata_eio_retry.sh'
-      - 'tests/blkdebug/ata-write-eio-once.conf'
-      - '.github/workflows/ata-eio-retry.yml'
+    branches:
+      - main
   pull_request:
-    paths:
-      - 'GNUmakefile'
-      - 'kernel/parts/storage_ata_deadline*.inc'
-      - 'tests/qemu_ata_eio_retry.sh'
-      - 'tests/blkdebug/ata-write-eio-once.conf'
-      - '.github/workflows/ata-eio-retry.yml'
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -45,6 +44,7 @@ jobs:
           bash -n tests/qemu_ata_eio_retry.sh
           test "$(grep -Fc '[inject-error]' tests/blkdebug/ata-write-eio-once.conf)" -eq 1
           grep -Fq 'event = "pwritev"' tests/blkdebug/ata-write-eio-once.conf
+          grep -Fq 'iotype = "write"' tests/blkdebug/ata-write-eio-once.conf
           grep -Fq 'errno = "5"' tests/blkdebug/ata-write-eio-once.conf
           grep -Fq 'once = "on"' tests/blkdebug/ata-write-eio-once.conf
 
@@ -54,6 +54,7 @@ jobs:
           set -o pipefail
           make clean check 2>&1 | tee ci-logs/ata-eio/native-check.log
           grep -Fq 'ATA_POLICY_TEST_OK cases=22' ci-logs/ata-eio/native-check.log
+          grep -Fq 'BLOCK_RESULT_TEST_OK cases=17' ci-logs/ata-eio/native-check.log
 
       - name: Inject one live EIO and prove reset retry
         run: |
