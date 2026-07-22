@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/pr57-source-snapshot
+  pull_request:
+    paths:
+      - '.github/workflows/pr57-source-snapshot.yml'
 
 permissions:
   contents: read
@@ -15,11 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
-      - name: Verify exact merge parent
+          fetch-depth: 3
+      - name: Verify exact merge source
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "9b6ff0dd700f51d3ccb927662db9383a12c805c8"
+          git cat-file -e 9b6ff0dd700f51d3ccb927662db9383a12c805c8^{commit}
       - name: Archive exact merged source
         run: |
           set -euo pipefail
