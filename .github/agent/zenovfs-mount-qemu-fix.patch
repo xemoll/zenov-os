@@ -1,0 +1,42 @@
+diff --git a/tools/zenovfs_mount_corrupt.cpp b/tools/zenovfs_mount_corrupt.cpp
+--- a/tools/zenovfs_mount_corrupt.cpp
++++ b/tools/zenovfs_mount_corrupt.cpp
+@@ -57,6 +57,10 @@ int main(int argc, char** argv) {
+         auto& super = *reinterpret_cast<Superblock*>(image.data());
+         auto* entries = reinterpret_cast<Entry*>(image.data() + kSectorSize);
+         const std::string mode = argv[2];
++        std::size_t spare = kEntryCount;
++        for (std::size_t i = kEntryCount; i > 0U; --i) {
++            if (!entries[i - 1U].used) { spare = i - 1U; break; }
++        }
+ 
+         if (mode == "entry-sectors") {
+             super.entry_sectors = 17U;
+@@ -68,11 +72,13 @@ int main(int argc, char** argv) {
+             std::memset(entries[2].path, 'A', sizeof(entries[2].path));
+             entries[2].path[0] = '/';
+         } else if (mode == "duplicate-path") {
+-            entries[127] = entries[2];
++            if (spare == kEntryCount) throw std::runtime_error("no free entry for duplicate fixture");
++            entries[spare] = entries[2];
+         } else if (mode == "transition-old-mismatch") {
+-            entries[127] = entries[2];
+-            entries[127].flags = 1U;
+-            entries[127].reserved = 0U;
++            if (spare == kEntryCount) throw std::runtime_error("no free entry for recovery fixture");
++            entries[spare] = entries[2];
++            entries[spare].flags = 1U;
++            entries[spare].reserved = 0U;
+         } else {
+             throw std::runtime_error("unknown corruption mode");
+         }
+diff --git a/.github/workflows/zenovfs-mount-hardening.yml b/.github/workflows/zenovfs-mount-hardening.yml
+--- a/.github/workflows/zenovfs-mount-hardening.yml
++++ b/.github/workflows/zenovfs-mount-hardening.yml
+@@ -60,7 +60,7 @@ jobs:
+           grep -Fq 'zfs_format_unused_entry_zero' kernel/parts/storage_format.inc
+           grep -Fq 'transition-old-mismatch' kernel/parts/storage_format.inc
+           grep -Fq 'run_case entry-sectors entry-sectors' tests/qemu_zenovfs_mount_reject.sh
+-          grep -Fq 'entries[127].reserved = 0U' tools/zenovfs_mount_corrupt.cpp
++          grep -Fq 'entries[spare].reserved = 0U' tools/zenovfs_mount_corrupt.cpp
+           echo 'ZENOVFS_MOUNT_HARDENING_SOURCE_CONTRACT_OK'
