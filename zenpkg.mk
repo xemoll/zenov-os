@@ -17,8 +17,10 @@ ZENPKG_CHECK_STAMP := $(BUILD)/zenpkg-check.stamp
 ZENPKG_QEMU_STAMP := $(BUILD)/qemu/zenpkg-qemu.stamp
 ZENPKG_TRANSPORT_QEMU_STAMP := $(BUILD)/qemu/zenpkg-transport-qemu.stamp
 ZENPKG_TRANSPORT_FAULT_QEMU_STAMP := $(BUILD)/qemu/zenpkg-transport-fault-qemu.stamp
+ZENPKG_BLKDEBUG_FIXTURE_STAMP := $(BUILD)/qemu/zenpkg-blkdebug-fixtures/.stamp
+ZENPKG_BLKDEBUG_QEMU_STAMP := $(BUILD)/qemu/zenpkg-blkdebug-qemu.stamp
 
-.PHONY: zenpkg-check zenpkg-qemu zenpkg-transport-qemu zenpkg-transport-fault-qemu zenrepo-check
+.PHONY: zenpkg-check zenpkg-qemu zenpkg-transport-qemu zenpkg-transport-fault-qemu zenpkg-blkdebug-qemu zenrepo-check
 
 all: $(ZENPKG_DATA_STAMP) $(BUILD)/zenpkg-manifest.json
 check: zenpkg-check
@@ -42,12 +44,17 @@ $(BUILD)/package-transport-journal-test: tests/package_transport_journal_test.cp
 $(BUILD)/zenpkg-transport-fault-test: tools/zenpkg_transport_fault_test.cpp tools/zenov_audit_format.hpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tools/zenpkg_transport_fault_test.cpp -o $@
 
+$(BUILD)/zenpkg-blkdebug-seed: tools/zenpkg_blkdebug_seed.cpp tools/zenov_audit_format.hpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tools/zenpkg_blkdebug_seed.cpp -o $@
+
+$(BUILD)/zenpkg-qmp-hmp-client: tools/zenpkg_blkdebug_qemu_test.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) -pthread $< -o $@
+
 $(BUILD)/zenrepo-metadata/.stamp: $(ZENREPO_FIXTURE_MATERIALIZER) $(wildcard tools/zenrepo/fixtures/*.inc) | $(BUILD)
 	bash $(ZENREPO_FIXTURE_MATERIALIZER) $(BUILD)/zenrepo-metadata
 	@touch $@
 
 $(ZENREPO_METADATA): $(BUILD)/zenrepo-metadata/.stamp
-
 
 $(BUILD)/package-repository-kernel-test: tests/package_repository_kernel_test.cpp kernel/parts/package_repository.inc $(wildcard kernel/parts/package_repository/*.inc) kernel/parts/rsa_pss.inc security/zenrepo_crypto_material.hpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tests/package_repository_kernel_test.cpp -o $@
@@ -90,8 +97,9 @@ $(BUILD)/zenpkg-manifest.json: $(ZENPKG_PACKAGES) $(ZENREPO_METADATA) $(ZENPKG_D
 zenrepo-check: $(BUILD)/zenrepo
 	bash tests/zenrepo_test.sh
 
-$(ZENPKG_CHECK_STAMP): $(BUILD)/package-repository-kernel-test $(BUILD)/package-transport-journal-test $(BUILD)/zenpkg-transport-fault-test $(BUILD)/zenovfs-package-seed $(BUILD)/zenpkg $(BUILD)/zenrepo $(ZENPKG_PACKAGES) $(ZENPKG_DATA_STAMP)
+$(ZENPKG_CHECK_STAMP): $(BUILD)/package-repository-kernel-test $(BUILD)/package-transport-journal-test $(BUILD)/zenpkg-transport-fault-test $(BUILD)/zenpkg-blkdebug-seed $(BUILD)/zenpkg-qmp-hmp-client $(BUILD)/zenovfs-package-seed $(BUILD)/zenpkg $(BUILD)/zenrepo $(ZENPKG_PACKAGES) $(ZENPKG_DATA_STAMP)
 	$(BUILD)/zenovfs-package-seed --self-test
+	$(BUILD)/zenpkg-qmp-hmp-client --self-test
 	bash tests/zenrepo_test.sh
 	$(BUILD)/package-repository-kernel-test $(BUILD)/zenrepo-test/fixtures
 	$(BUILD)/package-transport-journal-test
@@ -134,3 +142,22 @@ $(ZENPKG_TRANSPORT_FAULT_QEMU_STAMP): all $(BUILD)/zenpkg-transport-fault-test t
 	@touch $@
 
 zenpkg-transport-fault-qemu: $(ZENPKG_TRANSPORT_FAULT_QEMU_STAMP)
+
+$(ZENPKG_BLKDEBUG_FIXTURE_STAMP): all $(BUILD)/zenpkg-blkdebug-seed
+	@rm -rf $(BUILD)/qemu/zenpkg-blkdebug-fixtures
+	@mkdir -p $(BUILD)/qemu/zenpkg-blkdebug-fixtures
+	$(BUILD)/zenpkg-blkdebug-seed $(BUILD)/zenov-data.img $(BUILD)/hello-native-0.2.0.zpk $(BUILD)/qemu/zenpkg-blkdebug-fixtures
+	@for image in resume.img ready.img committed.img; do $(BUILD)/zenovfs-verify $(BUILD)/qemu/zenpkg-blkdebug-fixtures/$$image; done
+	@touch $@
+
+$(ZENPKG_BLKDEBUG_QEMU_STAMP): $(ZENPKG_BLKDEBUG_FIXTURE_STAMP) $(BUILD)/zenpkg-qmp-hmp-client tests/qemu_zenpkg_blkdebug_breakpoints.sh
+	@rm -rf $(BUILD)/qemu/zenpkg-blkdebug
+	@mkdir -p $(BUILD)/qemu/zenpkg-blkdebug
+	bash tests/qemu_zenpkg_blkdebug_breakpoints.sh \
+	  $(BUILD)/zenov-os.img \
+	  $(BUILD)/qemu/zenpkg-blkdebug-fixtures \
+	  $(BUILD)/qemu/zenpkg-blkdebug \
+	  $(BUILD)/zenpkg-qmp-hmp-client
+	@touch $@
+
+zenpkg-blkdebug-qemu: $(ZENPKG_BLKDEBUG_QEMU_STAMP)
