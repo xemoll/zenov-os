@@ -1,0 +1,104 @@
+name: ZenovOS ATA Deadlines
+
+on:
+  push:
+    paths:
+      - 'GNUmakefile'
+      - 'kernel/kernel.cpp'
+      - 'kernel/parts/hardware_irq_staging.inc'
+      - 'kernel/parts/storage*.inc'
+      - 'tests/storage_ata_policy_test.cpp'
+      - '.github/workflows/ata-deadlines.yml'
+  pull_request:
+    paths:
+      - 'GNUmakefile'
+      - 'kernel/kernel.cpp'
+      - 'kernel/parts/hardware_irq_staging.inc'
+      - 'kernel/parts/storage*.inc'
+      - 'tests/storage_ata_policy_test.cpp'
+      - '.github/workflows/ata-deadlines.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ata-deadlines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verify tested source revision
+        run: |
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+          echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
+
+      - name: Install native toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
+
+      - name: Run ATA policy under sanitizers
+        run: |
+          mkdir -p ci-logs/ata
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/storage_ata_policy_test.cpp -o ci-logs/ata/storage-ata-policy-sanitized
+          ci-logs/ata/storage-ata-policy-sanitized | tee ci-logs/ata/policy-sanitized.log
+          grep -Fq 'ATA_POLICY_TEST_OK cases=22' ci-logs/ata/policy-sanitized.log
+
+      - name: Build native system and policy gate
+        run: |
+          mkdir -p ci-logs/ata
+          set -o pipefail
+          make clean check 2>&1 | tee ci-logs/ata/native-check.log
+          grep -Fq 'ATA_POLICY_TEST_OK cases=22' ci-logs/ata/native-check.log
+
+      - name: Boot deadline-driven storage phases
+        run: |
+          set -o pipefail
+          make qemu 2>&1 | tee ci-logs/ata/qemu.log
+
+      - name: Verify ATA and input boot evidence
+        run: |
+          success_logs=(
+            build/qemu/serial-phase1.log
+            build/qemu/serial-phase2.log
+            build/qemu/serial-recovery.log
+            build/qemu/serial-audit-old-recovery.log
+            build/qemu/serial-audit-new-recovery.log
+          )
+          for serial in "${success_logs[@]}"; do
+            test -s "$serial"
+            grep -Fq 'MONOTONIC_TICK_READY hz=100 irq-mask=timer-only' "$serial"
+            grep -Fq 'ATA_IDENTIFY_OK deadline=3000ms retry-limit=1' "$serial"
+            grep -Fq 'ATA_DEADLINE_DRIVER_READY clock=pit100 timeout=3000ms reset=5000ms attempts=2' "$serial"
+            grep -Fq 'ZENOVFS_MOUNT_OK' "$serial"
+            grep -Fq 'INPUT_IRQS_READY keyboard=1 mouse=12' "$serial"
+            grep -Fq 'PS2_MOUSE_OK' "$serial"
+            grep -Fq 'PS2_MOUSE_IRQ_ROUTE_OK' "$serial"
+            grep -Fq 'ZENOVOS_UI_READY' "$serial"
+            grep -Fq 'zenov> ' "$serial"
+            ! grep -Eq 'ATA_IO_ERROR|PS2_MOUSE_UNAVAILABLE|KERNEL PANIC|DOUBLE FAULT|ASSERT' "$serial"
+          done
+          ! grep -Eq 'ATA_IO_ERROR|DOUBLE FAULT|ASSERT' build/qemu/serial*.log
+          grep -Fq 'Persistent ZenovGuard audit journal validation failed.' build/qemu/serial-audit-corrupt.log
+          grep -Fq 'Signed syscall capability policy validation failed.' build/qemu/serial-zcap-corrupt.log
+          grep -Fq 'Signed malware intelligence validation failed.' build/qemu/serial-zmid-corrupt.log
+          grep -Fq 'Signed ransomware policy validation failed.' build/qemu/serial-zrwp-corrupt.log
+
+      - name: Upload ATA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ata-deadlines-${{ github.run_id }}
+          path: |
+            ci-logs/ata/**
+            build/qemu/serial*.log
+            build/qemu/qemu-*.stderr
+          if-no-files-found: warn
+          retention-days: 14
