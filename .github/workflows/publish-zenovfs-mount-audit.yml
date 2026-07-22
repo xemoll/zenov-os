@@ -103,7 +103,7 @@ jobs:
             build/qemu/zenovfs-mount-reject
           grep -Fq 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=6 ui_reached=0' build/qemu/zenovfs-mount-reject/summary.log
 
-      - name: Derive and upload exact production blobs
+      - name: Derive and publish exact production tree
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -124,8 +124,12 @@ jobs:
             tools/zenovfs_mount_corrupt.cpp
           )
           git add "${paths[@]}"
-          tree=$(git write-tree)
-          printf 'parent=%s\ntree=%s\n' "$(git rev-parse HEAD)" "$tree" > /tmp/zenovfs-mount-map.txt
+          local_tree=$(git write-tree)
+          base_tree=$(git rev-parse HEAD^{tree})
+          printf '{"base_tree":"%s","tree":[' "$base_tree" > /tmp/tree-request.json
+          first=1
+          : > /tmp/zenovfs-mount-map.txt
+          printf 'parent=%s\nbase_tree=%s\nlocal_tree=%s\n' "$(git rev-parse HEAD)" "$base_tree" "$local_tree" >> /tmp/zenovfs-mount-map.txt
           for path in "${paths[@]}"; do
             expected=$(git hash-object "$path")
             mode=$(git ls-files -s -- "$path" | awk '{print $1}')
@@ -139,11 +143,25 @@ jobs:
                 --data-binary @-)
             actual=$(jq -r '.sha' <<<"$response")
             test "$actual" = "$expected"
+            if [[ $first -eq 0 ]]; then printf ',' >> /tmp/tree-request.json; fi
+            first=0
+            jq -cn --arg path "$path" --arg mode "$mode" --arg sha "$actual" \
+              '{path:$path,mode:$mode,type:"blob",sha:$sha}' >> /tmp/tree-request.json
             printf '%s\t%s\t%s\n' "$path" "$mode" "$actual" >> /tmp/zenovfs-mount-map.txt
           done
+          printf ']}' >> /tmp/tree-request.json
+          tree_response=$(curl --fail-with-body -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/trees" \
+            --data-binary @/tmp/tree-request.json)
+          remote_tree=$(jq -r '.sha' <<<"$tree_response")
+          test "$remote_tree" = "$local_tree"
+          printf 'remote_tree=%s\n' "$remote_tree" >> /tmp/zenovfs-mount-map.txt
           cat /tmp/zenovfs-mount-map.txt
 
-      - name: Upload exact blob map and verification logs
+      - name: Upload exact tree map and verification logs
         uses: actions/upload-artifact@v4
         with:
           name: zenovfs-mount-audit-map
