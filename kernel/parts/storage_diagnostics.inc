@@ -33,6 +33,7 @@ void command_disk_status() {
     console::line("");
     console::write("  Device          "); console::line(ata0.present ? "ata0 online" : "ata0 unavailable");
     console::line("  Driver          ATA PIO / LBA28 / PIT deadlines");
+    console::line("  Block ABI       typed BlockResult callbacks");
     console::write("  Capacity        "); console::unsigned_dec(ata0.sectors); console::line(" sectors");
     storage_print_counter("Requests", ata_diagnostics.requests);
     storage_print_counter("Completed", ata_diagnostics.completed);
@@ -56,6 +57,7 @@ void command_disk_status() {
     else console::warning("BLOCK_DEVICE_COUNTERS_INVALID");
     console::success("BLOCK_DEVICE_STATUS_OK");
     serial::line("BLOCK_RESULT_API_OK version=1");
+    serial::line("BLOCK_DEVICE_TYPED_ABI_OK version=1");
 }
 
 bool dispatch_storage_command(const char* line) {
