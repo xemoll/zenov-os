@@ -17,6 +17,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/graphics_mapping.inc"
 #include "parts/user_window.inc"
 #include "parts/storage.inc"
+#include "parts/storage_ata_deadline.inc"
 #include "parts/storage_bytes.inc"
 #include "parts/storage_tools.inc"
 #include "parts/storage_browser.inc"
@@ -103,13 +104,17 @@ extern "C" void kernel_main() {
 
     console::set_color(zenov_generated::kForeground, zenov_generated::kBackground);
     idt_init();
+    pic_remap();
+    pit_init(100);
+    enable_interrupts();
+    serial::line("MONOTONIC_TICK_READY hz=100");
     pmm::init();
     paging::init();
     if (!paging::scrub_process_window(true)) panic("User process window scrub self-test failed.");
     serial::line("USER_WINDOW_SCRUB_OK");
     if (!process::elf_policy_self_test()) panic("ELF W^X policy self-test failed.");
     serial::line("ELF_WX_POLICY_OK");
-    storage::init();
+    storage::init_deadline();
     process::init();
     if (!security_audit::init()) panic("Persistent ZenovGuard audit journal validation failed.");
     if (!security_guard::init()) panic("ZenovGuard cryptographic or audit self-test failed.");
@@ -137,13 +142,10 @@ extern "C" void kernel_main() {
     const bool graphical = graphics::init();
     if (graphical) { console::activate_shadow(); serial::line("CONSOLE_SHADOW_OK"); }
     serial::line(graphical ? "GRAPHICAL_DESKTOP_READY" : "GRAPHICS_FALLBACK_TEXT");
-    pic_remap();
     const bool mouse_ready = mouse_init();
     if (!mouse_ready) serial::line("PS2_MOUSE_UNAVAILABLE");
     if (mouse_ready && !mouse_irq_route_ready()) panic("PS/2 mouse IRQ route validation failed.");
     if (mouse_ready) serial::line("PS2_MOUSE_IRQ_ROUTE_OK");
-    pit_init(100);
-    enable_interrupts();
     if (graphical && mouse_ready && !mouse_decoder_regression()) panic("PS/2 mouse decoder regression failed.");
     if (graphical && mouse_ready) serial::line("PS2_MOUSE_DECODER_OK");
 
