@@ -5,6 +5,8 @@ on:
     paths:
       - 'GNUmakefile'
       - 'kernel/parts/storage_ata_deadline*.inc'
+      - 'kernel/parts/storage_ata_recovery_policy.inc'
+      - 'tests/storage_ata_recovery_policy_test.cpp'
       - 'tests/qemu_ata_eio_retry.sh'
       - 'tests/blkdebug/ata-write-eio-once.conf'
       - '.github/workflows/ata-eio-retry.yml'
@@ -12,6 +14,8 @@ on:
     paths:
       - 'GNUmakefile'
       - 'kernel/parts/storage_ata_deadline*.inc'
+      - 'kernel/parts/storage_ata_recovery_policy.inc'
+      - 'tests/storage_ata_recovery_policy_test.cpp'
       - 'tests/qemu_ata_eio_retry.sh'
       - 'tests/blkdebug/ata-write-eio-once.conf'
       - '.github/workflows/ata-eio-retry.yml'
@@ -54,6 +58,7 @@ jobs:
           set -o pipefail
           make clean check 2>&1 | tee ci-logs/ata-eio/native-check.log
           grep -Fq 'ATA_POLICY_TEST_OK cases=22' ci-logs/ata-eio/native-check.log
+          grep -Fq 'ATA_RECOVERY_POLICY_TEST_OK cases=9' ci-logs/ata-eio/native-check.log
 
       - name: Inject one live EIO and prove reset retry
         run: |
@@ -66,12 +71,14 @@ jobs:
           test -s "$out/serial.log"
           test -s "$out/summary.log"
           grep -Fq 'ATA_EIO_RETRY_QEMU_OK injected=EIO operation=write' "$out/summary.log"
+          grep -Fq 'revalidations=1' "$out/summary.log"
           test "$(grep -Fc 'ATA_IO_ERROR op=write reason=' "$out/serial.log")" -eq 1
           test "$(grep -Fc 'ATA_RECOVERY_RESET_OK' "$out/serial.log")" -eq 1
+          test "$(grep -Fc 'ATA_RECOVERY_REVALIDATE_OK command=identify capacity=stable' "$out/serial.log")" -eq 1
           test "$(grep -Fc 'ATA_RECOVERY_RETRY_OK op=write attempts=2' "$out/serial.log")" -eq 1
           grep -Fq 'ATA_RETRY_PROOF_OK' "$out/serial.log"
           grep -Fq 'ZENOVFS_FSCK_OK' "$out/serial.log"
-          ! grep -Eq 'KERNEL PANIC|DOUBLE FAULT|ASSERT|PS2_MOUSE_UNAVAILABLE' "$out/serial.log"
+          ! grep -Eq 'ATA_RECOVERY_REVALIDATE_FAILED|ATA_DEVICE_OFFLINE|KERNEL PANIC|DOUBLE FAULT|ASSERT|PS2_MOUSE_UNAVAILABLE' "$out/serial.log"
           test ! -s "$out/qemu.stderr"
 
       - name: Upload ATA EIO evidence

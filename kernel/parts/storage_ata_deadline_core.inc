@@ -35,7 +35,9 @@ struct AtaDiagnostics {
     uint32_t commands;
     uint32_t retries;
     uint32_t resets;
+    uint32_t revalidations;
     uint32_t reset_failures;
+    uint32_t revalidation_failures;
     uint32_t timeouts;
     uint32_t attempt_errors;
 };
@@ -78,6 +80,13 @@ BlockResult ata2_block_result(BlockOperation operation, uint32_t lba, const ata_
                         result.status, result.error_register);
 }
 
+void ata2_publish_device_state(bool present, uint32_t sectors) {
+    ata_present = present;
+    ata_sector_total = present ? sectors : 0U;
+    ata0.present = present;
+    ata0.sectors = present ? sectors : 0U;
+}
+
 void ata2_pause() { asm volatile("pause"); }
 uint32_t ata2_deadline(uint32_t timeout_ms) { return ata_policy::deadline_after(timer_ticks, timeout_ms, ata2_clock_hz); }
 
@@ -117,6 +126,8 @@ void ata2_record_attempt_failure(const char* operation_name, BlockOperation oper
     serial::line(block_status_name(block.status));
 }
 
+ata_policy::Result ata2_identify_once(uint8_t attempts);
+
 BlockResult ata2_complete_request(BlockResult result) {
     ata_last_block_result = result;
     if (result.ok()) ++ata_diagnostics.completed;
@@ -128,6 +139,7 @@ BlockResult ata2_complete_request(BlockResult result) {
 }
 
 ata_policy::Result ata2_soft_reset(uint8_t attempts) {
+    const uint32_t expected_sectors = ata_sector_total;
     out8(ata2_control, static_cast<uint8_t>(ata2_control_nien | ata2_control_srst));
     io_wait(); io_wait(); io_wait(); io_wait();
     out8(ata2_control, ata2_control_nien);
@@ -136,11 +148,33 @@ ata_policy::Result ata2_soft_reset(uint8_t attempts) {
     if (!result.ok()) {
         ++ata_diagnostics.reset_failures;
         result.error = ata_policy::Error::reset_failed;
+        ata2_publish_device_state(false, 0U);
         ata2_record_attempt_failure("reset", BlockOperation::reset, 0U, result);
+        serial::line("ATA_DEVICE_OFFLINE reason=reset-failed");
         return result;
     }
+
     ++ata_diagnostics.resets;
+    ++ata_diagnostics.revalidations;
+    ++ata_diagnostics.commands;
+    result = ata2_identify_once(attempts);
+    const uint32_t observed_sectors = ata_sector_total;
+    const AtaRevalidationDecision decision =
+        ata_revalidation_decision(result.ok(), expected_sectors, observed_sectors);
+    if (decision != AtaRevalidationDecision::accept) {
+        ++ata_diagnostics.revalidation_failures;
+        ata2_publish_device_state(false, 0U);
+        result.error = ata_policy::Error::reset_failed;
+        ata2_record_attempt_failure("revalidate", BlockOperation::reset, 0U, result);
+        serial::write("ATA_RECOVERY_REVALIDATE_FAILED reason=");
+        serial::line(ata_revalidation_reason(decision));
+        serial::line("ATA_DEVICE_OFFLINE reason=revalidation-failed");
+        return result;
+    }
+
+    ata2_publish_device_state(true, observed_sectors);
     serial::line("ATA_RECOVERY_RESET_OK");
+    serial::line("ATA_RECOVERY_REVALIDATE_OK command=identify capacity=stable");
     return result;
 }
 

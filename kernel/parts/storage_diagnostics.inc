@@ -42,7 +42,9 @@ void command_disk_status() {
     storage_print_counter("Attempts", ata_diagnostics.commands);
     storage_print_counter("Retries", ata_diagnostics.retries);
     storage_print_counter("Resets", ata_diagnostics.resets);
+    storage_print_counter("Revalidations", ata_diagnostics.revalidations);
     storage_print_counter("Reset failures", ata_diagnostics.reset_failures);
+    storage_print_counter("Revalidate fail", ata_diagnostics.revalidation_failures);
     storage_print_counter("Timeouts", ata_diagnostics.timeouts);
     storage_print_counter("Attempt errors", ata_diagnostics.attempt_errors);
     storage_print_result("Last result", ata_last_block_result);
