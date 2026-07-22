@@ -4,20 +4,37 @@ const char* foreign_format_text(package_foreign::Format format) {
         case Format::zenpkg: return "zenpkg";
         case Format::zex1: return "zex1";
         case Format::elf: return "elf";
+        case Format::elf_foreign: return "elf-foreign";
         case Format::appimage: return "appimage";
         case Format::portable_executable: return "pe";
         case Format::msi: return "msi";
         case Format::msix: return "msix";
+        case Format::cabinet: return "cab";
+        case Format::windows_update: return "msu";
+        case Format::windows_image: return "wim";
         case Format::deb: return "deb";
         case Format::rpm: return "rpm";
+        case Format::alpine_apk: return "alpine-apk";
+        case Format::arch_package: return "arch-package";
         case Format::snap: return "snap";
         case Format::flatpak: return "flatpak";
         case Format::apple_pkg: return "apple-pkg";
         case Format::apple_dmg: return "apple-dmg";
         case Format::macho: return "macho";
+        case Format::xbox_xbe: return "xbox-xbe";
+        case Format::xbox_xex: return "xbox-xex";
+        case Format::xbox_stfs: return "xbox-stfs";
         case Format::xbox_xvc: return "xbox-xvc";
         case Format::xbox_msixvc: return "xbox-msixvc";
+        case Format::xbox_msixvc2: return "xbox-msixvc2";
+        case Format::playstation_psx_exe: return "playstation-psx-exe";
+        case Format::playstation_ps2_elf: return "playstation-ps2-elf";
+        case Format::playstation_pbp: return "playstation-pbp";
         case Format::playstation_pkg: return "playstation-pkg";
+        case Format::playstation_pup: return "playstation-pup";
+        case Format::playstation_self: return "playstation-self";
+        case Format::disc_image: return "disc-image";
+        case Format::chd_image: return "chd";
         case Format::zip: return "zip";
         case Format::unknown: return "unknown";
     }
@@ -27,17 +44,18 @@ const char* foreign_format_text(package_foreign::Format format) {
 void formats() {
     console::line("  FORMAT/FAMILY                  0.1.1 STATUS");
     console::line("  ----------------------------- ------------------------------------------");
-    console::line("  ZenPkg ZENPKG1                installable after signed authorization");
-    console::line("  ZEX1, static ELF32/i386       host-import into ZenPkg, then sign/install");
-    console::line("  DEB, RPM, generic ZIP         inspect-only; scripts are never executed");
-    console::line("  AppImage, Snap, Flatpak       runtime-required; Linux ABI is absent");
-    console::line("  PE, MSI, MSIX/AppX            runtime-required; Win32/UWP ABI is absent");
-    console::line("  PKG, DMG, Mach-O              runtime-required; Darwin ABI is absent");
-    console::line("  Xbox XVC/MSIXVC               partner-only; GDK identity/keys required");
-    console::line("  PlayStation package           partner-only; official SDK/keys required");
+    console::line("  ZenPkg, ZEX1, ELF32/i386      native verify/import/sign/install path");
+    console::line("  DEB/RPM/APK/pkg.tar/CAB/WIM   inspect-only; package scripts never run");
+    console::line("  AppImage/Snap/Flatpak         runtime-required; Linux ABI is absent");
+    console::line("  PE/MSI/MSIX/AppX              runtime-required; Win32/UWP ABI is absent");
+    console::line("  PKG/DMG/Mach-O                runtime-required; Darwin ABI is absent");
+    console::line("  XBE/XEX/STFS                  legacy Xbox runtime-required");
+    console::line("  XVC/MSIXVC/MSIXVC2            partner-only; GDK identity/keys required");
+    console::line("  PS-X/PS2 ELF/PBP/disc images  legacy console runtime-required");
+    console::line("  PlayStation PKG/PUP/SELF      signed/encrypted partner boundary");
     console::line("");
     console::line("  Detection never grants execution authority or bypasses ZenRepo policy.");
-    serial::line("ZENPKG_FORMATS_OK");
+    serial::line("ZENPKG_FORMATS_OK generations=legacy-current");
 }
 
 bool probe_format(const char* path) {
