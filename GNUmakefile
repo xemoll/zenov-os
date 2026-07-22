@@ -20,6 +20,7 @@ $(BUILD)/kernel.o: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/for
 $(BUILD)/build-manifest.json: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc
 
 ATA_POLICY_TEST := $(BUILD)/storage-ata-policy-test
+ATA_RECOVERY_POLICY_TEST := $(BUILD)/storage-ata-recovery-policy-test
 BLOCK_RESULT_TEST := $(BUILD)/storage-block-result-test
 ATA_EIO_QEMU_OUT := $(BUILD)/qemu/ata-eio-retry
 ATA_EIO_QEMU_STAMP := $(ATA_EIO_QEMU_OUT)/.stamp
@@ -58,11 +59,15 @@ $(ATA_POLICY_TEST): tests/storage_ata_policy_test.cpp kernel/parts/storage_ata_p
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 	$@
 
+$(ATA_RECOVERY_POLICY_TEST): tests/storage_ata_recovery_policy_test.cpp kernel/parts/storage_ata_recovery_policy.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+	$@
+
 $(BLOCK_RESULT_TEST): tests/storage_block_result_test.cpp kernel/parts/storage_block_result.inc | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 	$@
 
-check: $(ATA_POLICY_TEST) $(BLOCK_RESULT_TEST)
+check: $(ATA_POLICY_TEST) $(ATA_RECOVERY_POLICY_TEST) $(BLOCK_RESULT_TEST)
 
 $(ATA_EIO_QEMU_STAMP): all tests/qemu_ata_eio_retry.sh tests/blkdebug/ata-write-eio-once.conf $(BUILD)/zenovfs-verify
 	@rm -rf $(ATA_EIO_QEMU_OUT)
