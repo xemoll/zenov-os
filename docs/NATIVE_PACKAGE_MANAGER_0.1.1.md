@@ -61,14 +61,14 @@ zenpkg import-native FILE \
   --output FILE.zpk
 ```
 
-`zenpkg probe` reports the detected family, support state, signature confidence, byte count and SHA-256. Extension-only matches are explicitly marked and are not treated as validated containers.
+`zenpkg probe` reports the detected family, support state, signature confidence, complete byte count and full-file SHA-256. Large ISO, CHD, DMG, XVC and similar images are not loaded into one unbounded vector: SHA-256 is computed incrementally, while classification receives at most a 64 KiB head sample plus the final 512 bytes. The tail sample preserves UDIF/DMG trailer detection. Extension-only matches are explicitly marked and are not treated as validated containers.
 
 `zenpkg import-native` accepts only:
 
 - a complete ZEX1 image compatible with the 0.1.1 ring-3 loader;
 - a little-endian ELF32/i386 `ET_EXEC` image with no dynamic interpreter or dynamic segment.
 
-ELF import rejects `PT_INTERP`, `PT_DYNAMIC`, W+X load segments, overlapping mappings, conflicting page permissions, invalid entrypoints, unsupported architectures and out-of-range files. ZEX1 import rechecks the complete header, image length, stack/BSS constraints and checksum.
+Import performs a bounded streaming preflight before the complete loader validation. ELF import rejects `PT_INTERP`, `PT_DYNAMIC`, W+X load segments, overlapping mappings, conflicting page permissions, invalid entrypoints, unsupported architectures and out-of-range files. ZEX1 import rechecks the complete header, image length, stack/BSS constraints and checksum.
 
 The output is a deterministic ZenPkg container. Import does not add the package to trusted repository metadata. The resulting `.zpk` remains unauthorized until it is included in a signed ZenRepo target set through the repository build process.
 
@@ -77,7 +77,7 @@ The output is a deterministic ZenPkg container. Import does not add the package 
 | Family | Recognized generations and examples | 0.1.1 behaviour |
 |---|---|---|
 | ZenovOS | ZENPKG1, ZEX1, static ELF32/i386 | Native verification, deterministic host import, signed installation and ring-3 execution |
-| Generic ELF | x86_64, MIPS and other foreign ELF classes/ABIs | Classified as `runtime-required`; never passed to native import |
+| Generic ELF | x86_64, generic MIPS and other foreign ELF classes/ABIs | Classified as `runtime-required`; generic MIPS is not assumed to be PS2 and is never passed to native import |
 | Debian / RPM | `.deb`, `.rpm` | Inspect-only; maintainer and transaction scripts are never executed |
 | Alpine | APK v2 gzip-stream packages and APK v3 ADB packages | Inspect-only; signatures, scripts and filesystem deployment remain external |
 | Arch Linux | `.pkg.tar.zst`, `.pkg.tar.xz`, `.pkg.tar.gz`, `.pkg.tar.bz2`, `.pkg.tar.lz4` | Inspect-only; ALPM hooks, signatures and dependency actions are never executed |
@@ -90,7 +90,7 @@ The output is a deterministic ZenPkg container. Import does not add the package 
 | Xbox One / Series | XVC | Partner-only; official GDK identity, licenses and package keys are required |
 | Xbox / Windows PC | MSIXVC and the newer PC-only MSIXVC2 generation | Partner-only; official GDK packaging and identity remain required |
 | PlayStation / PS1 | PS-X EXE and ISO/BIN/CUE media candidates | Runtime-required; MIPS R3000A and console services are absent |
-| PlayStation 2 | MIPS ELF and optical media images | Runtime-required; Emotion Engine/IOP and console services are absent |
+| PlayStation 2 | little-endian MIPS ELF carrying `EF_MIPS_ARCH_3` and `EF_MIPS_MACH_5900` flags | Runtime-required; Emotion Engine/IOP and console services are absent |
 | PSP / PlayStation Vita | PBP, platform-tagged PKG and ZIP-based VPK | PBP/VPK are runtime-required; protected PKG remains partner-only |
 | PlayStation 3 | platform-tagged PKG, SELF and PUP update package | Partner-only; encryption, licenses, firmware validation and signatures are not bypassed |
 | PlayStation 4 | `CNT` package, SELF and SCE x86-64 ELF | Protected package/SELF are partner-only; decrypted SCE ELF is runtime-required |
@@ -163,18 +163,19 @@ The 0.1.1 gates cover deterministic package creation, signed root rotation, dele
 
 The expanded foreign-intake suite adds:
 
-- 44 direct classifier cases spanning native, Windows, Linux, macOS, Xbox, PlayStation and media generations;
-- 37 host probe cases using generated signature fixtures;
+- 46 direct classifier cases spanning native, Windows, Linux, macOS, Xbox, PlayStation and media generations;
+- 39 host probe cases using generated signature fixtures, including a 1 MiB streaming DMG probe;
 - byte-identical repeated import for both ZEX1 and static ELF32/i386;
-- six fail-closed import cases: PE, interpreted/dynamic ELF, W+X ELF, x86-64 ELF, PS2/MIPS ELF and checksum-corrupt ZEX1;
-- false-positive regressions for bare MZ and Java `CAFEBABE`;
+- seven fail-closed import cases: PE, interpreted/dynamic ELF, W+X ELF, x86-64 ELF, generic MIPS ELF, PS2/R5900 ELF and checksum-corrupt ZEX1;
+- false-positive regressions for bare MZ, Java `CAFEBABE` and generic MIPS misclassification;
+- ASan/UBSan execution of the classifier and complete host intake suite;
 - a QEMU lifecycle proving `pkg formats`, `pkg probe`, signed installation, execution and ZenovFS `fsck`.
 
 Expected evidence markers:
 
 ```text
-PACKAGE_FOREIGN_FORMAT_TEST_OK cases=44 generations=legacy-current
-ZENPKG_FOREIGN_TEST_OK probes=37 native-import=zex1,elf32 deterministic=2 rejection=6 generations=legacy-current
+PACKAGE_FOREIGN_FORMAT_TEST_OK cases=46 generations=legacy-current
+ZENPKG_FOREIGN_TEST_OK probes=39 native-import=zex1,elf32 deterministic=2 rejection=7 generations=legacy-current streaming=1
 ZENPKG_FOREIGN_QEMU_OK formats=1 probe=zenpkg install=1 run=1 fsck=1
 ```
 
@@ -183,6 +184,7 @@ ZENPKG_FOREIGN_QEMU_OK formats=1 probe=zenpkg install=1 run=1 fsck=1
 - System version remains `0.1.1`.
 - General network repository transport is disabled.
 - ZenovFS1 limits each package and installed payload to 64 KiB.
+- Guest-side `pkg probe` is limited to a 64 KiB ZenovFS file; host-side `zenpkg probe` supports large files through streaming and bounded sampling.
 - Only one foreground userspace process is supported.
 - Dynamic linking, x86_64 native execution, a general Linux syscall ABI, Win32/UWP, Darwin/Mach-O execution and console emulation are not implemented.
 - Xbox and PlayStation encrypted or signed content remains subject to official platform access, licensing, identities and key material; ZenovOS does not bypass those controls.
