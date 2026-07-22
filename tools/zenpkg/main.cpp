@@ -222,8 +222,9 @@ int run_command(const std::string& command, const Arguments& arguments) {
     }
     if (command == "hash") {
         arguments.reject_unknown({});
-        const auto bytes = zenpkg::read_binary(arguments.require_positional("file path"));
-        std::cout << zenpkg::sha256_hex(bytes) << '\n';
+        const auto path = arguments.require_positional("file path");
+        const auto digest = zenpkg::sha256_file_streaming(path);
+        std::cout << digest.sha256 << '\n';
         return 0;
     }
     if (command == "manifest-check") {
