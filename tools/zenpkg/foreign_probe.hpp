@@ -69,7 +69,12 @@ inline StreamingForeignProbe probe_foreign_streaming(const std::filesystem::path
     if (!stream.eof()) throw Error("probe read failed: " + path.string());
     if (consumed != file_size) throw Error("probe short read: " + path.string());
 
-    if (file_size > sample.size()) sample.insert(sample.end(), tail.begin(), tail.end());
+    if (file_size > sample.size()) {
+        const std::uint64_t missing = file_size - static_cast<std::uint64_t>(sample.size());
+        const std::size_t append = static_cast<std::size_t>(
+            std::min<std::uint64_t>(missing, tail.size()));
+        sample.insert(sample.end(), tail.end() - static_cast<std::ptrdiff_t>(append), tail.end());
+    }
     if (sample.size() > 0xffffffffULL) throw Error("probe sample exceeds classifier limit");
 
     const std::string filename = path.filename().string();
