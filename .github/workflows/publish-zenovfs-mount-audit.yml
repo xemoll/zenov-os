@@ -4,27 +4,30 @@ on:
   push:
     branches:
       - agent/zenovfs-security-publication-clean
-  pull_request:
 
 concurrency:
   group: zenovfs-security-publication-clean
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   publish-content-addressed-blobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Prepare exact reviewed base
         run: |
           set -euo pipefail
+          mkdir -p ci-logs
           cp .github/agent/zenovfs-mount-hardening.patch /tmp/zenovfs-mount-hardening.patch
           cp .github/agent/zenovfs-mount-hardening-fix.patch /tmp/zenovfs-mount-hardening-fix.patch
           cp .github/agent/zenovfs-mount-hardening-count.patch /tmp/zenovfs-mount-hardening-count.patch
@@ -37,7 +40,13 @@ jobs:
           test "$(git rev-parse HEAD)" = 199f98d478a7515c927c97d8fd61bdf5679e7e99
 
       - name: Apply core mount validator
-        run: git apply --check /tmp/zenovfs-mount-hardening.patch && git apply /tmp/zenovfs-mount-hardening.patch
+        run: |
+          set +e
+          git apply --check --verbose /tmp/zenovfs-mount-hardening.patch >ci-logs/core-apply.log 2>&1
+          status=$?
+          cat ci-logs/core-apply.log
+          if [[ $status -ne 0 ]]; then exit $status; fi
+          git apply /tmp/zenovfs-mount-hardening.patch
 
       - name: Apply host compile fix
         run: git apply --check /tmp/zenovfs-mount-hardening-fix.patch && git apply /tmp/zenovfs-mount-hardening-fix.patch
@@ -84,14 +93,15 @@ jobs:
           diff -u /tmp/expected-files /tmp/actual-files
 
       - name: Install strict toolchain and QEMU
-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl jq qemu-system-x86
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl jq qemu-system-x86
 
       - name: Validate shared parser, strict build and kernel rejection
         run: |
           set -euo pipefail
           mkdir -p build/sanitized ci-logs
-          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
-            -fsanitize=address,undefined -fno-omit-frame-pointer \
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-integer-conversion \
+            -fno-sanitize-recover=all -fno-omit-frame-pointer \
             tests/zenovfs_mount_validation_test.cpp -o build/sanitized/zenovfs-mount-validation-test
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
           UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
@@ -162,12 +172,14 @@ jobs:
           cat /tmp/zenovfs-mount-map.txt
 
       - name: Upload exact tree map and verification logs
-        uses: actions/upload-artifact@v4
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: zenovfs-mount-audit-map
           if-no-files-found: error
           path: |
             /tmp/zenovfs-mount-map.txt
+            ci-logs/core-apply.log
             ci-logs/zenovfs-mount-validation.log
             ci-logs/zenovfs-mount-strict-build.log
             build/qemu/zenovfs-mount-reject/*.serial.log
