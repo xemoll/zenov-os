@@ -74,7 +74,7 @@ bool read_file_preview(const char* input, uint8_t* output, uint32_t capacity,
     uint8_t block[sector_size];
     uint32_t sector = 0;
     while (copied < wanted) {
-        if (!ata0.read_sector(data_sector(static_cast<uint32_t>(found)) + sector, block)) return false;
+        if (!zfs_read_sector(data_sector(static_cast<uint32_t>(found)) + sector, block).ok()) return false;
         uint32_t chunk = wanted - copied;
         if (chunk > sector_size) chunk = sector_size;
         memcpy(output + copied, block, chunk);
