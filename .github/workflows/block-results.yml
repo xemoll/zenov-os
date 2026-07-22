@@ -75,7 +75,7 @@ jobs:
           ci-logs/block-results/storage-block-result-sanitized | tee ci-logs/block-results/result-contract.log
           ci-logs/block-results/storage-block-device-sanitized | tee ci-logs/block-results/device-contract.log
           grep -Fq 'BLOCK_RESULT_TEST_OK cases=17' ci-logs/block-results/result-contract.log
-          grep -Fq 'BLOCK_DEVICE_ABI_TEST_OK cases=27 requests=12 completed=3 failed=9' ci-logs/block-results/device-contract.log
+          grep -Fq 'BLOCK_DEVICE_ABI_TEST_OK cases=29 requests=12 completed=3 failed=9' ci-logs/block-results/device-contract.log
 
       - name: Build strict native system
         run: |
@@ -83,7 +83,7 @@ jobs:
           mkdir -p ci-logs/block-results
           make clean check 2>&1 | tee ci-logs/block-results/native-check.log
           grep -Fq 'BLOCK_RESULT_TEST_OK cases=17' ci-logs/block-results/native-check.log
-          grep -Fq 'BLOCK_DEVICE_ABI_TEST_OK cases=27 requests=12 completed=3 failed=9' ci-logs/block-results/native-check.log
+          grep -Fq 'BLOCK_DEVICE_ABI_TEST_OK cases=29 requests=12 completed=3 failed=9' ci-logs/block-results/native-check.log
           grep -Fq 'ATA_POLICY_TEST_OK cases=22' ci-logs/block-results/native-check.log
           grep -Fq 'ATA_RECOVERY_POLICY_TEST_OK cases=9' ci-logs/block-results/native-check.log
 
