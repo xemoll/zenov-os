@@ -103,7 +103,7 @@ jobs:
             cat ci-logs/final-diff-check.log
             exit 1
           fi
-          git diff --name-only | sort > /tmp/actual-files
+          git status --porcelain=v1 --untracked-files=all | cut -c4- | sort > /tmp/actual-files
           cat > /tmp/expected-files <<'EOF'
           .github/workflows/antimalware.yml
           .github/workflows/zenovfs-mount-hardening.yml
