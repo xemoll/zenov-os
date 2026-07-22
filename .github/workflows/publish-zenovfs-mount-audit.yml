@@ -47,6 +47,8 @@ jobs:
           done
           cp .github/agent/zenovfs-mount-hardening.final.yml /tmp/zenovfs-mount-hardening.final.yml
           cp .github/agent/ZENOVFS_MOUNT_HARDENING_0.1.1.final.md /tmp/ZENOVFS_MOUNT_HARDENING_0.1.1.final.md
+          cp .github/agent/ANTIMALWARE_0.1.1.final.md /tmp/ANTIMALWARE_0.1.1.final.md
+          cp .github/agent/ON_ACCESS_PROTECTION_0.1.1.final.md /tmp/ON_ACCESS_PROTECTION_0.1.1.final.md
           git switch --detach 199f98d478a7515c927c97d8fd61bdf5679e7e99
           test "$(git rev-parse HEAD)" = 199f98d478a7515c927c97d8fd61bdf5679e7e99
           : > ci-logs/patch-application.log
@@ -97,14 +99,24 @@ jobs:
           PY
 
           apply_patch zenovfs-read-failure-scrub.patch --include=kernel/parts/storage.inc
-          apply_patch zmid-update-rollback.patch
-          apply_patch quarantine-digest-prefix.patch
-          apply_patch quarantine-read-block.patch
+          apply_patch zmid-update-rollback.patch \
+            --include=kernel/parts/zmid_policy.inc \
+            --include=.github/workflows/antimalware.yml
+          apply_patch quarantine-digest-prefix.patch \
+            --include=kernel/parts/security_guard.inc \
+            --include=.github/workflows/antimalware.yml
+          apply_patch quarantine-read-block.patch \
+            --include=kernel/parts/security_guard.inc \
+            --include=tests/qemu_smoke.sh \
+            --include=tools/zenovfs_antimalware_verify.cpp \
+            --include=.github/workflows/antimalware.yml
           apply_patch zmid-action-constant-sharing.patch
           apply_patch zenovfs-mount-index.patch
 
           cp /tmp/zenovfs-mount-hardening.final.yml .github/workflows/zenovfs-mount-hardening.yml
           cp /tmp/ZENOVFS_MOUNT_HARDENING_0.1.1.final.md docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+          cp /tmp/ANTIMALWARE_0.1.1.final.md docs/ANTIMALWARE_0.1.1.md
+          cp /tmp/ON_ACCESS_PROTECTION_0.1.1.final.md docs/ON_ACCESS_PROTECTION_0.1.1.md
 
           git diff --check
           git diff --name-only | sort > /tmp/actual-files
