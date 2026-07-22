@@ -1,87 +1,11 @@
-name: ZenovOS 0.1.1 Adaptive Display
+name: Publication staging — Display CI disabled
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
-  adaptive-display:
+  staging-only:
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Verify tested source revision
-        run: |
-          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
-          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
-
-      - name: Install native toolchain and QEMU
-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
-
-      - name: Build strict native image
-        run: make clean check
-
-      - name: Exercise 22 VBE modes and native shell controls
-        run: bash tests/qemu_display_ui.sh build/zenov-os.img build/zenov-data.img build/qemu-display-ui
-
-      - name: Inspect adaptive display evidence
-        run: |
-          grep -q UI_ADAPTIVE_DISPLAY_OK build/qemu-display-ui/serial.log
-          grep -q UI_HYBRID_SCALER_OK build/qemu-display-ui/serial.log
-          grep -q 'UI_DISPLAY_MODE_COUNT 22' build/qemu-display-ui/serial.log
-          grep -q UI_SETTINGS_CONTROLS_OK build/qemu-display-ui/serial.log
-          grep -q UI_START_MENU_OK build/qemu-display-ui/serial.log
-          grep -q UI_QUICK_SETTINGS_OK build/qemu-display-ui/serial.log
-          grep -q UI_PERSONALIZATION_OK build/qemu-display-ui/serial.log
-          grep -q UI_TASKBAR_OK build/qemu-display-ui/serial.log
-          grep -q UI_ANIMATION_MODEL_OK build/qemu-display-ui/serial.log
-          grep -q UI_SYSTEM_CENTER_OK build/qemu-display-ui/serial.log
-          grep -q UI_ACCESSIBILITY_OK build/qemu-display-ui/serial.log
-          grep -q UI_START_SYSTEM_TOOLS_OK build/qemu-display-ui/serial.log
-          grep -q UI_HIGH_CONTRAST_ON build/qemu-display-ui/serial.log
-          grep -q UI_LARGE_POINTER_ON build/qemu-display-ui/serial.log
-          grep -q UI_START_PACKAGES_OPEN_OK build/qemu-display-ui/serial.log
-          grep -q UI_START_SECURITY_OPEN_OK build/qemu-display-ui/serial.log
-          grep -q UI_DISPLAY_CYCLE_OK build/qemu-display-ui/serial.log
-          grep -q UI_DISPLAY_PERSIST_OK build/qemu-display-ui/serial.log
-          for mode in \
-            640x480 720x480 800x600 960x540 960x600 1024x576 1024x600 1024x768 \
-            1152x648 1152x720 1152x864 1280x720 1280x768 1280x800 1280x960 1280x1024 \
-            1360x768 1368x768 1440x900 1536x864 1600x900 1600x1200; do
-            grep -q "UI_DISPLAY_MODE_OK $mode" build/qemu-display-ui/serial.log
-          done
-          test "$(sed -n '2p' build/qemu-display-ui/desktop-640x480.ppm | tr -d '\r')" = '640 480'
-          test "$(sed -n '2p' build/qemu-display-ui/desktop-960x540.ppm | tr -d '\r')" = '960 540'
-          test "$(sed -n '2p' build/qemu-display-ui/desktop-1024x768.ppm | tr -d '\r')" = '1024 768'
-          test "$(sed -n '2p' build/qemu-display-ui/desktop-1280x720.ppm | tr -d '\r')" = '1280 720'
-          test "$(sed -n '2p' build/qemu-display-ui/desktop-1280x1024.ppm | tr -d '\r')" = '1280 1024'
-          test "$(sed -n '2p' build/qemu-display-ui/desktop-1440x900.ppm | tr -d '\r')" = '1440 900'
-          test "$(sed -n '2p' build/qemu-display-ui/desktop-1600x1200.ppm | tr -d '\r')" = '1600 1200'
-          test "$(sed -n '2p' build/qemu-display-ui/settings-1024x768.ppm | tr -d '\r')" = '1024 768'
-          test "$(sed -n '2p' build/qemu-display-ui/system-center-1024x768.ppm | tr -d '\r')" = '1024 768'
-          test "$(sed -n '2p' build/qemu-display-ui/settings-accessibility-1024x768.ppm | tr -d '\r')" = '1024 768'
-          test "$(sed -n '2p' build/qemu-display-ui/high-contrast-1024x768.ppm | tr -d '\r')" = '1024 768'
-          test "$(sed -n '2p' build/qemu-display-ui/packages-status-1024x768.ppm | tr -d '\r')" = '1024 768'
-          test "$(sed -n '2p' build/qemu-display-ui/security-status-1024x768.ppm | tr -d '\r')" = '1024 768'
-
-      - name: Upload adaptive display evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: zenov-os-0.1.1-adaptive-display-ci
-          if-no-files-found: error
-          path: |
-            build/zenov-os.img
-            build/zenov-data.img
-            build/qemu-display-ui/*.log
-            build/qemu-display-ui/*.stderr
-            build/qemu-display-ui/*.ppm
+      - run: echo staging-only
