@@ -52,6 +52,8 @@ ata_policy::Result ata2_write_once(uint32_t lba, const uint8_t* input, uint8_t a
                                static_cast<uint16_t>(static_cast<uint16_t>(input[i * 2U + 1U]) << 8U);
         ata2_out16(ata2_data, value);
     }
+    result = ata2_wait(false, ata2_command_timeout_ms, attempts);
+    if (!result.ok()) return result;
     out8(ata2_command, ata2_command_flush_cache);
     return ata2_wait(false, ata2_command_timeout_ms, attempts);
 }
