@@ -35,12 +35,16 @@ BlockResult block_io_complete(BlockIoState& state, const BlockResult& result) {
 
 BlockResult block_device_read(BlockDevice& device, BlockIoState& state,
                               uint32_t lba, uint8_t* output) {
-    if (!device.present || !device.read_sector) {
+    if (!device.present) {
         return block_io_complete(state, block_result(BlockOperation::read, BlockStatus::no_device,
                                                      lba, 0U, 0U, 0U));
     }
     if (!output) {
         return block_io_complete(state, block_result(BlockOperation::read, BlockStatus::invalid_argument,
+                                                     lba, 0U, 0U, 0U));
+    }
+    if (!device.read_sector) {
+        return block_io_complete(state, block_result(BlockOperation::read, BlockStatus::no_device,
                                                      lba, 0U, 0U, 0U));
     }
     if (lba >= device.sectors) {
@@ -52,7 +56,7 @@ BlockResult block_device_read(BlockDevice& device, BlockIoState& state,
 
 BlockResult block_device_write(BlockDevice& device, BlockIoState& state,
                                uint32_t lba, const uint8_t* input) {
-    if (!device.present || !device.write_sector) {
+    if (!device.present) {
         return block_io_complete(state, block_result(BlockOperation::write, BlockStatus::no_device,
                                                      lba, 0U, 0U, 0U));
     }
@@ -62,6 +66,10 @@ BlockResult block_device_write(BlockDevice& device, BlockIoState& state,
     }
     if (!device.writable) {
         return block_io_complete(state, block_result(BlockOperation::write, BlockStatus::read_only,
+                                                     lba, 0U, 0U, 0U));
+    }
+    if (!device.write_sector) {
+        return block_io_complete(state, block_result(BlockOperation::write, BlockStatus::no_device,
                                                      lba, 0U, 0U, 0U));
     }
     if (lba >= device.sectors) {
