@@ -17,6 +17,27 @@ import sys
 out = Path(sys.argv[1])
 out.mkdir(parents=True, exist_ok=True)
 
+
+def elf_ident(elf_class: int, endian: int, osabi: int, etype: int, machine: int) -> bytearray:
+    data = bytearray(20)
+    data[0:7] = b"\x7fELF" + bytes([elf_class, endian, 1])
+    data[7] = osabi
+    order = "<" if endian == 1 else ">"
+    struct.pack_into(order + "HH", data, 16, etype, machine)
+    return data
+
+
+def static_elf(flags: int = 5) -> bytearray:
+    data = bytearray(4097)
+    data[0:7] = b"\x7fELF\x01\x01\x01"
+    struct.pack_into("<HHIIIIIHHHHHH", data, 16,
+                     2, 3, 1, 0x1000, 52, 0, 0, 52, 32, 1, 0, 0, 0)
+    struct.pack_into("<IIIIIIII", data, 52,
+                     1, 0x1000, 0x1000, 0x1000, 1, 1, flags, 0x1000)
+    data[0x1000] = 0xC3
+    return data
+
+
 pe = bytearray(68)
 pe[0:2] = b"MZ"
 struct.pack_into("<I", pe, 0x3C, 0x40)
@@ -25,23 +46,53 @@ pe[0x40:0x44] = b"PE\0\0"
 (out / "bare-mz.exe").write_bytes(b"MZ" + bytes(62))
 (out / "sample.msi").write_bytes(bytes.fromhex("d0cf11e0a1b11ae1") + bytes(56))
 (out / "sample.msix").write_bytes(b"PK\x03\x04" + bytes(60))
+(out / "sample.cab").write_bytes(b"MSCF" + bytes(60))
+(out / "sample.msu").write_bytes(b"MSCF" + bytes(60))
+(out / "sample.wim").write_bytes(b"MSWIM\0\0\0" + bytes(56))
 (out / "sample.deb").write_bytes(b"!<arch>\n" + bytes(56))
 (out / "sample.rpm").write_bytes(bytes.fromhex("edabeedb") + bytes(60))
+(out / "sample-v2.apk").write_bytes(b"\x1f\x8b\x08\0" + bytes(60))
+(out / "sample-v3.apk").write_bytes(b"ADB.pckg" + bytes(56))
+(out / "sample.pkg.tar.zst").write_bytes(bytes.fromhex("28b52ffd") + bytes(60))
 (out / "sample.pkg").write_bytes(b"xar!" + bytes(60))
-(out / "sample.xvc").write_bytes(b"XVC fixture")
-(out / "sample-playstation.pkg").write_bytes(b"\x7fCNT" + bytes(60))
 (out / "sample.AppImage").write_bytes(b"\x7fELF" + bytes(60))
-(out / "java-class.bin").write_bytes(bytes.fromhex("cafebabe0000003d"))
-(out / "unknown.bin").write_bytes(b"unknown fixture")
+(out / "sample.xbe").write_bytes(b"XBEH" + bytes(60))
+(out / "sample.xex").write_bytes(b"XEX2" + bytes(60))
+(out / "sample-stfs.bin").write_bytes(b"LIVE" + bytes(60))
+(out / "sample.xvc").write_bytes(b"XVC fixture")
+(out / "sample.msixvc2").write_bytes(b"MSIXVC2 fixture")
+(out / "sample-psx.exe").write_bytes(b"PS-X EXE" + bytes(56))
+(out / "EBOOT.PBP").write_bytes(b"\0PBP" + bytes(60))
 
-# ELF32/i386 ET_EXEC with one PT_INTERP entry. The importer must reject it
-# before any package is produced.
-elf = bytearray(84)
-elf[0:7] = b"\x7fELF\x01\x01\x01"
-struct.pack_into("<HHIIIIIHHHHHH", elf, 16,
+ps3_pkg = bytearray(b"\x7fPKG\x80\0\0\x01")
+psp_pkg = bytearray(b"\x7fPKG\x80\0\0\x02")
+(out / "sample-ps3.pkg").write_bytes(ps3_pkg + bytes(56))
+(out / "sample-psp.pkg").write_bytes(psp_pkg + bytes(56))
+(out / "sample-ps4.pkg").write_bytes(b"\x7fCNT" + bytes(60))
+(out / "PS3UPDAT.PUP").write_bytes(b"SCEUF" + bytes(59))
+(out / "sample-ps3.self").write_bytes(b"SCE\0" + bytes(60))
+(out / "sample-ps4.self").write_bytes(bytes.fromhex("4f153d1d") + bytes(60))
+(out / "sample.vpk").write_bytes(b"PK\x03\x04" + bytes(60))
+(out / "java-class.bin").write_bytes(bytes.fromhex("cafebabe0000003d"))
+(out / "unknown.dat").write_bytes(b"unknown fixture")
+(out / "static.elf").write_bytes(static_elf())
+(out / "wx.elf").write_bytes(static_elf(7))
+(out / "foreign-x64.elf").write_bytes(elf_ident(2, 1, 0, 2, 62))
+(out / "ps2.elf").write_bytes(elf_ident(1, 1, 0, 2, 8))
+(out / "ps4.elf").write_bytes(elf_ident(2, 1, 9, 0xFE00, 62))
+
+# ELF32/i386 ET_EXEC with PT_INTERP. Import must reject it before output.
+dynamic = bytearray(84)
+dynamic[0:7] = b"\x7fELF\x01\x01\x01"
+struct.pack_into("<HHIIIIIHHHHHH", dynamic, 16,
                  2, 3, 1, 0x1000, 52, 0, 0, 52, 32, 1, 0, 0, 0)
-struct.pack_into("<IIIIIIII", elf, 52, 3, 0, 0, 0, 0, 0, 4, 1)
-(out / "dynamic.elf").write_bytes(elf)
+struct.pack_into("<IIIIIIII", dynamic, 52, 3, 0, 0, 0, 0, 0, 4, 1)
+(out / "dynamic.elf").write_bytes(dynamic)
+
+iso = bytearray(0x8006)
+iso[0x8001:0x8006] = b"CD001"
+(out / "game.iso").write_bytes(iso)
+(out / "game.chd").write_bytes(b"MComprHD" + bytes(56))
 PY
 
 probe_expect() {
@@ -54,80 +105,98 @@ probe_expect() {
 }
 
 probe_expect "$NATIVE_ZEX" zex1 host-import signature
+probe_expect "$OUT/fixtures/static.elf" elf host-import signature
+probe_expect "$OUT/fixtures/foreign-x64.elf" elf-foreign runtime-required signature
+probe_expect "$OUT/fixtures/ps2.elf" playstation-ps2-elf runtime-required signature
+probe_expect "$OUT/fixtures/ps4.elf" playstation-self runtime-required signature
 probe_expect "$OUT/fixtures/sample.exe" pe runtime-required signature
 probe_expect "$OUT/fixtures/bare-mz.exe" unknown unsupported signature
 probe_expect "$OUT/fixtures/sample.msi" msi runtime-required signature
 probe_expect "$OUT/fixtures/sample.msix" msix runtime-required signature
+probe_expect "$OUT/fixtures/sample.cab" cab inspect-only signature
+probe_expect "$OUT/fixtures/sample.msu" msu inspect-only signature
+probe_expect "$OUT/fixtures/sample.wim" wim inspect-only signature
 probe_expect "$OUT/fixtures/sample.deb" deb inspect-only signature
 probe_expect "$OUT/fixtures/sample.rpm" rpm inspect-only signature
-probe_expect "$OUT/fixtures/sample.pkg" apple-pkg runtime-required signature
-probe_expect "$OUT/fixtures/sample.xvc" xbox-xvc partner-only extension-only
-probe_expect "$OUT/fixtures/sample-playstation.pkg" playstation-pkg partner-only signature
+probe_expect "$OUT/fixtures/sample-v2.apk" alpine-apk inspect-only signature
+probe_expect "$OUT/fixtures/sample-v3.apk" alpine-apk inspect-only signature
+probe_expect "$OUT/fixtures/sample.pkg.tar.zst" arch-package inspect-only signature
 probe_expect "$OUT/fixtures/sample.AppImage" appimage runtime-required signature
+probe_expect "$OUT/fixtures/sample.pkg" apple-pkg runtime-required signature
+probe_expect "$OUT/fixtures/sample.xbe" xbox-xbe runtime-required signature
+probe_expect "$OUT/fixtures/sample.xex" xbox-xex runtime-required signature
+probe_expect "$OUT/fixtures/sample-stfs.bin" xbox-stfs runtime-required signature
+probe_expect "$OUT/fixtures/sample.xvc" xbox-xvc partner-only extension-only
+probe_expect "$OUT/fixtures/sample.msixvc2" xbox-msixvc2 partner-only extension-only
+probe_expect "$OUT/fixtures/sample-psx.exe" playstation-psx-exe runtime-required signature
+probe_expect "$OUT/fixtures/EBOOT.PBP" playstation-pbp runtime-required signature
+probe_expect "$OUT/fixtures/sample-ps3.pkg" playstation-pkg partner-only signature
+probe_expect "$OUT/fixtures/sample-psp.pkg" playstation-pkg partner-only signature
+probe_expect "$OUT/fixtures/sample-ps4.pkg" playstation-pkg partner-only signature
+probe_expect "$OUT/fixtures/PS3UPDAT.PUP" playstation-pup partner-only signature
+probe_expect "$OUT/fixtures/sample-ps3.self" playstation-self partner-only signature
+probe_expect "$OUT/fixtures/sample-ps4.self" playstation-self partner-only signature
+probe_expect "$OUT/fixtures/sample.vpk" playstation-pkg runtime-required signature
+probe_expect "$OUT/fixtures/game.iso" disc-image runtime-required signature
+probe_expect "$OUT/fixtures/game.chd" chd runtime-required signature
 probe_expect "$OUT/fixtures/java-class.bin" unknown unsupported signature
-probe_expect "$OUT/fixtures/unknown.bin" unknown unsupported signature
+probe_expect "$OUT/fixtures/unknown.dat" unknown unsupported signature
 
-echo ZENPKG_FOREIGN_PROBE_OK cases=13
+echo ZENPKG_FOREIGN_PROBE_OK cases=37 generations=legacy-current
 
-import_once() {
-  local output="$1" log="$2"
-  "$ZENPKG" import-native "$NATIVE_ZEX" \
-    --name imported-hello \
-    --version 0.1.0 \
-    --license BSD-2-Clause \
-    --source packages/examples/hello-native \
-    --asset-policy redistributable \
-    --output "$output" > "$log"
-  grep -Fq 'IMPORT_NATIVE_OK imported-hello@0.1.0 payload=zex1' "$log"
+import_native_twice() {
+  local input="$1" name="$2" payload="$3" extension="$4"
+  local first="$OUT/$name-a.zpk" second="$OUT/$name-b.zpk"
+  "$ZENPKG" import-native "$input" \
+    --name "$name" --version 0.1.0 --license BSD-2-Clause \
+    --source local-fixture --asset-policy redistributable \
+    --output "$first" > "$OUT/$name-a.log"
+  "$ZENPKG" import-native "$input" \
+    --name "$name" --version 0.1.0 --license BSD-2-Clause \
+    --source local-fixture --asset-policy redistributable \
+    --output "$second" > "$OUT/$name-b.log"
+  cmp "$first" "$second"
+  "$ZENPKG" verify "$first" | grep -Fq "VERIFY_OK $name@0.1.0"
+  "$ZENPKG" inspect "$first" > "$OUT/$name.inspect.log"
+  grep -Fqx "payload_type: $payload" "$OUT/$name.inspect.log"
+  grep -Fqx "entrypoint: /data/apps/pkg-$name-0.1.0.$extension" "$OUT/$name.inspect.log"
+  probe_expect "$first" zenpkg installable signature
 }
 
-import_once "$OUT/import-a.zpk" "$OUT/import-a.log"
-import_once "$OUT/import-b.zpk" "$OUT/import-b.log"
-cmp "$OUT/import-a.zpk" "$OUT/import-b.zpk"
-"$ZENPKG" verify "$OUT/import-a.zpk" | grep -Fq 'VERIFY_OK imported-hello@0.1.0'
-"$ZENPKG" inspect "$OUT/import-a.zpk" > "$OUT/import.inspect.log"
-grep -Fqx 'runtime: native' "$OUT/import.inspect.log"
-grep -Fqx 'payload_type: zex1' "$OUT/import.inspect.log"
-grep -Fqx 'entrypoint: /data/apps/pkg-imported-hello-0.1.0.zex' "$OUT/import.inspect.log"
-grep -Fqx 'asset_policy: redistributable' "$OUT/import.inspect.log"
-probe_expect "$OUT/import-a.zpk" zenpkg installable signature
+import_native_twice "$NATIVE_ZEX" imported-zex zex1 zex
+import_native_twice "$OUT/fixtures/static.elf" imported-elf elf32 elf
 
-echo ZENPKG_NATIVE_IMPORT_OK deterministic=1
+echo ZENPKG_NATIVE_IMPORT_OK payloads=zex1,elf32 deterministic=2
 
-set +e
-"$ZENPKG" import-native "$OUT/fixtures/sample.exe" \
-  --name rejected-pe --version 0.1.0 --license Proprietary \
-  --source local-fixture --asset-policy redistributable \
-  --output "$OUT/rejected-pe.zpk" > "$OUT/rejected-pe.log" 2>&1
-status=$?
-set -e
-test "$status" -eq 2
-grep -Fq 'format pe is not eligible for native import; support=runtime-required' "$OUT/rejected-pe.log"
-test ! -e "$OUT/rejected-pe.zpk"
+reject_import() {
+  local input="$1" name="$2" expected="$3"
+  local output="$OUT/$name.zpk" log="$OUT/$name.log"
+  set +e
+  "$ZENPKG" import-native "$input" \
+    --name "$name" --version 0.1.0 --license BSD-2-Clause \
+    --source local-fixture --asset-policy redistributable \
+    --output "$output" > "$log" 2>&1
+  local status=$?
+  set -e
+  test "$status" -eq 2
+  grep -Fq "$expected" "$log"
+  test ! -e "$output"
+}
 
-set +e
-"$ZENPKG" import-native "$OUT/fixtures/dynamic.elf" \
-  --name rejected-elf --version 0.1.0 --license BSD-2-Clause \
-  --source local-fixture --asset-policy redistributable \
-  --output "$OUT/rejected-elf.zpk" > "$OUT/rejected-elf.log" 2>&1
-status=$?
-set -e
-test "$status" -eq 2
-grep -Fq 'dynamic ELF and PT_INTERP executables cannot be imported' "$OUT/rejected-elf.log"
-test ! -e "$OUT/rejected-elf.zpk"
+reject_import "$OUT/fixtures/sample.exe" rejected-pe \
+  'format pe is not eligible for native import; support=runtime-required'
+reject_import "$OUT/fixtures/dynamic.elf" rejected-dynamic \
+  'dynamic ELF and PT_INTERP executables cannot be imported'
+reject_import "$OUT/fixtures/wx.elf" rejected-wx \
+  'ELF load segment violates the ZenovOS loader contract'
+reject_import "$OUT/fixtures/foreign-x64.elf" rejected-x64 \
+  'format elf-foreign is not eligible for native import; support=runtime-required'
+reject_import "$OUT/fixtures/ps2.elf" rejected-ps2 \
+  'format playstation-ps2-elf is not eligible for native import; support=runtime-required'
 
 cp "$NATIVE_ZEX" "$OUT/corrupt.zex"
 printf '\x00' | dd of="$OUT/corrupt.zex" bs=1 seek=$(( $(stat -c%s "$OUT/corrupt.zex") - 1 )) conv=notrunc status=none
-set +e
-"$ZENPKG" import-native "$OUT/corrupt.zex" \
-  --name corrupt-zex --version 0.1.0 --license BSD-2-Clause \
-  --source local-fixture --asset-policy redistributable \
-  --output "$OUT/corrupt.zpk" > "$OUT/corrupt.log" 2>&1
-status=$?
-set -e
-test "$status" -eq 2
-grep -Fq 'ZEX1 image checksum mismatch' "$OUT/corrupt.log"
-test ! -e "$OUT/corrupt.zpk"
+reject_import "$OUT/corrupt.zex" corrupt-zex 'ZEX1 image checksum mismatch'
 
-echo ZENPKG_FOREIGN_REJECTION_OK cases=3
-echo ZENPKG_FOREIGN_TEST_OK probes=13 native-import=deterministic rejection=3
+echo ZENPKG_FOREIGN_REJECTION_OK cases=6
+echo ZENPKG_FOREIGN_TEST_OK probes=37 native-import=zex1,elf32 deterministic=2 rejection=6 generations=legacy-current
