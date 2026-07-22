@@ -19,7 +19,7 @@ The native path supports bounded ZEX1 and static ELF32/i386 applications, determ
 
 ## Intake is not execution
 
-ZenPkg uses one shared classifier in the host tool and the in-system package manager. Each result carries an explicit state:
+ZenPkg uses one shared base classifier plus a generation policy in the host tool and the in-system package manager. Each result carries an explicit state:
 
 ```text
 installable | host-import | inspect-only | runtime-required | partner-only | unsupported
@@ -32,9 +32,13 @@ installable | host-import | inspect-only | runtime-required | partner-only | uns
 
 The classifier never grants an executable capability. It does not extract protected content, emulate activation, provide title keys, bypass signatures or replace platform licensing.
 
+Host probing is designed for real game images rather than only tiny fixtures. It computes the complete SHA-256 incrementally and retains a bounded 64 KiB head plus 512-byte tail sample for classification. This preserves ISO header and DMG trailer detection without allocating memory proportional to a multi-gigabyte image.
+
 ## Native import boundary
 
 `zenpkg import-native` accepts redistributable ZEX1 and static ELF32/i386 `ET_EXEC` images only. Architecture classification happens before loader validation, so x86-64, MIPS, PowerPC and console-specific ELF files cannot accidentally enter the native import path.
+
+Generic `EM_MIPS` is not sufficient evidence of a PlayStation 2 executable. The generation policy requires little-endian ELF32 plus the R5900 machine and MIPS III architecture flag combination; other MIPS binaries remain `elf-foreign`.
 
 The generated `.zpk` remains unauthorized until its length and digests are included in signed ZenRepo metadata. Import is conversion, not trust enrollment.
 
@@ -50,7 +54,7 @@ The classifier distinguishes historical and current families rather than treatin
 - Xbox One and Series: XVC.
 - Xbox/Windows PC: MSIXVC and the newer PC-only MSIXVC2 generation.
 - PlayStation and PS1: PS-X EXE and optical media candidates.
-- PlayStation 2: MIPS ELF and disc media.
+- PlayStation 2: R5900/MIPS III ELF and disc media; generic MIPS ELF is kept separate.
 - PSP and PlayStation Vita: PBP, platform-tagged PKG and VPK.
 - PlayStation 3: PKG, SELF and PUP.
 - PlayStation 4: `CNT` package, SELF and SCE ELF.
@@ -72,13 +76,13 @@ A functional provider requires substantially more than a package parser:
 
 ## Test boundary
 
-The generation-aware intake is covered by direct signature classification, host probing, deterministic native conversion and negative import tests. Guest QEMU testing proves that the added classifier and commands do not break the signed native install/run path.
+The generation-aware intake is covered by direct signature classification, bounded host probing, deterministic native conversion, negative import tests and ASan/UBSan execution. Guest QEMU testing proves that the added classifier and commands do not break the signed native install/run path.
 
 Current expected evidence:
 
 ```text
-PACKAGE_FOREIGN_FORMAT_TEST_OK cases=44 generations=legacy-current
-ZENPKG_FOREIGN_TEST_OK probes=37 native-import=zex1,elf32 deterministic=2 rejection=6 generations=legacy-current
+PACKAGE_FOREIGN_FORMAT_TEST_OK cases=46 generations=legacy-current
+ZENPKG_FOREIGN_TEST_OK probes=39 native-import=zex1,elf32 deterministic=2 rejection=7 generations=legacy-current streaming=1
 ZENPKG_FOREIGN_QEMU_OK formats=1 probe=zenpkg install=1 run=1 fsck=1
 ```
 
@@ -91,6 +95,7 @@ These markers prove recognition and native-path isolation. They do not prove tha
 - Signed offline roles, root rotation, delegation and anti-rollback — implemented.
 - Search, planning, verified cache, resumable offline transport, upgrade, repair and policy inspection — implemented.
 - Shared historical/current package probing — implemented.
+- Bounded large-file probing with streaming SHA-256 — implemented.
 - Strict ZEX1 and ELF32/i386 native import — implemented.
 - Network mirrors and TLS repository download — not implemented.
 - General dependency solver, multi-architecture native packages and dynamic linking — not implemented.
