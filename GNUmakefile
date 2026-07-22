@@ -11,6 +11,7 @@ $(ZENPKG_CHECK_STAMP): $(BUILD)/zenpkg-manifest.json
 ATA_POLICY_TEST := $(BUILD)/storage-ata-policy-test
 ATA_RECOVERY_POLICY_TEST := $(BUILD)/storage-ata-recovery-policy-test
 BLOCK_RESULT_TEST := $(BUILD)/storage-block-result-test
+BLOCK_DEVICE_TEST := $(BUILD)/storage-block-device-test
 ATA_EIO_QEMU_OUT := $(BUILD)/qemu/ata-eio-retry
 ATA_EIO_QEMU_STAMP := $(ATA_EIO_QEMU_OUT)/.stamp
 BLOCK_STATUS_QEMU_OUT := $(BUILD)/qemu/block-status
@@ -30,7 +31,11 @@ $(BLOCK_RESULT_TEST): tests/storage_block_result_test.cpp kernel/parts/storage_b
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 	$@
 
-check: $(ATA_POLICY_TEST) $(ATA_RECOVERY_POLICY_TEST) $(BLOCK_RESULT_TEST)
+$(BLOCK_DEVICE_TEST): tests/storage_block_device_test.cpp kernel/parts/storage_block_result.inc kernel/parts/storage_block_device.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+	$@
+
+check: $(ATA_POLICY_TEST) $(ATA_RECOVERY_POLICY_TEST) $(BLOCK_RESULT_TEST) $(BLOCK_DEVICE_TEST)
 
 $(ATA_EIO_QEMU_STAMP): all tests/qemu_ata_eio_retry.sh tests/blkdebug/ata-write-eio-once.conf $(BUILD)/zenovfs-verify
 	@rm -rf $(ATA_EIO_QEMU_OUT)
