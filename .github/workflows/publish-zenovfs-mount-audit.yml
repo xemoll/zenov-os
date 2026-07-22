@@ -32,6 +32,7 @@ jobs:
           cp .github/agent/zenovfs-mount-qemu-fix.patch /tmp/zenovfs-mount-qemu-fix.patch
           cp .github/agent/zenovfs-read-failure-scrub.patch /tmp/zenovfs-read-failure-scrub.patch
           cp .github/agent/zmid-update-rollback.patch /tmp/zmid-update-rollback.patch
+          cp .github/agent/quarantine-digest-prefix.patch /tmp/quarantine-digest-prefix.patch
           git switch --detach 199f98d478a7515c927c97d8fd61bdf5679e7e99
           test "$(git rev-parse HEAD)" = 199f98d478a7515c927c97d8fd61bdf5679e7e99
 
@@ -56,6 +57,9 @@ jobs:
       - name: Apply atomic ZMID update rollback
         run: git apply --check /tmp/zmid-update-rollback.patch && git apply /tmp/zmid-update-rollback.patch
 
+      - name: Apply quarantine collision hardening
+        run: git apply --check /tmp/quarantine-digest-prefix.patch && git apply /tmp/quarantine-digest-prefix.patch
+
       - name: Verify exact production file set
         run: |
           set -euo pipefail
@@ -68,6 +72,7 @@ jobs:
           docs/ANTIMALWARE_0.1.1.md
           docs/INDEX.md
           docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+          kernel/parts/security_guard.inc
           kernel/parts/storage.inc
           kernel/parts/storage_format.inc
           kernel/parts/zmid_policy.inc
@@ -110,6 +115,7 @@ jobs:
             docs/ANTIMALWARE_0.1.1.md
             docs/INDEX.md
             docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
+            kernel/parts/security_guard.inc
             kernel/parts/storage.inc
             kernel/parts/storage_format.inc
             kernel/parts/zmid_policy.inc
