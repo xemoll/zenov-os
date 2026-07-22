@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-#include "foreign.hpp"
+#include "foreign_probe.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -79,8 +79,9 @@ void print_usage(std::ostream& output) {
         "  zenpkg index --input DIRECTORY --output INDEX\n"
         "  zenpkg manifest-check FILE --payload-size BYTES\n"
         "  zenpkg hash FILE\n\n"
-        "Foreign package probing never implies execution compatibility. Native import is limited to\n"
-        "validated ZEX1 and static ELF32/i386 payloads and still requires ZenRepo authorization.\n\n"
+        "Foreign package probing uses bounded head/tail sampling and a streaming SHA-256.\n"
+        "Detection never implies execution compatibility. Native import is limited to validated\n"
+        "ZEX1 and static ELF32/i386 payloads and still requires ZenRepo authorization.\n\n"
         "Exit codes: 0 success, 2 invalid package/arguments, 3 incompatible resolution.\n";
 }
 
@@ -117,7 +118,7 @@ void print_manifest(const zenpkg::Package& package) {
     std::cout << "conflicts: " << (manifest.conflicts.empty() ? "-" : zenpkg::join(manifest.conflicts, ",")) << '\n';
 }
 
-void print_probe(const std::filesystem::path& path, const zenpkg::ForeignProbe& probe) {
+void print_probe(const std::filesystem::path& path, const zenpkg::StreamingForeignProbe& probe) {
     std::cout << "path: " << path.string() << '\n';
     std::cout << "format: " << zenpkg::foreign_format_id(probe.detection.format) << '\n';
     std::cout << "name: " << probe.detection.name << '\n';
@@ -125,7 +126,8 @@ void print_probe(const std::filesystem::path& path, const zenpkg::ForeignProbe& 
     std::cout << "support: " << package_foreign::support_text(probe.detection.support) << '\n';
     std::cout << "confidence: " << (probe.detection.extension_only ? "extension-only" : "signature") << '\n';
     std::cout << "reason: " << probe.detection.reason << '\n';
-    std::cout << "bytes: " << probe.bytes.size() << '\n';
+    std::cout << "bytes: " << probe.file_size << '\n';
+    std::cout << "sampled_bytes: " << probe.sampled_bytes << '\n';
     std::cout << "sha256: " << probe.sha256 << '\n';
     std::cout << "PROBE_OK format=" << zenpkg::foreign_format_id(probe.detection.format)
               << " support=" << package_foreign::support_text(probe.detection.support)
@@ -163,13 +165,14 @@ int run_command(const std::string& command, const Arguments& arguments) {
     if (command == "probe") {
         arguments.reject_unknown({});
         const auto path = arguments.require_positional("file path");
-        print_probe(path, zenpkg::probe_foreign(path));
+        print_probe(path, zenpkg::probe_foreign_streaming(path));
         return 0;
     }
     if (command == "import-native") {
         arguments.reject_unknown({"name", "version", "license", "source", "asset-policy", "output"});
         const auto input = arguments.require_positional("native executable path");
         const auto output = arguments.require_one("output");
+        (void)zenpkg::require_native_import_candidate(input);
         const auto package = zenpkg::import_native(
             input, arguments.require_one("name"), arguments.require_one("version"),
             arguments.require_one("license"), arguments.require_one("source"),
