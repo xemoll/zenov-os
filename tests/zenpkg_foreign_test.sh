@@ -195,7 +195,17 @@ reject_import "$OUT/fixtures/ps2.elf" rejected-ps2 \
   'format playstation-ps2-elf is not eligible for native import; support=runtime-required'
 
 cp "$NATIVE_ZEX" "$OUT/corrupt.zex"
-printf '\x00' | dd of="$OUT/corrupt.zex" bs=1 seek=$(( $(stat -c%s "$OUT/corrupt.zex") - 1 )) conv=notrunc status=none
+python3 - "$OUT/corrupt.zex" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+data = bytearray(path.read_bytes())
+if not data:
+    raise SystemExit("cannot corrupt an empty ZEX1 fixture")
+data[-1] ^= 0xFF
+path.write_bytes(data)
+PY
 reject_import "$OUT/corrupt.zex" corrupt-zex 'ZEX1 image checksum mismatch'
 
 echo ZENPKG_FOREIGN_REJECTION_OK cases=6
