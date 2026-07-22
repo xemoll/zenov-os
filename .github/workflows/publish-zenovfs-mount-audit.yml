@@ -27,6 +27,7 @@ jobs:
           cp .github/agent/zenovfs-mount-qemu.patch /tmp/zenovfs-mount-qemu.patch
           cp .github/agent/zenovfs-mount-qemu-fix.patch /tmp/zenovfs-mount-qemu-fix.patch
           cp .github/agent/zenovfs-read-failure-scrub.patch /tmp/zenovfs-read-failure-scrub.patch
+          cp .github/agent/zmid-update-rollback.patch /tmp/zmid-update-rollback.patch
           git switch --detach 199f98d478a7515c927c97d8fd61bdf5679e7e99
           test "$(git rev-parse HEAD)" = 199f98d478a7515c927c97d8fd61bdf5679e7e99
 
@@ -48,18 +49,24 @@ jobs:
       - name: Apply failed-read disclosure fix
         run: git apply --check /tmp/zenovfs-read-failure-scrub.patch && git apply /tmp/zenovfs-read-failure-scrub.patch
 
+      - name: Apply atomic ZMID update rollback
+        run: git apply --check /tmp/zmid-update-rollback.patch && git apply /tmp/zmid-update-rollback.patch
+
       - name: Verify exact production file set
         run: |
           set -euo pipefail
           git diff --check
           git diff --name-only | sort > /tmp/actual-files
           cat > /tmp/expected-files <<'EOF'
+          .github/workflows/antimalware.yml
           .github/workflows/zenovfs-mount-hardening.yml
           Makefile
+          docs/ANTIMALWARE_0.1.1.md
           docs/INDEX.md
           docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
           kernel/parts/storage.inc
           kernel/parts/storage_format.inc
+          kernel/parts/zmid_policy.inc
           tests/qemu_zenovfs_mount_reject.sh
           tests/zenovfs_mount_validation_test.cpp
           tools/zenovfs_mount_corrupt.cpp
@@ -93,12 +100,15 @@ jobs:
         run: |
           set -euo pipefail
           paths=(
+            .github/workflows/antimalware.yml
             .github/workflows/zenovfs-mount-hardening.yml
             Makefile
+            docs/ANTIMALWARE_0.1.1.md
             docs/INDEX.md
             docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
             kernel/parts/storage.inc
             kernel/parts/storage_format.inc
+            kernel/parts/zmid_policy.inc
             tests/qemu_zenovfs_mount_reject.sh
             tests/zenovfs_mount_validation_test.cpp
             tools/zenovfs_mount_corrupt.cpp
