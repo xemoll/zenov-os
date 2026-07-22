@@ -68,9 +68,34 @@ jobs:
           apply_patch zenovfs-mount-qemu-fix.patch --include=tools/zenovfs_mount_corrupt.cpp
           apply_patch zenovfs-path-depth-consistency.patch \
             --include=kernel/parts/storage_format.inc \
-            --include=tests/zenovfs_mount_validation_test.cpp \
-            --include=tools/zenovfs_mount_corrupt.cpp \
-            --include=tests/qemu_zenovfs_mount_reject.sh
+            --include=tools/zenovfs_mount_corrupt.cpp
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          test = Path('tests/zenovfs_mount_validation_test.cpp')
+          text = test.read_text()
+          anchor = '        { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/apps/../tool"); require_entries_rejected(super, value, "entry-path"); }\n'
+          addition = '        { auto value = entries; set_text(value[1].path, sizeof(value[1].path), "/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a"); require_entries_rejected(super, value, "entry-path"); }\n'
+          assert text.count(anchor) == 1
+          assert addition not in text
+          text = text.replace(anchor, anchor + addition, 1)
+          assert text.count('cases=23 shared-kernel-validator=yes') == 1
+          text = text.replace('cases=23 shared-kernel-validator=yes', 'cases=24 shared-kernel-validator=yes', 1)
+          test.write_text(text)
+
+          script = Path('tests/qemu_zenovfs_mount_reject.sh')
+          text = script.read_text()
+          anchor = 'run_case entry-path entry-path\n'
+          addition = 'run_case component-depth entry-path\n'
+          assert text.count(anchor) == 1
+          assert addition not in text
+          text = text.replace(anchor, anchor + addition, 1)
+          assert text.count('ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=6 ui_reached=0') == 1
+          text = text.replace('ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=6 ui_reached=0', 'ZENOVFS_MOUNT_QEMU_REJECTION_OK cases=7 ui_reached=0', 1)
+          script.write_text(text)
+          PY
+
           apply_patch zenovfs-read-failure-scrub.patch --include=kernel/parts/storage.inc
           apply_patch zmid-update-rollback.patch
           apply_patch quarantine-digest-prefix.patch
