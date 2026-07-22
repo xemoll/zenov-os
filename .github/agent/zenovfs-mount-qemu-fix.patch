@@ -1,10 +1,15 @@
 diff --git a/tools/zenovfs_mount_corrupt.cpp b/tools/zenovfs_mount_corrupt.cpp
 --- a/tools/zenovfs_mount_corrupt.cpp
 +++ b/tools/zenovfs_mount_corrupt.cpp
-@@ -57,6 +57,10 @@ int main(int argc, char** argv) {
+@@ -57,6 +57,14 @@ int main(int argc, char** argv) {
          auto& super = *reinterpret_cast<Superblock*>(image.data());
          auto* entries = reinterpret_cast<Entry*>(image.data() + kSectorSize);
          const std::string mode = argv[2];
++        std::size_t sample = kEntryCount;
++        for (std::size_t i = 0U; i < kEntryCount; ++i) {
++            if (entries[i].used && entries[i].type == 1U) { sample = i; break; }
++        }
++        if (sample == kEntryCount) throw std::runtime_error("no file entry for corruption fixture");
 +        std::size_t spare = kEntryCount;
 +        for (std::size_t i = kEntryCount; i > 0U; --i) {
 +            if (!entries[i - 1U].used) { spare = i - 1U; break; }
@@ -12,19 +17,25 @@ diff --git a/tools/zenovfs_mount_corrupt.cpp b/tools/zenovfs_mount_corrupt.cpp
  
          if (mode == "entry-sectors") {
              super.entry_sectors = 17U;
-@@ -68,11 +72,13 @@ int main(int argc, char** argv) {
-             std::memset(entries[2].path, 'A', sizeof(entries[2].path));
-             entries[2].path[0] = '/';
+@@ -64,15 +72,17 @@ int main(int argc, char** argv) {
+             super.data_start = 16U;
+         } else if (mode == "slot-size") {
+             super.slot_sectors = 129U;
+         } else if (mode == "entry-path") {
+-            std::memset(entries[2].path, 'A', sizeof(entries[2].path));
+-            entries[2].path[0] = '/';
++            std::memset(entries[sample].path, 'A', sizeof(entries[sample].path));
++            entries[sample].path[0] = '/';
          } else if (mode == "duplicate-path") {
 -            entries[127] = entries[2];
 +            if (spare == kEntryCount) throw std::runtime_error("no free entry for duplicate fixture");
-+            entries[spare] = entries[2];
++            entries[spare] = entries[sample];
          } else if (mode == "transition-old-mismatch") {
 -            entries[127] = entries[2];
 -            entries[127].flags = 1U;
 -            entries[127].reserved = 0U;
 +            if (spare == kEntryCount) throw std::runtime_error("no free entry for recovery fixture");
-+            entries[spare] = entries[2];
++            entries[spare] = entries[sample];
 +            entries[spare].flags = 1U;
 +            entries[spare].reserved = 0U;
          } else {
@@ -33,10 +44,11 @@ diff --git a/tools/zenovfs_mount_corrupt.cpp b/tools/zenovfs_mount_corrupt.cpp
 diff --git a/.github/workflows/zenovfs-mount-hardening.yml b/.github/workflows/zenovfs-mount-hardening.yml
 --- a/.github/workflows/zenovfs-mount-hardening.yml
 +++ b/.github/workflows/zenovfs-mount-hardening.yml
-@@ -60,7 +60,7 @@ jobs:
+@@ -60,7 +60,8 @@ jobs:
            grep -Fq 'zfs_format_unused_entry_zero' kernel/parts/storage_format.inc
            grep -Fq 'transition-old-mismatch' kernel/parts/storage_format.inc
            grep -Fq 'run_case entry-sectors entry-sectors' tests/qemu_zenovfs_mount_reject.sh
 -          grep -Fq 'entries[127].reserved = 0U' tools/zenovfs_mount_corrupt.cpp
++          grep -Fq 'entries[sample].path[0] = '\''/'\'';' tools/zenovfs_mount_corrupt.cpp
 +          grep -Fq 'entries[spare].reserved = 0U' tools/zenovfs_mount_corrupt.cpp
            echo 'ZENOVFS_MOUNT_HARDENING_SOURCE_CONTRACT_OK'
