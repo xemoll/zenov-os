@@ -6,6 +6,10 @@ on:
       - agent/zenovfs-mount-audit-publication
   pull_request:
 
+concurrency:
+  group: zenovfs-mount-publication
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
