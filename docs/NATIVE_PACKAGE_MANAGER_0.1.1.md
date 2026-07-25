@@ -68,7 +68,9 @@ zenpkg import-native FILE \
 - a complete ZEX1 image compatible with the 0.1.1 ring-3 loader;
 - a little-endian ELF32/i386 `ET_EXEC` image with no dynamic interpreter or dynamic segment.
 
-Import performs a bounded streaming preflight before the complete loader validation. ELF import rejects `PT_INTERP`, `PT_DYNAMIC`, W+X load segments, overlapping mappings, conflicting page permissions, invalid entrypoints, unsupported architectures and out-of-range files. ZEX1 import rechecks the complete header, image length, stack/BSS constraints and checksum.
+Native import does not perform a path-based preflight followed by a second source read. It opens the source once, determines its size, rejects inputs larger than 64 KiB before allocating the payload buffer, reads one exact bounded snapshot and rejects truncation, growth or I/O failure. Classification, snapshot SHA-256 binding, loader validation and package construction all consume that same byte vector. The emitted package is re-read and its payload digest must equal the validated snapshot digest; a mismatch removes the output and fails closed.
+
+ELF import rejects `PT_INTERP`, `PT_DYNAMIC`, W+X load segments, overlapping mappings, conflicting page permissions, invalid entrypoints, unsupported architectures and out-of-range files. ZEX1 import rechecks the complete header, image length, stack/BSS constraints and checksum.
 
 The output is a deterministic ZenPkg container. Import does not add the package to trusted repository metadata. The resulting `.zpk` remains unauthorized until it is included in a signed ZenRepo target set through the repository build process.
 
@@ -167,8 +169,9 @@ The expanded foreign-intake suite adds:
 - 39 host probe cases using generated signature fixtures, including a 1 MiB streaming DMG probe;
 - byte-identical repeated import for both ZEX1 and static ELF32/i386;
 - seven fail-closed import cases: PE, interpreted/dynamic ELF, W+X ELF, x86-64 ELF, generic MIPS ELF, PS2/R5900 ELF and checksum-corrupt ZEX1;
+- eight native-snapshot invariants covering digest binding, source-path independence, tamper rejection without output and pre-allocation rejection of a 65,537-byte input;
 - false-positive regressions for bare MZ, Java `CAFEBABE` and generic MIPS misclassification;
-- ASan/UBSan execution of the classifier and complete host intake suite;
+- ASan/UBSan execution of the classifier, complete host intake suite and native-snapshot regression;
 - a QEMU lifecycle proving `pkg formats`, `pkg probe`, signed installation, execution and ZenovFS `fsck`.
 
 Expected evidence markers:
@@ -176,6 +179,8 @@ Expected evidence markers:
 ```text
 PACKAGE_FOREIGN_FORMAT_TEST_OK cases=46 generations=legacy-current
 ZENPKG_FOREIGN_TEST_OK probes=39 native-import=zex1,elf32 deterministic=2 rejection=7 generations=legacy-current streaming=1
+ZENPKG_STREAMING_TEST_OK cases=2 hash=full probe=head65536+tail512 overlap=none
+ZENPKG_NATIVE_SNAPSHOT_TEST_OK cases=8 bounded=1 digest=1 path-independent=1
 ZENPKG_FOREIGN_QEMU_OK formats=1 probe=zenpkg install=1 run=1 fsck=1
 ```
 
