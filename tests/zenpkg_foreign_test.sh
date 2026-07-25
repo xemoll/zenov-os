@@ -212,14 +212,21 @@ reject_import() {
   local expected="$3"
   local output="$OUT/$name.zpk"
   local log="$OUT/$name.log"
-  set +e
-  "$ZENPKG" import-native "$input" \
-    --name "$name" --version 0.1.0 --license BSD-2-Clause \
-    --source local-fixture --asset-policy redistributable \
-    --output "$output" > "$log" 2>&1
-  local status=$?
-  set -e
-  test "$status" -eq 2
+  local status
+  if "$ZENPKG" import-native "$input" \
+      --name "$name" --version 0.1.0 --license BSD-2-Clause \
+      --source local-fixture --asset-policy redistributable \
+      --output "$output" > "$log" 2>&1; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ "$status" -ne 2 ]]; then
+    printf 'unexpected import result: name=%s expected_status=2 actual_status=%s\n' \
+      "$name" "$status" >&2
+    cat "$log" >&2
+    return 1
+  fi
   grep -Fq "$expected" "$log"
   test ! -e "$output"
 }
