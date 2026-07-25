@@ -29,6 +29,7 @@ FsResult security_read_file_result(const char* input, uint8_t* output, uint32_t 
 
 bool security_read_file(const char* input, uint8_t* output, uint32_t capacity,
                         uint32_t& actual_size) {
-    return security_read_file_result(input, output, capacity, actual_size).ok();
+    return fs_record_result(
+        security_read_file_result(input, output, capacity, actual_size)).ok();
 }
 } // namespace storage
