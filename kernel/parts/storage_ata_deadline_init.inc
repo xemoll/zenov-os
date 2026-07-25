@@ -1,4 +1,13 @@
 void init_deadline() {
+    // Transitional bool entrypoints remain available to legacy internal callers
+    // until the next API-removal slice. Keep them referenced under -Werror.
+    (void)&flush_entry;
+    (void)&load_entries;
+    (void)&recover_transactions;
+    (void)&mount;
+    (void)&fs_last_result;
+    (void)&fs_last_failure;
+
     heap::init();
     serial::line("Storage: probing ATA primary master with monotonic deadlines...");
     ata_present = false;
