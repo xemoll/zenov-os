@@ -10,7 +10,7 @@ constexpr uint32_t max_argument_bytes = 64U;
 constexpr uint32_t syscall_exit = 0, syscall_console_write = 1, syscall_ticks = 2, syscall_file_read = 3, syscall_file_write = 4;
 constexpr uint32_t syscall_file_stat = 5, syscall_version = 6, syscall_sync = 7, syscall_console_read = 8;
 constexpr uint32_t error_invalid = 0xFFFFFFFFU, error_not_found = 0xFFFFFFFEU, error_no_space = 0xFFFFFFFDU;
-constexpr uint32_t error_io = 0xFFFFFFFCU, error_fault = 0xFFFFFFFBU, error_unsupported = 0xFFFFFFFAU;
+constexpr uint32_t error_io = 0xFFFFFFFCU, error_fault = 0xFFFFFFFBU, error_unsupported = 0xFFFFFFFAU, error_denied = 0xFFFFFFF9U;
 
 extern "C" uint8_t gdt_tss[];
 extern "C" char __stack_top;
@@ -112,7 +112,7 @@ extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
     if (number == syscall_file_read) {
         const char* path = user_string(frame->ebx); uint8_t* output = user_bytes(frame->ecx, frame->edx, true); uint32_t actual = 0;
         if (!path || !output) frame->eax = error_fault;
-        else if (!storage::read_file(path, output, frame->edx, actual)) frame->eax = error_not_found;
+        else if (!storage::read_file(path, output, frame->edx, actual)) frame->eax = storage::security_read_was_blocked() ? error_denied : error_not_found;
         else frame->eax = actual;
         return 0;
     }

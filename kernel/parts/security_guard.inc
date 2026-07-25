@@ -5,7 +5,7 @@ constexpr uint32_t sha256_bytes = 32U;
 constexpr uint32_t audit_capacity = 32U;
 
 enum class Verdict : uint8_t { clean, trusted, untrusted, suspicious, infected, error };
-enum class AuditAction : uint8_t { boot, scan, execute, quarantine, write_block, intelligence_update, ransomware, ransomware_policy };
+enum class AuditAction : uint8_t { boot, scan, execute, quarantine, write_block, intelligence_update, ransomware, ransomware_policy, read_block, read_audit };
 
 struct ScanResult {
     Verdict verdict = Verdict::error;
@@ -60,6 +60,7 @@ AuditRecord audit_log[audit_capacity]{};
 uint32_t audit_next = 0, audit_count = 0;
 uint32_t scans = 0, blocked = 0, quarantined = 0, trusted_launches = 0;
 uint32_t write_scans = 0, write_blocked = 0, audit_only_findings = 0;
+uint32_t read_scans = 0, read_blocked = 0, read_audited = 0, read_skipped = 0;
 constexpr uintptr_t write_scan_workspace_address = 0x00300000U;
 constexpr uint32_t write_scan_workspace_bytes = process::application_buffer_bytes;
 static_assert(write_scan_workspace_address >= heap::limit_address);
@@ -152,6 +153,8 @@ const char* action_name(AuditAction action) {
         case AuditAction::intelligence_update: return "INTELLIGENCE-UPDATE";
         case AuditAction::ransomware: return "RANSOMWARE";
         case AuditAction::ransomware_policy: return "RANSOMWARE-POLICY";
+        case AuditAction::read_block: return "READ-BLOCK";
+        case AuditAction::read_audit: return "READ-AUDIT";
         default: return "UNKNOWN";
     }
 }
@@ -288,6 +291,39 @@ bool quarantine_path(const char* path) {
     serial_decision("ZENOV_GUARD_QUARANTINE_OK", result); return true;
 }
 
+bool on_access_excluded(const char* normalized) {
+    if (!normalized) return true;
+    return string_equal(normalized, "/security") || string_starts_with(normalized, "/security/") ||
+        string_equal(normalized, "/repo") || string_starts_with(normalized, "/repo/") ||
+        string_equal(normalized, "/var/lib/zenpkg") || string_starts_with(normalized, "/var/lib/zenpkg/") ||
+        string_equal(normalized, "/quarantine") || string_starts_with(normalized, "/quarantine/");
+}
+
+bool allow_persistent_read(const char* path, const uint8_t* data, uint32_t size) {
+    ++read_scans;
+    char normalized[48]{};
+    if (!path || !storage::normalize_path(path, normalized) || !enforcement_ready || !zmid::ready || (!data && size)) {
+        ++read_blocked;
+        serial::write("ZENOV_GUARD_READ_BLOCKED path="); serial::write(path ? path : "<null>");
+        serial::line(" reason=security-not-ready-or-invalid-path");
+        return false;
+    }
+    if (on_access_excluded(normalized)) { ++read_skipped; return true; }
+    ScanResult result = scan_memory(normalized, data, size, false);
+    if (result.verdict == Verdict::infected) {
+        ++read_blocked;
+        if (!record(AuditAction::read_block, result)) return false;
+        serial_decision("ZENOV_GUARD_READ_BLOCKED", result);
+        return false;
+    }
+    if (result.verdict == Verdict::suspicious) {
+        ++read_audited;
+        if (!record(AuditAction::read_audit, result)) return false;
+        serial_decision("ZENOV_GUARD_READ_AUDIT", result);
+    }
+    return true;
+}
+
 bool allow_persistent_write(const char* path, const uint8_t* data, uint32_t size, bool append) {
     ++write_scans;
     char normalized[48]{};
@@ -382,6 +418,10 @@ bool sha256_self_test() {
     uint8_t digest[sha256_bytes]; sha256(abc, sizeof(abc), digest); return digest_equal(digest, expected);
 }
 bool self_test() {
+    if (!on_access_excluded("/security") || !on_access_excluded("/security/policy") ||
+        !on_access_excluded("/repo/timestamp.zrm") || !on_access_excluded("/var/lib/zenpkg/state.v1") ||
+        !on_access_excluded("/quarantine/q-test.qtn") || on_access_excluded("/security-copy") ||
+        on_access_excluded("/repository") || on_access_excluded("/quarantine-copy")) return false;
     static constexpr char test_vector[] = "ZENOV_GUARD_SAFE_TEST_VECTOR_V1";
     static constexpr char clean_vector[] = "ZENOV_GUARD_CLEAN_VECTOR_V1";
     if (!sha256_self_test() || !zmid::ready || !zmid::self_test()) return false;
@@ -437,6 +477,10 @@ void print_status() {
     console::write("  Write scans   "); console::unsigned_dec(write_scans); console::put('\n');
     console::write("  Write blocks  "); console::unsigned_dec(write_blocked); console::put('\n');
     console::write("  Audit-only    "); console::unsigned_dec(audit_only_findings); console::put('\n');
+    console::write("  Read scans    "); console::unsigned_dec(read_scans); console::put('\n');
+    console::write("  Read blocks   "); console::unsigned_dec(read_blocked); console::put('\n');
+    console::write("  Read audits   "); console::unsigned_dec(read_audited); console::put('\n');
+    console::write("  Read skipped  "); console::unsigned_dec(read_skipped); console::put('\n');
     serial::line("ZENOV_GUARD_STATUS_OK");
 }
 void print_audit() {

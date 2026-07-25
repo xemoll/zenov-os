@@ -17,18 +17,6 @@ void list(const char* input) {
     if (!shown) console::line("  <empty>");
 }
 
-void cat(const char* input) {
-    uint32_t size = 0U;
-    const FsResult result = fs_record_result(
-        read_file_result(input, file_buffer, max_file_bytes(), size));
-    if (!result.ok()) {
-        console::write("Read failed: ");
-        console::line(fs_status_name(result.status));
-        return;
-    }
-    for (uint32_t i = 0; i < size; ++i) console::put(static_cast<char>(file_buffer[i]));
-    if (!size || file_buffer[size - 1U] != '\n') console::put('\n');
-}
 
 void stat(const char* input) { char path[48]; if (!normalize_path(input, path)) { console::warning("Invalid path."); return; } if (string_equal(path, "/")) { console::line("  Path          /data"); console::line("  Type          directory"); return; } const int32_t index = find_entry(path); if (index < 0) { console::warning("Path not found."); return; } console::write("  Path          /data"); console::line(path); console::write("  Type          "); console::line(zfs_entries[index].type == zfs_type_directory ? "directory" : "file"); if (zfs_entries[index].type == zfs_type_file) { console::write("  Size          "); console::unsigned_dec(zfs_entries[index].size); console::line(" bytes"); console::write("  Checksum      "); console::hex(zfs_entries[index].checksum); console::put('\n'); } }
 void print_working_directory() { console::write("/data"); if (!string_equal(current_directory, "/")) console::write(current_directory); console::put('\n'); }
