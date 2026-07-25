@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   integrate-and-verify:
+    if: github.event_name == 'pull_request' || github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
@@ -110,6 +111,7 @@ jobs:
           test "$(grep -Foc 'ZENOV_RANSOMWARE_TEST_V1' build/qemu/serial-phase1.log)" -eq 1
           test "$(grep -Foc 'ZENOV_MALWARE_TEST_V2' build/qemu/serial-phase1.log || true)" -eq 0
           grep -Fq 'ZENOV_SECURITY_RUNTIME_IMAGE_OK' ci-logs/qemu.log
+          grep -Fq 'ZENOV_SECURITY_GATE_OK' ci-logs/qemu.log
 
       - name: Prove deterministic rebuild
         shell: bash
@@ -118,25 +120,160 @@ jobs:
           make deterministic 2>&1 | tee ci-logs/deterministic.log
           grep -Fq 'deterministic rebuild: OK' ci-logs/deterministic.log
 
-      - name: Record verified tree
+      - name: Record and package clean production tree
         shell: bash
         run: |
           set -euo pipefail
-          git write-tree | tee ci-logs/verified-tree.log
+          verified_branch_tree="$(git write-tree)"
+          printf '%s\n' "$verified_branch_tree" | tee ci-logs/verified-branch-tree.log
           git diff --cached --stat | tee ci-logs/verified-diff-stat.log
           git status --short | tee ci-logs/final-status.log
+
+          rm -f /tmp/on-access-production.index
+          GIT_INDEX_FILE=/tmp/on-access-production.index git read-tree "${TARGET_BASE}^{tree}"
+          while IFS= read -r path; do
+            GIT_INDEX_FILE=/tmp/on-access-production.index git add -- "$path"
+          done < /tmp/expected-paths
+          production_tree="$(GIT_INDEX_FILE=/tmp/on-access-production.index git write-tree)"
+          printf '%s\n' "$production_tree" | tee ci-logs/verified-production-tree.log
+
+          tar --format=posix --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -cf /tmp/on-access-production.tar -T /tmp/expected-paths
+          tar_sha="$(sha256sum /tmp/on-access-production.tar | awk '{print $1}')"
+          {
+            printf 'target_base=%s\n' "$TARGET_BASE"
+            printf 'production_tree=%s\n' "$production_tree"
+            printf 'tar_sha256=%s\n' "$tar_sha"
+            while IFS= read -r path; do
+              mode="$(git ls-files -s -- "$path" | awk '{print $1}')"
+              blob="$(git hash-object "$path")"
+              printf 'path=%s\tmode=%s\tblob=%s\n' "$path" "$mode" "$blob"
+            done < /tmp/expected-paths
+          } > /tmp/on-access-production-manifest.txt
+          cat /tmp/on-access-production-manifest.txt | tee ci-logs/production-manifest.log
 
       - name: Upload integration evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: on-access-current-main-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          if-no-files-found: warn
+          if-no-files-found: error
           path: |
             /tmp/on-access-current-main.patch
+            /tmp/on-access-production.tar
+            /tmp/on-access-production-manifest.txt
             /tmp/expected-paths
             /tmp/actual-paths
             ci-logs/
             build/qemu/serial*.log
             build/qemu/*.stderr
             build/build-manifest.json
+
+  publish-clean-production:
+    if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+    needs: integrate-and-verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    env:
+      TARGET_BASE: 5eac0bee73a46e7b132f0694322bf7c4531bd63b
+      TARGET_BRANCH: agent/on-access-read-production
+      ARTIFACT_NAME: on-access-current-main-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.TARGET_BASE }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download verified production payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/on-access-artifact
+          curl --fail-with-body -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            > /tmp/artifacts.json
+          artifact_id="$(python3 - <<'PY'
+          import json
+          import os
+
+          data = json.load(open('/tmp/artifacts.json', encoding='utf-8'))
+          name = os.environ['ARTIFACT_NAME']
+          matches = [item for item in data.get('artifacts', []) if item.get('name') == name and not item.get('expired')]
+          assert len(matches) == 1, [(item.get('id'), item.get('name')) for item in data.get('artifacts', [])]
+          print(matches[0]['id'])
+          PY
+          )"
+          curl --fail-with-body -L -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+            -o /tmp/on-access-artifact.zip
+          unzip -q /tmp/on-access-artifact.zip -d /tmp/on-access-artifact
+
+      - name: Reconstruct exact clean tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$(find /tmp/on-access-artifact -type f -name on-access-production-manifest.txt -print -quit)"
+          payload="$(find /tmp/on-access-artifact -type f -name on-access-production.tar -print -quit)"
+          test -n "$manifest" && test -n "$payload"
+          test "$(grep '^target_base=' "$manifest" | cut -d= -f2)" = "$TARGET_BASE"
+          expected_tree="$(grep '^production_tree=' "$manifest" | cut -d= -f2)"
+          expected_tar_sha="$(grep '^tar_sha256=' "$manifest" | cut -d= -f2)"
+          test "$(sha256sum "$payload" | awk '{print $1}')" = "$expected_tar_sha"
+
+          tar -xf "$payload" -C "$GITHUB_WORKSPACE" --no-same-owner
+          grep '^path=' "$manifest" | sed -E 's/^path=([^\t]+).*/\1/' | sort > /tmp/expected-production-paths
+          git status --porcelain=v1 --untracked-files=all | cut -c4- | sort > /tmp/actual-production-paths
+          diff -u /tmp/expected-production-paths /tmp/actual-production-paths
+          ! grep -Fxq 'kernel/parts/storage.inc' /tmp/actual-production-paths
+          git diff --check
+
+          rm -f /tmp/publish.index
+          GIT_INDEX_FILE=/tmp/publish.index git read-tree "${TARGET_BASE}^{tree}"
+          while IFS= read -r path; do
+            GIT_INDEX_FILE=/tmp/publish.index git add -- "$path"
+          done < /tmp/expected-production-paths
+          actual_tree="$(GIT_INDEX_FILE=/tmp/publish.index git write-tree)"
+          test "$actual_tree" = "$expected_tree"
+          printf 'verified_clean_tree=%s\n' "$actual_tree"
+
+          export GIT_AUTHOR_NAME='github-actions[bot]'
+          export GIT_AUTHOR_EMAIL='41898282+github-actions[bot]@users.noreply.github.com'
+          export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+          export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+          commit="$(printf '%s\n\n%s\n' \
+            'security: integrate synchronous on-access read protection' \
+            'Verified against typed storage main with strict build, QEMU runtime-image checks and deterministic rebuild.' \
+            | git commit-tree "$actual_tree" -p "$TARGET_BASE")"
+          printf 'production_commit=%s\n' "$commit"
+          printf '%s\n' "$commit" > /tmp/production-commit.txt
+
+      - name: Publish non-force clean branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit="$(cat /tmp/production-commit.txt)"
+          remote_url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          existing="$(git ls-remote "$remote_url" "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')"
+          if [[ -n "$existing" && "$existing" != "$commit" ]]; then
+            echo "refusing to overwrite existing ${TARGET_BRANCH} at ${existing}" >&2
+            exit 1
+          fi
+          if [[ -z "$existing" ]]; then
+            git push "$remote_url" "${commit}:refs/heads/${TARGET_BRANCH}"
+          fi
+          test "$(git ls-remote "$remote_url" "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')" = "$commit"
+          printf 'PUBLISHED_ON_ACCESS_PRODUCTION_OK branch=%s commit=%s\n' "$TARGET_BRANCH" "$commit"
