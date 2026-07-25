@@ -247,7 +247,7 @@ extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
         }
         const storage::FsResult result = storage::fs_record_result(
             storage::guarded_write_file_result(path, data, frame->edx, frame->esi != 0U));
-        frame->eax = result.ok() ? result.bytes : fs_status_to_syscall_error(result.status);
+        frame->eax = result.ok() ? frame->edx : fs_status_to_syscall_error(result.status);
         return 0U;
     }
     if (number == syscall_file_stat) {
