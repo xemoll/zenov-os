@@ -8,6 +8,7 @@ using uint32_t = std::uint32_t;
 namespace storage {
 #include "../kernel/parts/storage_block_result.inc"
 #include "../kernel/parts/storage_fs_result.inc"
+#include "../kernel/parts/storage_fs_state.inc"
 }
 
 namespace process {
@@ -15,8 +16,8 @@ constexpr uint32_t error_invalid = 0xFFFFFFFFU;
 constexpr uint32_t error_not_found = 0xFFFFFFFEU;
 constexpr uint32_t error_no_space = 0xFFFFFFFDU;
 constexpr uint32_t error_io = 0xFFFFFFFCU;
-constexpr uint32_t error_denied = 0xFFFFFFF9U;
-constexpr uint32_t error_corrupt = 0xFFFFFFF8U;
+constexpr uint32_t syscall_error_denied = 0xFFFFFFF9U;
+constexpr uint32_t syscall_error_corrupt = 0xFFFFFFF8U;
 #include "../kernel/parts/process_fs_errors.inc"
 }
 
@@ -87,13 +88,13 @@ int main() {
            "map-not-found");
     expect(process::fs_status_to_syscall_error(FsStatus::buffer_too_small) == process::error_no_space,
            "map-capacity");
-    expect(process::fs_status_to_syscall_error(FsStatus::permission_denied) == process::error_denied,
+    expect(process::fs_status_to_syscall_error(FsStatus::permission_denied) == process::syscall_error_denied,
            "map-denied");
-    expect(process::fs_status_to_syscall_error(FsStatus::read_only) == process::error_denied,
+    expect(process::fs_status_to_syscall_error(FsStatus::read_only) == process::syscall_error_denied,
            "map-read-only");
-    expect(process::fs_status_to_syscall_error(FsStatus::checksum_mismatch) == process::error_corrupt,
+    expect(process::fs_status_to_syscall_error(FsStatus::checksum_mismatch) == process::syscall_error_corrupt,
            "map-checksum");
-    expect(process::fs_status_to_syscall_error(FsStatus::metadata_corrupt) == process::error_corrupt,
+    expect(process::fs_status_to_syscall_error(FsStatus::metadata_corrupt) == process::syscall_error_corrupt,
            "map-metadata");
     expect(process::fs_status_to_syscall_error(FsStatus::io_error) == process::error_io,
            "map-io");
@@ -102,8 +103,21 @@ int main() {
     expect(process::fs_status_to_syscall_error(FsStatus::wrong_type) == process::error_invalid,
            "map-wrong-type");
 
+    expect(fs_result_counters_valid(zfs_result_state), "initial-state-valid");
+    fs_record_result(success);
+    fs_record_result(retry);
+    fs_record_result(pending);
+    expect(zfs_result_state.requests == 3U, "state-requests");
+    expect(zfs_result_state.completed == 2U, "state-completed");
+    expect(zfs_result_state.failed == 1U, "state-failed");
+    expect(zfs_result_state.recovery_pending == 1U, "state-pending");
+    expect(fs_result_counters_valid(zfs_result_state), "final-state-valid");
+    expect(fs_last_result().status == FsStatus::recovery_pending, "last-result");
+    expect(fs_last_failure().status == FsStatus::io_error, "last-failure");
+
     if (failures != 0) return 1;
-    std::printf("ZENOVFS_RESULT_TEST_OK cases=%d abi=typed syscall-errors=distinct recovery=pending\n",
-                cases);
+    std::printf("ZENOVFS_RESULT_TEST_OK cases=%d abi=typed syscall-errors=distinct recovery=pending requests=%u completed=%u failed=%u\n",
+                cases, zfs_result_state.requests, zfs_result_state.completed,
+                zfs_result_state.failed);
     return 0;
 }
