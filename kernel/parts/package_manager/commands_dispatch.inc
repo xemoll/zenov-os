@@ -116,11 +116,16 @@ void command(char* input) {
     char* action = nullptr;
     char* arguments = nullptr;
     if (!split_subcommand(input, action, arguments)) {
-        console::line("Usage: pkg status|list|search|plan|verify|fetch|install|upgrade|repair|policy|info|rollback|remove|run|cache|transport|repo");
+        console::line("Usage: pkg status|formats|probe|list|search|plan|verify|fetch|install|upgrade|repair|policy|info|rollback|remove|run|cache|transport|repo");
         return;
     }
     if (string_equal(action, "status")) {
         status();
+    } else if (string_equal(action, "formats")) {
+        formats();
+    } else if (string_equal(action, "probe")) {
+        if (*arguments) probe_format(arguments);
+        else console::warning("Usage: pkg probe <file>");
     } else if (string_equal(action, "list")) {
         list();
     } else if (string_equal(action, "search")) {
