@@ -96,12 +96,24 @@ python3 - <<'PY'
 from pathlib import Path
 
 script = Path('tests/qemu_smoke.sh')
-text = script.read_text()
-anchor = '  send_command "guard quarantine list"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_LIST_OK entries=2" || { echo quit; return 1; }\n'
-block = '''  local quarantine_payload_count\n  quarantine_payload_count="$(grep -Foc 'prefix-ZENOV_RANSOMWARE_TEST_V1-suffix' "$serial" || true)"\n  send_command "cat /data/quarantine/q-92ec69273708e45efb43afbe.qtn"\n  wait_for_serial "$serial" "ZENOV_GUARD_READ_BLOCKED path=/quarantine/q-92ec69273708e45efb43afbe.qtn verdict=INFECTED signature=Quarantine.ReadDenied" || { echo quit; return 1; }\n  test "$(grep -Foc 'prefix-ZENOV_RANSOMWARE_TEST_V1-suffix' "$serial" || true)" -eq "$quarantine_payload_count" || { echo quit; return 1; }\n'''
-assert text.count(anchor) == 1
-assert 'local quarantine_payload_count' not in text
-script.write_text(text.replace(anchor, anchor + block, 1))
+lines = script.read_text().splitlines(keepends=True)
+matches = [
+    index for index, line in enumerate(lines)
+    if 'send_command "guard quarantine list"' in line
+    and 'ZENOV_GUARD_QUARANTINE_LIST_OK entries=2' in line
+]
+assert len(matches) == 1, matches
+assert not any('quarantine_payload_count' in line for line in lines)
+block = [
+    '  local quarantine_payload_count\n',
+    '  quarantine_payload_count="$(grep -Foc \'prefix-ZENOV_RANSOMWARE_TEST_V1-suffix\' "$serial" || true)"\n',
+    '  send_command "cat /data/quarantine/q-92ec69273708e45efb43afbe.qtn"\n',
+    '  wait_for_serial "$serial" "ZENOV_GUARD_READ_BLOCKED path=/quarantine/q-92ec69273708e45efb43afbe.qtn verdict=INFECTED signature=Quarantine.ReadDenied" || { echo quit; return 1; }\n',
+    '  test "$(grep -Foc \'prefix-ZENOV_RANSOMWARE_TEST_V1-suffix\' "$serial" || true)" -eq "$quarantine_payload_count" || { echo quit; return 1; }\n',
+]
+insert_at = matches[0] + 1
+lines[insert_at:insert_at] = block
+script.write_text(''.join(lines))
 PY
 
 cp /tmp/zenovfs-mount-hardening.final.yml .github/workflows/zenovfs-mount-hardening.yml
