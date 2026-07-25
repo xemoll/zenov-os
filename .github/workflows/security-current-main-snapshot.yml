@@ -20,22 +20,21 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 0
+          ref: 5eac0bee73a46e7b132f0694322bf7c4531bd63b
+          fetch-depth: 1
           persist-credentials: false
       - name: Verify exact source and archive
         run: |
           set -euo pipefail
-          git switch --detach 5eac0bee73a46e7b132f0694322bf7c4531bd63b
           test "$(git rev-parse HEAD)" = 5eac0bee73a46e7b132f0694322bf7c4531bd63b
-          printf '%s\n' 5eac0bee73a46e7b132f0694322bf7c4531bd63b > SOURCE-REVISION.txt
-          tar --exclude=.git --exclude=security-current-main-source.tar.gz \
-            -czf security-current-main-source.tar.gz .
-          sha256sum security-current-main-source.tar.gz > security-current-main-source.tar.gz.sha256
+          printf '%s\n' 5eac0bee73a46e7b132f0694322bf7c4531bd63b > /tmp/SOURCE-REVISION.txt
+          tar --exclude=.git -czf /tmp/security-current-main-source.tar.gz .
+          sha256sum /tmp/security-current-main-source.tar.gz > /tmp/security-current-main-source.tar.gz.sha256
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: security-current-main-source-5eac0bee
           if-no-files-found: error
           path: |
-            security-current-main-source.tar.gz
-            security-current-main-source.tar.gz.sha256
-            SOURCE-REVISION.txt
+            /tmp/security-current-main-source.tar.gz
+            /tmp/security-current-main-source.tar.gz.sha256
+            /tmp/SOURCE-REVISION.txt
