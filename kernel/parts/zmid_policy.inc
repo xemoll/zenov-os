@@ -9,9 +9,8 @@ constexpr uint32_t max_database_bytes = 16U * 1024U;
 constexpr uint32_t max_records = 32U;
 constexpr uint32_t max_pattern_bytes = 32U;
 constexpr uint8_t record_hash = 1U, record_pattern = 2U;
-constexpr uint8_t action_block = 1U, action_quarantine = 2U, action_audit = 4U;
+constexpr uint8_t action_block = security_guard::policy_action_block, action_quarantine = 2U, action_audit = 4U;
 constexpr uint8_t known_actions = action_block | action_quarantine | action_audit;
-
 struct [[gnu::packed]] Header {
     char magic[4];
     uint16_t schema, header_size;
@@ -105,8 +104,23 @@ bool write_version(uint32_t version) {
     return storage::write_file("/security/zenovguard-intelligence.version", reinterpret_cast<const uint8_t*>(text), count, false);
 }
 
-void activate(const Record source[max_records], uint32_t count, uint32_t version) {
-    memset(active_records, 0, sizeof(active_records));
+bool restore_update(uint32_t previous_version, uint32_t previous_size) {
+    const bool policy_restored = previous_size && security_guard::write_scan_buffer &&
+        storage::write_file("/security/zenovguard-intelligence.zmid", security_guard::write_scan_buffer, previous_size, false);
+    const bool version_restored = policy_restored && write_version(previous_version);
+    const bool metadata_synced = version_restored && storage::sync_metadata();
+    if (!policy_restored || !version_restored || !metadata_synced) {
+        ready = false;
+        serial::line("ZMID_UPDATE_ROLLBACK_FAILED");
+        return false;
+    }
+    persistent_database_version = previous_version;
+    ready = true;
+    serial::line("ZMID_UPDATE_ROLLBACK_OK");
+    return true;
+}
+
+void activate(const Record source[max_records], uint32_t count, uint32_t version) {    memset(active_records, 0, sizeof(active_records));
     hash_records = pattern_records = audit_only_records = 0U;
     for (uint32_t i = 0U; i < count; ++i) {
         active_records[i] = source[i];
@@ -180,28 +194,68 @@ bool update(const char* candidate_path) {
         serial::line("ZMID_SEQUENCE_REJECTED reason=non-sequential");
         return false;
     }
-    uint32_t size = 0U;
-    if (!storage::read_file(candidate_path, process::application_buffer, max_database_bytes, size)) return false;
+
+    const uint32_t previous_version = persistent_database_version;
+    uint32_t previous_size = 0U;
+    if (!security_guard::write_scan_buffer ||
+        !storage::read_file("/security/zenovguard-intelligence.zmid", security_guard::write_scan_buffer,
+            security_guard::write_scan_workspace_bytes, previous_size) || !previous_size) {
+        serial::line("ZMID_UPDATE_BACKUP_FAILED");
+        return false;
+    }
+
+    uint32_t candidate_size = 0U;
+    if (!storage::read_file(candidate_path, process::application_buffer, max_database_bytes, candidate_size)) return false;
     uint32_t final_version = 0U, final_count = 0U;
-    validation = validate(process::application_buffer, size, active_database_version + 1U, candidate_records, final_count, final_version);
+    validation = validate(process::application_buffer, candidate_size, active_database_version + 1U,
+        candidate_records, final_count, final_version);
     if (validation != Validation::okay || final_version != version || final_count != count) return false;
-    if (!storage::write_file("/security/zenovguard-intelligence.zmid", process::application_buffer, size, false)) return false;
-    if (!write_version(version)) return false;
-    activate(candidate_records, count, version);
-    persistent_database_version = version;
-    ready = true;
+
     security_guard::ScanResult event{};
     event.verdict = security_guard::Verdict::trusted;
     event.policy_action = action_audit;
     storage::path_copy(event.path, "/security/zenovguard-intelligence.zmid", sizeof(event.path));
-    storage::path_copy(event.signature, "Signed.Intelligence.Update", sizeof(event.signature));
-    security_guard::sha256(process::application_buffer, size, event.digest);
-    event.size = size;
-    if (!security_guard::record(security_guard::AuditAction::intelligence_update, event)) return false;
-    serial::write("ZMID_ATOMIC_UPDATE_OK version="); process::serial_u32(version); serial::write("\r\n");
+    storage::path_copy(event.signature, "Signed.Intelligence.UpdateIntent", sizeof(event.signature));
+    security_guard::sha256(process::application_buffer, candidate_size, event.digest);
+    event.size = candidate_size;
+    if (!security_guard::record(security_guard::AuditAction::intelligence_update, event)) {
+        serial::line("ZMID_UPDATE_AUDIT_FAILED");
+        return false;
+    }
+
+    if (!storage::write_file("/security/zenovguard-intelligence.zmid", process::application_buffer, candidate_size, false)) {
+        (void)restore_update(previous_version, previous_size);
+        serial::line("ZMID_UPDATE_POLICY_COMMIT_FAILED");
+        return false;
+    }
+
+    uint32_t committed_size = 0U;
+    if (!storage::read_file("/security/zenovguard-intelligence.zmid", process::application_buffer,
+            max_database_bytes, committed_size) || committed_size != candidate_size ||
+        validate(process::application_buffer, committed_size, active_database_version + 1U,
+            candidate_records, final_count, final_version) != Validation::okay ||
+        final_version != version || final_count != count) {
+        (void)restore_update(previous_version, previous_size);
+        serial::line("ZMID_UPDATE_READBACK_FAILED");
+        return false;
+    }
+    if (!write_version(final_version)) {
+        (void)restore_update(previous_version, previous_size);
+        serial::line("ZMID_UPDATE_VERSION_COMMIT_FAILED");
+        return false;
+    }
+    if (!storage::sync_metadata()) {
+        (void)restore_update(previous_version, previous_size);
+        serial::line("ZMID_UPDATE_SYNC_FAILED");
+        return false;
+    }
+
+    activate(candidate_records, final_count, final_version);
+    persistent_database_version = final_version;
+    ready = true;
+    serial::write("ZMID_ATOMIC_UPDATE_OK version="); process::serial_u32(final_version); serial::write("\r\n");
     return true;
 }
-
 bool self_test() {
     if (!ready || active_record_count < 5U || hash_records < 2U || pattern_records < 3U) return false;
     static constexpr char threat[] = "prefix-ZENOV_RANSOMWARE_TEST_V1-suffix";

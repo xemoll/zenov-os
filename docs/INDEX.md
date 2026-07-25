@@ -19,7 +19,7 @@
 - [`PACKAGE_COMPATIBILITY_ARCHITECTURE.md`](PACKAGE_COMPATIBILITY_ARCHITECTURE.md) — provider boundaries and staged foreign-runtime roadmap.
 - [`ZENUNIVERSE_REPOSITORY_0.1.1.md`](ZENUNIVERSE_REPOSITORY_0.1.1.md) — platform-neutral artifact catalog, HTTPS delivery contract and runtime-provider resolution.
 - [`ZENOVFS1_TRANSACTIONS.md`](ZENOVFS1_TRANSACTIONS.md) — interrupted-write ordering and recovery.
+- [`ZENOVFS_MOUNT_HARDENING_0.1.1.md`](ZENOVFS_MOUNT_HARDENING_0.1.1.md) — fail-closed superblock/entry validation, recovery-reference checks and malformed-metadata regression coverage.
 - [`POST_MERGE_HARDENING.md`](POST_MERGE_HARDENING.md) — process-window scrub and W^X audit delta.
 - [`RELEASE_CHECKLIST_0.1.1.md`](RELEASE_CHECKLIST_0.1.1.md) — final-main verification and publication gate.
-- [`SOURCE_ARCHITECTURE.md`](SOURCE_ARCHITECTURE.md) — modular Zenov configuration and scale contracts.
-- [`ZEX_ABI.md`](ZEX_ABI.md) and [`ELF32_ABI.md`](ELF32_ABI.md) — format-specific references.
+- [`SOURCE_ARCHITECTURE.md`](SOURCE_ARCHITECTURE.md) — modular Zenov configuration and scale contracts.- [`ZEX_ABI.md`](ZEX_ABI.md) and [`ELF32_ABI.md`](ELF32_ABI.md) — format-specific references.

@@ -60,6 +60,12 @@ $(BUILD)/zex-pack: tools/zex_pack.cpp | $(BUILD)
 $(BUILD)/zenovfs-builder: tools/zenovfs_builder.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
+$(BUILD)/zenovfs-mount-validation-test: tests/zenovfs_mount_validation_test.cpp kernel/parts/storage_format.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tests/zenovfs_mount_validation_test.cpp -o $@
+
+$(BUILD)/zenovfs-mount-corrupt: tools/zenovfs_mount_corrupt.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
 $(BUILD)/zenovfs-verify: tools/zenovfs_verify.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
@@ -416,9 +422,10 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  }' \
 	 '}' > $@
 
-check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(BUILD)/zcap-verify $(BUILD)/zmid-verify $(BUILD)/zrwp-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE)
+check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-mount-validation-test $(BUILD)/zenovfs-mount-corrupt $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(BUILD)/zcap-verify $(BUILD)/zmid-verify $(BUILD)/zrwp-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE)
 	$(BUILD)/zenov-stage0 --self-test
 	$(BUILD)/image-verify $(BUILD)/zenov-os.img
+	$(BUILD)/zenovfs-mount-validation-test
 	$(BUILD)/zenovfs-verify $(BUILD)/zenov-data.img
 	$(BUILD)/zenovfs-audit-verify $(BUILD)/zenov-data.img
 	$(BUILD)/zenovfs-fault-test $(BUILD)/zenov-data.img

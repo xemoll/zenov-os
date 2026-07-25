@@ -49,9 +49,9 @@ static_assert(sizeof(ZfsSuperblock) == sector_size && sizeof(ZfsEntry) == 64);
 constexpr uint32_t zfs_max_entries = 128U, transaction_none = 0xFFFFFFFFU;
 constexpr uint8_t zfs_type_file = 1, zfs_type_directory = 2, zfs_type_transaction = 3;
 constexpr uint16_t zfs_flag_committed = 0x0001U;
+#include "storage_format.inc"
 ZfsSuperblock zfs_super{}; ZfsEntry zfs_entries[zfs_max_entries]{};
 bool zfs_mounted = false; char current_directory[48] = "/"; uint8_t sector_buffer[sector_size]; uint8_t* file_buffer = nullptr;
-
 bool bytes_equal(const char* left, const char* right, uint32_t count) { for (uint32_t i = 0; i < count; ++i) if (left[i] != right[i]) return false; return true; }
 uint32_t fnv1a(const uint8_t* data, uint32_t size) { uint32_t hash = 2166136261U; for (uint32_t i = 0; i < size; ++i) { hash ^= data[i]; hash *= 16777619U; } return hash; }
 bool path_copy(char* output, const char* input, uint32_t capacity) { if (!output || !input || !capacity) return false; uint32_t n = 0; while (input[n]) { if (n + 1 >= capacity) return false; output[n] = input[n]; ++n; } output[n] = 0; return true; }
@@ -78,10 +78,11 @@ bool normalize_path(const char* input, char* output) {
         if (!combined[position]) break;
         char component[48]; uint32_t length = 0;
         while (combined[position] && combined[position] != '/') {
+            const uint8_t value = static_cast<uint8_t>(combined[position]);
+            if (value < 0x20U || value == 0x7FU) return false;
             if (length + 1 >= sizeof(component)) return false;
             component[length++] = combined[position++];
-        }
-        component[length] = 0;
+        }        component[length] = 0;
         if (string_equal(component, ".")) continue;
         if (string_equal(component, "..")) {
             if (count) { const uint32_t start = starts[--count]; output[start == 1 ? 1 : start - 1] = 0; }
@@ -117,11 +118,16 @@ uint32_t entry_slot_offset(uint32_t index) { return (index % 8U) * sizeof(ZfsEnt
 uint32_t data_sector(uint32_t index) { return zfs_super.data_start + index * zfs_super.slot_sectors; }
 uint32_t max_file_bytes() { return zfs_super.slot_sectors * sector_size; }
 bool flush_entry(uint32_t index) { if (index >= zfs_super.entry_count || !ata0.read_sector(entry_sector(index), sector_buffer)) return false; memcpy(sector_buffer + entry_slot_offset(index), &zfs_entries[index], sizeof(ZfsEntry)); return ata0.write_sector(entry_sector(index), sector_buffer); }
-bool load_entries() { uint8_t* destination = reinterpret_cast<uint8_t*>(zfs_entries); for (uint32_t sector = 0; sector < zfs_super.entry_sectors; ++sector) if (!ata0.read_sector(1U + sector, destination + sector * sector_size)) return false; return true; }
+bool load_entries() {
+    if (zfs_super.entry_sectors > sizeof(zfs_entries) / sector_size) return false;
+    memset(zfs_entries, 0, sizeof(zfs_entries));
+    uint8_t* destination = reinterpret_cast<uint8_t*>(zfs_entries);
+    for (uint32_t sector = 0; sector < zfs_super.entry_sectors; ++sector) if (!ata0.read_sector(1U + sector, destination + sector * sector_size)) return false;
+    return true;
+}
 bool recover_transactions() {
     bool recovered = false;
-    for (uint32_t i = 0; i < zfs_super.entry_count; ++i) {
-        if (zfs_entries[i].used && zfs_entries[i].type == zfs_type_transaction) {
+    for (uint32_t i = 0; i < zfs_super.entry_count; ++i) {        if (zfs_entries[i].used && zfs_entries[i].type == zfs_type_transaction) {
             memset(&zfs_entries[i], 0, sizeof(ZfsEntry));
             if (!flush_entry(i)) return false;
             recovered = true;
@@ -132,10 +138,11 @@ bool recover_transactions() {
         if (!committed.used || committed.type != zfs_type_file || !(committed.flags & zfs_flag_committed)) continue;
         const uint32_t old = committed.reserved;
         if (old < zfs_super.entry_count && old != i && zfs_entries[old].used) {
+            const ZfsEntry& previous = zfs_entries[old];
+            if (previous.type != zfs_type_file || previous.flags != 0U || !zfs_format_path_equal(previous.path, committed.path)) return false;
             memset(&zfs_entries[old], 0, sizeof(ZfsEntry));
             if (!flush_entry(old)) return false;
-        }
-        committed.flags &= static_cast<uint16_t>(~zfs_flag_committed);
+        }        committed.flags &= static_cast<uint16_t>(~zfs_flag_committed);
         committed.reserved = 0;
         if (!flush_entry(i)) return false;
         recovered = true;
@@ -143,18 +150,25 @@ bool recover_transactions() {
     if (recovered) serial::line("ZENOVFS_INTERRUPTED_WRITE_RECOVERED");
     return true;
 }
+bool reject_mount(const char* reason) {
+    serial::write("ZENOVFS_MOUNT_REJECTED reason=");
+    serial::line(reason ? reason : "unknown");
+    return false;
+}
 bool mount() {
-    if (!ata0.present || !ata0.read_sector(0, reinterpret_cast<uint8_t*>(&zfs_super))) return false;
-    const char expected[8] = {'Z','E','N','O','V','F','S','1'};
-    if (!bytes_equal(zfs_super.magic, expected, 8) || zfs_super.version != 1 || !zfs_super.entry_count || zfs_super.entry_count > zfs_max_entries || zfs_super.total_sectors > ata0.sectors || !zfs_super.slot_sectors) return false;
-    if (!load_entries()) return false;
+    if (!ata0.present || !ata0.read_sector(0, reinterpret_cast<uint8_t*>(&zfs_super))) return reject_mount("superblock-io");
+    const char* reason = nullptr;
+    if (!zfs_format_superblock_valid(zfs_super, ata0.sectors, reason)) return reject_mount(reason);
+    if (!load_entries()) return reject_mount("entry-table-io");
+    if (!zfs_format_entries_valid(zfs_super, zfs_entries, reason)) return reject_mount(reason);
     file_buffer = static_cast<uint8_t*>(heap::allocate(max_file_bytes(), 16));
-    if (!file_buffer || !recover_transactions()) return false;
+    if (!file_buffer) return reject_mount("file-buffer-allocation");
+    if (!recover_transactions()) return reject_mount("transaction-recovery");
+    if (!zfs_format_entries_valid(zfs_super, zfs_entries, reason)) return reject_mount("post-recovery-metadata");
     zfs_mounted = true;
     string_copy(current_directory, "/", sizeof(current_directory));
     return true;
 }
-
 bool read_file(const char* input, uint8_t* output, uint32_t capacity, uint32_t& actual_size) {
     actual_size = 0;
     if (!zfs_mounted || !output) return false;
@@ -165,18 +179,42 @@ bool read_file(const char* input, uint8_t* output, uint32_t capacity, uint32_t& 
     const uint32_t size = zfs_entries[found].size;
     uint32_t copied = 0;
     for (uint32_t sector = 0; copied < size; ++sector) {
-        if (!ata0.read_sector(data_sector(static_cast<uint32_t>(found)) + sector, sector_buffer)) return false;
+        if (!ata0.read_sector(data_sector(static_cast<uint32_t>(found)) + sector, sector_buffer)) {
+            if (copied) memset(output, 0, copied);
+            return false;
+        }
         uint32_t chunk = size - copied;
         if (chunk > sector_size) chunk = sector_size;
         memcpy(output + copied, sector_buffer, chunk);
         copied += chunk;
     }
-    if (fnv1a(output, size) != zfs_entries[found].checksum) return false;
+    if (fnv1a(output, size) != zfs_entries[found].checksum) {
+        if (size) memset(output, 0, size);
+        return false;
+    }
     actual_size = size;
     return true;
 }
-bool write_file(const char* input, const uint8_t* data, uint32_t size, bool append) {
-    if (!zfs_mounted || (!data && size)) return false;
+bool read_failure_scrub_self_test() {
+    if (!zfs_mounted || !file_buffer) return false;
+    for (uint32_t i = 0; i < zfs_super.entry_count; ++i) {
+        ZfsEntry& entry = zfs_entries[i];
+        if (!entry.used || entry.type != zfs_type_file || !entry.size) continue;
+        const uint32_t expected_size = entry.size;
+        const uint32_t checksum = entry.checksum;
+        entry.checksum ^= 1U;
+        memset(file_buffer, 0xA5, expected_size);
+        uint32_t actual_size = 0xFFFFFFFFU;
+        const bool accepted = read_file(entry.path, file_buffer, max_file_bytes(), actual_size);
+        entry.checksum = checksum;
+        if (accepted || actual_size != 0U) return false;
+        for (uint32_t offset = 0; offset < expected_size; ++offset) if (file_buffer[offset] != 0U) return false;
+        uint32_t verified_size = 0U;
+        return read_file(entry.path, file_buffer, max_file_bytes(), verified_size) && verified_size == expected_size;
+    }
+    return true;
+}
+bool write_file(const char* input, const uint8_t* data, uint32_t size, bool append) {    if (!zfs_mounted || (!data && size)) return false;
     char path[48];
     if (!normalize_path(input, path) || string_equal(path, "/") || !parent_exists(path)) return false;
     const int32_t old_index = find_entry(path);
@@ -250,5 +288,14 @@ void print_mounts() { console::line("  SOURCE        TARGET   FILESYSTEM  ACCESS
 void print_df() { if (!zfs_mounted) { console::warning("Persistent volume is not mounted."); return; } uint32_t files = 0, directories = 0, bytes = 0; for (uint32_t i = 0; i < zfs_super.entry_count; ++i) { if (!zfs_entries[i].used || zfs_entries[i].type == zfs_type_transaction) continue; if (zfs_entries[i].type == zfs_type_directory) ++directories; else { ++files; bytes += zfs_entries[i].size; } } console::write("  Files         "); console::unsigned_dec(files); console::put('\n'); console::write("  Directories   "); console::unsigned_dec(directories); console::put('\n'); console::write("  Payload       "); console::unsigned_dec(bytes); console::line(" bytes"); }
 bool ready() { return zfs_mounted; }
 uint32_t file_capacity() { return zfs_mounted ? max_file_bytes() : 0; }
-void init() { heap::init(); serial::line("Storage: probing ATA primary master..."); ata0.present = ata_identify(); ata0.sectors = ata_sector_total; if (!ata0.present) { serial::line("Storage: ATA device not found"); return; } serial::line("Storage: ATA PIO device online"); if (!mount()) { serial::line("Storage: ZenovFS mount failed"); return; } serial::line("ZENOVFS_MOUNT_OK"); }
+void init() {
+    heap::init(); serial::line("Storage: probing ATA primary master...");
+    ata0.present = ata_identify(); ata0.sectors = ata_sector_total;
+    if (!ata0.present) { serial::line("Storage: ATA device not found"); return; }
+    serial::line("Storage: ATA PIO device online");
+    if (!mount()) { serial::line("Storage: ZenovFS mount failed"); return; }
+    if (!read_failure_scrub_self_test()) { zfs_mounted = false; serial::line("ZENOVFS_READ_FAILURE_SCRUB_FAILED"); return; }
+    serial::line("ZENOVFS_READ_FAILURE_SCRUB_OK");
+    serial::line("ZENOVFS_MOUNT_OK");
+}
 } // namespace storage

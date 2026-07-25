@@ -132,6 +132,11 @@ controller_first() {
   send_command "guard scan /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_DETECTED" || { echo quit; return 1; }
   send_command "guard quarantine /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_OK" || { echo quit; return 1; }
   send_command "guard quarantine list"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_LIST_OK entries=2" || { echo quit; return 1; }
+  local quarantine_payload_count
+  quarantine_payload_count="$(grep -Foc 'prefix-ZENOV_RANSOMWARE_TEST_V1-suffix' "$serial" || true)"
+  send_command "cat /data/quarantine/q-92ec69273708e45efb43afbe.qtn"
+  wait_for_serial "$serial" "ZENOV_GUARD_READ_BLOCKED path=/quarantine/q-92ec69273708e45efb43afbe.qtn verdict=INFECTED signature=Quarantine.ReadDenied" || { echo quit; return 1; }
+  test "$(grep -Foc 'prefix-ZENOV_RANSOMWARE_TEST_V1-suffix' "$serial" || true)" -eq "$quarantine_payload_count" || { echo quit; return 1; }
   send_command "cp /data/apps/hello.zex /data/apps/untrusted.zex"; wait_for_serial "$serial" "COPY_OK" || { echo quit; return 1; }
   send_command "run UNTRUSTED.ZEX"; wait_for_serial "$serial" "ZENOV_GUARD_UNTRUSTED_BLOCKED" || { echo quit; return 1; }
   send_command "rm /data/apps/untrusted.zex"; wait_for_serial "$serial" "REMOVE_OK" || { echo quit; return 1; }

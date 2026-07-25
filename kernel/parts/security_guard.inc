@@ -3,10 +3,10 @@ static_assert(sizeof(unsigned long long) == 8);
 
 constexpr uint32_t sha256_bytes = 32U;
 constexpr uint32_t audit_capacity = 32U;
+constexpr uint8_t policy_action_block = 1U;
 
 enum class Verdict : uint8_t { clean, trusted, untrusted, suspicious, infected, error };
 enum class AuditAction : uint8_t { boot, scan, execute, quarantine, write_block, intelligence_update, ransomware, ransomware_policy, read_block, read_audit };
-
 struct ScanResult {
     Verdict verdict = Verdict::error;
     char path[48]{};
@@ -256,10 +256,9 @@ void build_quarantine_path(const uint8_t digest[sha256_bytes], char output[48]) 
     static constexpr char hex[] = "0123456789abcdef";
     storage::path_copy(output, "/quarantine/q-", 48);
     uint32_t position = static_cast<uint32_t>(string_length(output));
-    for (uint32_t i = 0; i < 6U; ++i) { output[position++] = hex[digest[i] >> 4U]; output[position++] = hex[digest[i] & 0x0FU]; }
+    for (uint32_t i = 0; i < 12U; ++i) { output[position++] = hex[digest[i] >> 4U]; output[position++] = hex[digest[i] & 0x0FU]; }
     output[position++] = '.'; output[position++] = 'q'; output[position++] = 't'; output[position++] = 'n'; output[position] = 0;
-}
-bool quarantine_path(const char* path) {
+}bool quarantine_path(const char* path) {
     ScanResult result{};
     if (!scan_path(path, result) || (result.verdict != Verdict::infected && result.verdict != Verdict::suspicious && result.verdict != Verdict::untrusted)) return false;
     char normalized[48];
@@ -295,12 +294,10 @@ bool on_access_excluded(const char* normalized) {
     if (!normalized) return true;
     return string_equal(normalized, "/security") || string_starts_with(normalized, "/security/") ||
         string_equal(normalized, "/repo") || string_starts_with(normalized, "/repo/") ||
-        string_equal(normalized, "/var/lib/zenpkg") || string_starts_with(normalized, "/var/lib/zenpkg/") ||
-        string_equal(normalized, "/quarantine") || string_starts_with(normalized, "/quarantine/");
+        string_equal(normalized, "/var/lib/zenpkg") || string_starts_with(normalized, "/var/lib/zenpkg/");
 }
 
-bool allow_persistent_read(const char* path, const uint8_t* data, uint32_t size) {
-    ++read_scans;
+bool allow_persistent_read(const char* path, const uint8_t* data, uint32_t size) {    ++read_scans;
     char normalized[48]{};
     if (!path || !storage::normalize_path(path, normalized) || !enforcement_ready || !zmid::ready || (!data && size)) {
         ++read_blocked;
@@ -308,9 +305,20 @@ bool allow_persistent_read(const char* path, const uint8_t* data, uint32_t size)
         serial::line(" reason=security-not-ready-or-invalid-path");
         return false;
     }
+    if (starts_with_quarantine(normalized)) {
+        ScanResult result{};
+        result.verdict = Verdict::infected;
+        result.policy_action = policy_action_block;
+        result.size = size;
+        storage::path_copy(result.path, normalized, sizeof(result.path));
+        storage::path_copy(result.signature, "Quarantine.ReadDenied", sizeof(result.signature));        sha256(data, size, result.digest);
+        ++read_blocked;
+        if (!record(AuditAction::read_block, result)) return false;
+        serial_decision("ZENOV_GUARD_READ_BLOCKED", result);
+        return false;
+    }
     if (on_access_excluded(normalized)) { ++read_skipped; return true; }
-    ScanResult result = scan_memory(normalized, data, size, false);
-    if (result.verdict == Verdict::infected) {
+    ScanResult result = scan_memory(normalized, data, size, false);    if (result.verdict == Verdict::infected) {
         ++read_blocked;
         if (!record(AuditAction::read_block, result)) return false;
         serial_decision("ZENOV_GUARD_READ_BLOCKED", result);
@@ -420,11 +428,16 @@ bool sha256_self_test() {
 bool self_test() {
     if (!on_access_excluded("/security") || !on_access_excluded("/security/policy") ||
         !on_access_excluded("/repo/timestamp.zrm") || !on_access_excluded("/var/lib/zenpkg/state.v1") ||
-        !on_access_excluded("/quarantine/q-test.qtn") || on_access_excluded("/security-copy") ||
+        on_access_excluded("/quarantine/q-test.qtn") || on_access_excluded("/security-copy") ||
         on_access_excluded("/repository") || on_access_excluded("/quarantine-copy")) return false;
+    uint8_t quarantine_digest_a[sha256_bytes]{};
+    uint8_t quarantine_digest_b[sha256_bytes]{};    quarantine_digest_b[6] = 1U;
+    char quarantine_path_a[48]{}, quarantine_path_b[48]{};
+    build_quarantine_path(quarantine_digest_a, quarantine_path_a);
+    build_quarantine_path(quarantine_digest_b, quarantine_path_b);
+    if (string_equal(quarantine_path_a, quarantine_path_b) || string_length(quarantine_path_a) != 42U) return false;
     static constexpr char test_vector[] = "ZENOV_GUARD_SAFE_TEST_VECTOR_V1";
-    static constexpr char clean_vector[] = "ZENOV_GUARD_CLEAN_VECTOR_V1";
-    if (!sha256_self_test() || !zmid::ready || !zmid::self_test()) return false;
+    static constexpr char clean_vector[] = "ZENOV_GUARD_CLEAN_VECTOR_V1";    if (!sha256_self_test() || !zmid::ready || !zmid::self_test()) return false;
     const ScanResult detected = scan_memory("<selftest-threat>", reinterpret_cast<const uint8_t*>(test_vector), sizeof(test_vector) - 1U, false);
     const ScanResult clean = scan_memory("<selftest-clean>", reinterpret_cast<const uint8_t*>(clean_vector), sizeof(clean_vector) - 1U, false);
     return detected.verdict == Verdict::infected && clean.verdict == Verdict::clean && sizeof(trusted_executables) / sizeof(trusted_executables[0]) == 7U;
