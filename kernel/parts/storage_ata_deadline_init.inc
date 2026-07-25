@@ -1,4 +1,13 @@
 void init_deadline() {
+    // Transitional bool entrypoints remain available to legacy internal callers
+    // until the next API-removal slice. Keep them referenced under -Werror.
+    (void)&flush_entry;
+    (void)&load_entries;
+    (void)&recover_transactions;
+    (void)&mount;
+    (void)&fs_last_result;
+    (void)&fs_last_failure;
+
     heap::init();
     serial::line("Storage: probing ATA primary master with monotonic deadlines...");
     ata_present = false;
@@ -8,6 +17,11 @@ void init_deadline() {
     ata0.read_sector = ata2_read_result;
     ata0.write_sector = ata2_write_result;
     zfs_io_state = block_io_state_initial();
+    zfs_result_state = FsResultState{
+        0U, 0U, 0U, 0U,
+        fs_success(FsOperation::none),
+        fs_success(FsOperation::none)
+    };
 
     const bool identified = ata2_identify();
     ata2_publish_device_state(identified, identified ? ata_sector_total : 0U);
@@ -19,9 +33,13 @@ void init_deadline() {
     serial::line("BLOCK_DEVICE_TYPED_ABI_READY version=1");
     serial::line("ATA_DEADLINE_DRIVER_READY clock=pit100 timeout=3000ms reset=5000ms attempts=2");
     serial::line("Storage: ATA PIO device online");
-    if (!mount()) {
-        serial::line("Storage: ZenovFS mount failed");
+
+    const FsResult mounted = fs_record_result(mount_result());
+    if (!mounted.ok()) {
+        serial::write("Storage: ZenovFS mount failed status=");
+        serial::line(fs_status_name(mounted.status));
         return;
     }
+    serial::line("ZENOVFS_RESULT_API_READY version=1");
     serial::line("ZENOVFS_MOUNT_OK");
 }

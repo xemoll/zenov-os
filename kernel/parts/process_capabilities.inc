@@ -1,3 +1,7 @@
+namespace storage {
+FsResult security_read_file_result(const char*, uint8_t*, uint32_t, uint32_t&);
+}
+
 namespace process {
 constexpr uint32_t capability_console_write = 1U << 0U;
 constexpr uint32_t capability_ticks = 1U << 1U;
@@ -10,6 +14,9 @@ constexpr uint32_t capability_console_read = 1U << 7U;
 constexpr uint32_t capability_all = capability_console_write | capability_ticks | capability_file_read | capability_file_write |
     capability_file_stat | capability_version | capability_sync | capability_console_read;
 constexpr uint32_t syscall_error_denied = 0xFFFFFFF9U;
+constexpr uint32_t syscall_error_corrupt = 0xFFFFFFF8U;
+
+#include "process_fs_errors.inc"
 
 using CapabilityProfile = zcap::Record;
 
@@ -157,7 +164,7 @@ bool trusted_profile_bijection() {
 }
 
 bool capability_self_test() {
-    if (!zcap::self_test() || !trusted_profile_bijection()) return false;
+    if (!zcap::self_test() || !trusted_profile_bijection() || !fs_status_error_mapping_valid()) return false;
     if (syscall_capability(syscall_console_write) != capability_console_write || syscall_capability(255U) != 0U) return false;
     if (!exact_scope_allows("/data/apps/userio.txt", "/apps/userio.txt")) return false;
     if (exact_scope_allows("/data/apps/other.txt", "/apps/userio.txt")) return false;
@@ -178,6 +185,7 @@ bool capability_init() {
         serial::write("SYSCALL_CAPABILITY_PROFILES_OK count=");
         serial_u32(zcap::profile_count);
         serial::write("\r\n");
+        serial::line("ZENOVFS_SYSCALL_ERROR_MAPPING_OK version=1");
     }
     return capability_ready;
 }
@@ -215,6 +223,59 @@ extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
             if (capability_audit_failed) { last_exit_code = 126U; return 1U; }
             return 0U;
         }
+    }
+
+    if (number == syscall_file_read) {
+        const char* path = user_string(frame->ebx);
+        uint8_t* output = user_bytes(frame->ecx, frame->edx, true);
+        if (!path || !output) {
+            frame->eax = error_fault;
+            return 0U;
+        }
+        uint32_t actual = 0U;
+        const storage::FsResult result = storage::fs_record_result(
+            storage::security_read_file_result(path, output, frame->edx, actual));
+        frame->eax = result.ok() ? actual : fs_status_to_syscall_error(result.status);
+        return 0U;
+    }
+    if (number == syscall_file_write) {
+        const char* path = user_string(frame->ebx);
+        const uint8_t* data = user_bytes(frame->ecx, frame->edx, false);
+        if (!path || (!data && frame->edx)) {
+            frame->eax = error_fault;
+            return 0U;
+        }
+        const storage::FsResult result = storage::fs_record_result(
+            storage::guarded_write_file_result(path, data, frame->edx, frame->esi != 0U));
+        frame->eax = result.ok() ? frame->edx : fs_status_to_syscall_error(result.status);
+        return 0U;
+    }
+    if (number == syscall_file_stat) {
+        const char* path = user_string(frame->ebx);
+        auto* output = reinterpret_cast<UserFileInfo*>(
+            user_bytes(frame->ecx, sizeof(UserFileInfo), true));
+        if (!path || !output) {
+            frame->eax = error_fault;
+            return 0U;
+        }
+        storage::FileInfo info{};
+        const storage::FsResult result = storage::fs_record_result(
+            storage::query_result(path, info));
+        if (!result.ok()) {
+            frame->eax = fs_status_to_syscall_error(result.status);
+            return 0U;
+        }
+        output->type = info.type;
+        output->size = info.size;
+        output->checksum = info.checksum;
+        frame->eax = 0U;
+        return 0U;
+    }
+    if (number == syscall_sync) {
+        const storage::FsResult result = storage::fs_record_result(
+            storage::sync_metadata_result());
+        frame->eax = result.ok() ? 0U : fs_status_to_syscall_error(result.status);
+        return 0U;
     }
     return syscall_dispatch_unrestricted(frame);
 }
