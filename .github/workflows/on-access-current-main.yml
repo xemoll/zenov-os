@@ -1,0 +1,130 @@
+name: Integrate on-access read protection on current main
+
+on:
+  push:
+    branches:
+      - agent/on-access-read-current-main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integrate-test-and-publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    env:
+      SOURCE_BASE: a38379b493ddeb0916047cc70c3183cb404f1872
+      SOURCE_HEAD: 199f98d478a7515c927c97d8fd61bdf5679e7e99
+      TARGET_BRANCH: agent/on-access-read-current-main
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl jq qemu-system-x86
+
+      - name: Apply reviewed on-access diff without legacy storage monolith
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          test "$(git rev-parse HEAD^)" = "5eac0bee73a46e7b132f0694322bf7c4531bd63b"
+          git cat-file -e "${SOURCE_BASE}^{commit}"
+          git cat-file -e "${SOURCE_HEAD}^{commit}"
+
+          paths=(
+            .github/workflows/antimalware.yml
+            Makefile
+            README.md
+            docs/ANTIMALWARE_0.1.1.md
+            docs/AUDIT_JOURNAL_0.1.1.md
+            docs/INDEX.md
+            docs/ON_ACCESS_PROTECTION_0.1.1.md
+            docs/SECURITY_MODEL_0.1.1.md
+            kernel/kernel.cpp
+            kernel/parts/process.inc
+            kernel/parts/security_audit.inc
+            kernel/parts/security_guard.inc
+            kernel/parts/security_io.inc
+            tests/qemu_smoke.sh
+            tools/check_antimalware.sh
+            tools/zenov_audit_format.hpp
+            tools/zenovfs_antimalware_verify.cpp
+          )
+          git diff --binary "${SOURCE_BASE}" "${SOURCE_HEAD}" -- "${paths[@]}" > /tmp/on-access-current-main.patch
+          test -s /tmp/on-access-current-main.patch
+
+          if ! git apply --3way --index /tmp/on-access-current-main.patch 2>&1 | tee ci-logs/git-apply.log; then
+            git status --short > ci-logs/apply-status.log
+            git diff --name-only --diff-filter=U > ci-logs/conflicts.log
+            exit 1
+          fi
+
+          printf '%s\n' "${paths[@]}" | sort > /tmp/expected-paths
+          git diff --cached --name-only | sort > /tmp/actual-paths
+          diff -u /tmp/expected-paths /tmp/actual-paths | tee ci-logs/path-set.log
+          ! grep -Fxq 'kernel/parts/storage.inc' /tmp/actual-paths
+          git diff --cached --check | tee ci-logs/diff-check.log
+          bash -n tests/qemu_smoke.sh
+          bash -n tools/check_antimalware.sh
+
+      - name: Run strict host and freestanding checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean check 2>&1 | tee ci-logs/make-check.log
+
+      - name: Run complete QEMU security lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          make qemu 2>&1 | tee ci-logs/qemu.log
+          grep -Fq 'ZENOV_GUARD_READ_AUDIT path=/samples/pua-test.bin' build/qemu/serial-phase1.log
+          grep -Fq 'ZENOV_GUARD_READ_BLOCKED path=/samples/ransomware-test.bin' build/qemu/serial-phase1.log
+          grep -Fq 'ZENOV_GUARD_READ_BLOCKED path=/samples/malware-v2.bin' build/qemu/serial-phase1.log
+          test "$(grep -Foc 'ZENOV_PUA_TEST_V1' build/qemu/serial-phase1.log)" -eq 2
+          test "$(grep -Foc 'ZENOV_RANSOMWARE_TEST_V1' build/qemu/serial-phase1.log)" -eq 1
+          test "$(grep -Foc 'ZENOV_MALWARE_TEST_V2' build/qemu/serial-phase1.log || true)" -eq 0
+          grep -Fq 'ZENOV_SECURITY_RUNTIME_IMAGE_OK' ci-logs/qemu.log
+
+      - name: Prove deterministic rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          make deterministic 2>&1 | tee ci-logs/deterministic.log
+          grep -Fq 'deterministic rebuild: OK' ci-logs/deterministic.log
+
+      - name: Commit and publish verified integration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'security: integrate on-access reads with typed storage main'
+          verified_sha="$(git rev-parse HEAD)"
+          printf 'verified_commit=%s\n' "$verified_sha" | tee ci-logs/verified-commit.log
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${TARGET_BRANCH}"
+
+      - name: Upload integration evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: on-access-current-main-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            /tmp/on-access-current-main.patch
+            ci-logs/*.log
+            build/qemu/serial*.log
+            build/qemu/*.stderr
+            build/build-manifest.json
