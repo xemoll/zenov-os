@@ -42,7 +42,7 @@ jobs:
           git cat-file -e "${SOURCE_BASE}^{commit}"
           git cat-file -e "${SOURCE_HEAD}^{commit}"
 
-          paths=(
+          source_paths=(
             .github/workflows/antimalware.yml
             Makefile
             README.md
@@ -61,8 +61,9 @@ jobs:
             tools/zenov_audit_format.hpp
             tools/zenovfs_antimalware_verify.cpp
           )
-          printf '%s\n' "${paths[@]}" | sort > /tmp/expected-paths
-          git diff --binary "${SOURCE_BASE}" "${SOURCE_HEAD}" -- "${paths[@]}" > /tmp/on-access-current-main.patch
+          expected_paths=("${source_paths[@]}" kernel/parts/storage_zenovfs_commands.inc)
+          printf '%s\n' "${expected_paths[@]}" | sort > /tmp/expected-paths
+          git diff --binary "${SOURCE_BASE}" "${SOURCE_HEAD}" -- "${source_paths[@]}" > /tmp/on-access-current-main.patch
           test -s /tmp/on-access-current-main.patch
 
           if ! git apply --3way --index /tmp/on-access-current-main.patch 2>&1 | tee ci-logs/git-apply.log; then
@@ -71,9 +72,22 @@ jobs:
             exit 1
           fi
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('kernel/parts/storage_zenovfs_commands.inc')
+          text = path.read_text()
+          raw_cat = "void cat(const char* input) { uint32_t size = 0; if (!read_file(input, file_buffer, max_file_bytes(), size)) { console::warning(\"File not found or checksum failed.\"); return; } for (uint32_t i = 0; i < size; ++i) console::put(static_cast<char>(file_buffer[i])); if (!size || file_buffer[size - 1] != '\\n') console::put('\\n'); }\n"
+          assert text.count(raw_cat) == 1, text.count(raw_cat)
+          path.write_text(text.replace(raw_cat, '', 1))
+          PY
+          git add kernel/parts/storage_zenovfs_commands.inc
+
           git diff --cached --name-only | sort > /tmp/actual-paths
           diff -u /tmp/expected-paths /tmp/actual-paths | tee ci-logs/path-set.log
           ! grep -Fxq 'kernel/parts/storage.inc' /tmp/actual-paths
+          grep -Fq 'void guarded_cat(const char* input)' kernel/parts/security_io.inc
+          ! grep -Fq 'void cat(const char* input)' kernel/parts/storage_zenovfs_commands.inc
           git diff --cached --check | tee ci-logs/diff-check.log
           bash -n tests/qemu_smoke.sh
           bash -n tools/check_antimalware.sh
