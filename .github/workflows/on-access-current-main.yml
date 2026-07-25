@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/on-access-read-current-main
+  pull_request:
+    branches:
+      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,19 +16,17 @@ permissions:
   contents: read
 
 jobs:
-  integrate-test-and-publish:
-    if: github.actor != 'github-actions[bot]'
+  integrate-and-verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
-    permissions:
-      contents: write
     env:
       SOURCE_BASE: a38379b493ddeb0916047cc70c3183cb404f1872
       SOURCE_HEAD: 199f98d478a7515c927c97d8fd61bdf5679e7e99
-      TARGET_BRANCH: agent/on-access-read-current-main
+      TARGET_BASE: 5eac0bee73a46e7b132f0694322bf7c4531bd63b
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -37,7 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci-logs
-          test "$(git rev-parse HEAD^)" = "5eac0bee73a46e7b132f0694322bf7c4531bd63b"
+          test "$(git merge-base HEAD origin/main)" = "${TARGET_BASE}"
           git cat-file -e "${SOURCE_BASE}^{commit}"
           git cat-file -e "${SOURCE_HEAD}^{commit}"
 
@@ -60,6 +61,7 @@ jobs:
             tools/zenov_audit_format.hpp
             tools/zenovfs_antimalware_verify.cpp
           )
+          printf '%s\n' "${paths[@]}" | sort > /tmp/expected-paths
           git diff --binary "${SOURCE_BASE}" "${SOURCE_HEAD}" -- "${paths[@]}" > /tmp/on-access-current-main.patch
           test -s /tmp/on-access-current-main.patch
 
@@ -69,7 +71,6 @@ jobs:
             exit 1
           fi
 
-          printf '%s\n' "${paths[@]}" | sort > /tmp/expected-paths
           git diff --cached --name-only | sort > /tmp/actual-paths
           diff -u /tmp/expected-paths /tmp/actual-paths | tee ci-logs/path-set.log
           ! grep -Fxq 'kernel/parts/storage.inc' /tmp/actual-paths
@@ -103,18 +104,13 @@ jobs:
           make deterministic 2>&1 | tee ci-logs/deterministic.log
           grep -Fq 'deterministic rebuild: OK' ci-logs/deterministic.log
 
-      - name: Commit and publish verified integration
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Record verified tree
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'security: integrate on-access reads with typed storage main'
-          verified_sha="$(git rev-parse HEAD)"
-          printf 'verified_commit=%s\n' "$verified_sha" | tee ci-logs/verified-commit.log
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${TARGET_BRANCH}"
+          git write-tree | tee ci-logs/verified-tree.log
+          git diff --cached --stat | tee ci-logs/verified-diff-stat.log
+          git status --short | tee ci-logs/final-status.log
 
       - name: Upload integration evidence
         if: always()
@@ -124,7 +120,9 @@ jobs:
           if-no-files-found: warn
           path: |
             /tmp/on-access-current-main.patch
-            ci-logs/*.log
+            /tmp/expected-paths
+            /tmp/actual-paths
+            ci-logs/
             build/qemu/serial*.log
             build/qemu/*.stderr
             build/build-manifest.json
