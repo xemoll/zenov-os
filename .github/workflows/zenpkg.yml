@@ -2,6 +2,8 @@ name: ZenPkg
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'GNUmakefile'
       - 'zenpkg.mk'
@@ -40,6 +42,8 @@ on:
       - '.github/workflows/zenpkg.yml'
       - '.github/workflows/zenrepo.yml'
   pull_request:
+    branches:
+      - main
     paths:
       - 'GNUmakefile'
       - 'zenpkg.mk'
@@ -77,6 +81,14 @@ on:
       - 'docs/PACKAGE_COMPATIBILITY_ARCHITECTURE.md'
       - '.github/workflows/zenpkg.yml'
       - '.github/workflows/zenrepo.yml'
+  merge_group:
+    types:
+      - checks_requested
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -92,18 +104,25 @@ jobs:
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 2
-      - name: Verify tested source revision
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact tested source revision
         run: |
+          set -euo pipefail
           [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
-          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
-          echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
+          actual_revision="$(git rev-parse HEAD)"
+          test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
+          git cat-file -e "$actual_revision^{commit}"
+          test -z "$(git status --porcelain)"
+          echo "tested-source-revision=$actual_revision"
       - name: Install strict native and QEMU toolchain
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
       - name: Build signed-package image and host regressions
         run: |
+          set -euo pipefail
           rm -f /tmp/zenpkg-check.log
           if ! make clean zenpkg-check > /tmp/zenpkg-check.log 2>&1; then
             tail -n 280 /tmp/zenpkg-check.log
@@ -116,6 +135,7 @@ jobs:
         run: bash tests/zenrepo_test.sh
       - name: Compile parsers and crash tools with sanitizers
         run: |
+          set -euo pipefail
           mkdir -p build/sanitized
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
@@ -141,6 +161,7 @@ jobs:
           bash -n tests/qemu_zenpkg_blkdebug_breakpoints.sh
       - name: Compile release host tools
         run: |
+          set -euo pipefail
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg/main.cpp -o build/zenpkg-release
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenrepo/main.cpp -o build/zenrepo-release
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg_transport_fault_test.cpp -o build/zenpkg-transport-fault-release
@@ -157,6 +178,7 @@ jobs:
           cmp /tmp/zenpkg-blkdebug-sanitized/sectors.env /tmp/zenpkg-blkdebug-release/sectors.env
       - name: Verify deterministic package and repository bytes
         run: |
+          set -euo pipefail
           rm -rf /tmp/zenpkg-rebuild
           make --no-print-directory BUILD=/tmp/zenpkg-rebuild zenpkg-check
           for package in hello-native-0.1.0.zpk hello-native-0.2.0.zpk hello-native-0.3.0.zpk; do
@@ -169,6 +191,7 @@ jobs:
           ! grep -R -E 'metadata_versions|root v[0-9]+|timestamp v[0-9]+' build/zenpkg-manifest.json docs/ZENREPO_OFFLINE_0.1.1.md
       - name: Boot ZenovOS and verify real package lifecycle
         run: |
+          set -euo pipefail
           rm -f /tmp/zenpkg-qemu.log
           if ! make zenpkg-qemu > /tmp/zenpkg-qemu.log 2>&1; then
             tail -n 300 /tmp/zenpkg-qemu.log
@@ -177,6 +200,7 @@ jobs:
           tail -n 160 /tmp/zenpkg-qemu.log
       - name: Boot three phases and prove journal recovery across reboot
         run: |
+          set -euo pipefail
           rm -f /tmp/zenpkg-transport-qemu.log
           if ! make zenpkg-transport-qemu > /tmp/zenpkg-transport-qemu.log 2>&1; then
             tail -n 340 /tmp/zenpkg-transport-qemu.log
@@ -185,6 +209,7 @@ jobs:
           tail -n 200 /tmp/zenpkg-transport-qemu.log
       - name: Boot sector-fault recovery images
         run: |
+          set -euo pipefail
           rm -f /tmp/zenpkg-transport-fault-qemu.log
           if ! make zenpkg-transport-fault-qemu > /tmp/zenpkg-transport-fault-qemu.log 2>&1; then
             tail -n 380 /tmp/zenpkg-transport-fault-qemu.log
@@ -193,6 +218,7 @@ jobs:
           tail -n 240 /tmp/zenpkg-transport-fault-qemu.log
       - name: Crash at proven live block I/O boundaries and reboot the same disks
         run: |
+          set -euo pipefail
           rm -f /tmp/zenpkg-blkdebug-qemu.log
           if ! make zenpkg-blkdebug-qemu > /tmp/zenpkg-blkdebug-qemu.log 2>&1; then
             tail -n 420 /tmp/zenpkg-blkdebug-qemu.log
@@ -201,6 +227,7 @@ jobs:
           tail -n 260 /tmp/zenpkg-blkdebug-qemu.log
       - name: Verify crash-consistency evidence
         run: |
+          set -euo pipefail
           lifecycle=build/qemu/zenpkg/serial.log
           recovery=build/qemu/zenpkg-transport/serial.log
           faults=build/qemu/zenpkg-faults/serial.log
@@ -232,9 +259,9 @@ jobs:
           ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$lifecycle" "$recovery" "$faults" "$blkdebug"/serial-*.log
       - name: Upload ZenPkg QEMU evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: zenpkg-qemu-evidence-${{ github.run_id }}
+          name: zenpkg-qemu-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             build/qemu/zenpkg/serial.log
             build/qemu/zenpkg/serial-*.log
@@ -258,9 +285,9 @@ jobs:
           retention-days: 14
       - name: Upload ZenPkg diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: zenpkg-diagnostics-${{ github.run_id }}
+          name: zenpkg-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             /tmp/zenpkg-check.log
             /tmp/zenpkg-qemu.log
