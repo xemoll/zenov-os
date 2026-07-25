@@ -1,6 +1,7 @@
 name: Security current-main source snapshot
 
 on:
+  pull_request:
   push:
     branches:
       - agent/security-current-main-snapshot
@@ -24,7 +25,10 @@ jobs:
       - name: Verify exact source and archive
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = 5eac0bee73a46e7b132f0694322bf7c4531bd63b
+          git fetch origin refs/heads/agent/security-current-main-snapshot:refs/remotes/origin/security-current-main-snapshot
+          git switch --detach refs/remotes/origin/security-current-main-snapshot
+          test "$(git rev-parse HEAD^)" = d89539b43b267bd0a799ec167aeb833146d48e7c
+          test "$(git rev-parse HEAD^^)" = 5eac0bee73a46e7b132f0694322bf7c4531bd63b
           printf '%s\n' 5eac0bee73a46e7b132f0694322bf7c4531bd63b > SOURCE-REVISION.txt
           tar --exclude=.git --exclude=security-current-main-source.tar.gz \
             -czf security-current-main-source.tar.gz .
