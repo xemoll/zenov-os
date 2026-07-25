@@ -160,7 +160,8 @@ inline ForeignProbe require_native_import_candidate(const std::filesystem::path&
                     " is not eligible for native import; support=" +
                     package_foreign::support_text(detection.support));
     }
-    return ForeignProbe{std::move(bytes), detection, sha256_hex(bytes)};
+    const std::string digest = sha256_hex(bytes);
+    return ForeignProbe{std::move(bytes), detection, digest};
 }
 
 inline Package import_native(const ForeignProbe& probe, const std::string& name,
@@ -173,6 +174,9 @@ inline Package import_native(const ForeignProbe& probe, const std::string& name,
     if (!is_printable_text(source, 256U)) throw Error("source is required and must fit 256 printable characters");
     if (asset_policy != "redistributable") {
         throw Error("0.1.1 native import accepts only asset_policy=redistributable");
+    }
+    if (probe.sha256 != sha256_hex(probe.bytes)) {
+        throw Error("native import candidate snapshot digest mismatch");
     }
 
     Manifest manifest;
@@ -211,7 +215,13 @@ inline Package import_native(const ForeignProbe& probe, const std::string& name,
         throw Error("imported package exceeds the current 64 KiB ZenovFS/package-manager limit");
     }
     write_binary_atomic(output_path, package_bytes);
-    return read_package(output_path);
+    auto package = read_package(output_path);
+    if (hex_encode(package.payload_digest.data(), package.payload_digest.size()) != probe.sha256) {
+        std::error_code ignored;
+        std::filesystem::remove(output_path, ignored);
+        throw Error("native import output payload does not match the validated snapshot");
+    }
+    return package;
 }
 
 } // namespace zenpkg
