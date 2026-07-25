@@ -1,0 +1,262 @@
+name: Verify on-access reads on typed filesystem main
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integrate-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      SOURCE_HEAD: 07286ff361f13bff5525c8b0ea1e5f5143e01526
+      TARGET_BASE: 87219b0931ad2318e3a677ac69293fcb3388f3cb
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl jq qemu-system-x86
+
+      - name: Reconstruct typed on-access production tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          test "$(git merge-base HEAD origin/main)" = "${TARGET_BASE}"
+          git cat-file -e "${SOURCE_HEAD}^{commit}"
+
+          inherited_paths=(
+            .github/workflows/antimalware.yml
+            Makefile
+            README.md
+            docs/ANTIMALWARE_0.1.1.md
+            docs/AUDIT_JOURNAL_0.1.1.md
+            docs/INDEX.md
+            docs/ON_ACCESS_PROTECTION_0.1.1.md
+            docs/SECURITY_MODEL_0.1.1.md
+            kernel/kernel.cpp
+            kernel/parts/process.inc
+            kernel/parts/security_audit.inc
+            kernel/parts/security_guard.inc
+            tests/qemu_smoke.sh
+            tools/check_antimalware.sh
+            tools/zenov_audit_format.hpp
+            tools/zenovfs_antimalware_verify.cpp
+          )
+          git checkout "${SOURCE_HEAD}" -- "${inherited_paths[@]}"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/antimalware.yml')
+          text = workflow.read_text()
+          old = "grep -Fq 'if (output != process::application_buffer) return guarded_read_file' kernel/parts/security_io.inc"
+          new = "grep -Fq 'if (output != process::application_buffer) return guarded_read_file_result' kernel/parts/security_io.inc"
+          assert text.count(old) == 1, text.count(old)
+          assert text.count(new) == 0, text.count(new)
+          workflow.write_text(text.replace(old, new, 1))
+
+          commands = Path('kernel/parts/storage_zenovfs_commands.inc')
+          text = commands.read_text()
+          marker = 'void cat(const char* input) {'
+          assert text.count(marker) == 1, text.count(marker)
+          start = text.index(marker)
+          end = text.index('\n}\n', start) + 3
+          commands.write_text(text[:start] + text[end:])
+          PY
+
+          cat > kernel/parts/security_io.inc <<'EOF'
+          namespace storage {
+          bool security_read_blocked = false;
+          bool security_read_was_blocked() { return security_read_blocked; }
+
+          FsResult guarded_read_file_result(const char* input, uint8_t* output, uint32_t capacity,
+                                            uint32_t& actual_size) {
+              security_read_blocked = false;
+              const FsResult read = read_file_result(input, output, capacity, actual_size);
+              if (!read.ok()) return read;
+
+              const auto deny = [&]() {
+                  security_read_blocked = true;
+                  if (output && actual_size) memset(output, 0, actual_size);
+                  actual_size = 0U;
+                  return fs_failure(FsOperation::read, FsStatus::permission_denied);
+              };
+
+              if (!security_guard::write_scan_buffer ||
+                  actual_size > security_guard::write_scan_workspace_bytes) return deny();
+              if (actual_size) memcpy(security_guard::write_scan_buffer, output, actual_size);
+              if (!security_guard::allow_persistent_read(
+                      input, security_guard::write_scan_buffer, actual_size)) return deny();
+              if (actual_size) memcpy(output, security_guard::write_scan_buffer, actual_size);
+              return read;
+          }
+
+          bool guarded_read_file(const char* input, uint8_t* output, uint32_t capacity,
+                                 uint32_t& actual_size) {
+              return fs_record_result(
+                  guarded_read_file_result(input, output, capacity, actual_size)).ok();
+          }
+
+          FsResult security_read_file_result(const char* input, uint8_t* output, uint32_t capacity,
+                                             uint32_t& actual_size) {
+              security_read_blocked = false;
+              if (output != process::application_buffer) return guarded_read_file_result(input, output, capacity, actual_size);
+
+              const FsResult read = read_file_result(input, output, capacity, actual_size);
+              if (!read.ok()) return read;
+
+              const auto deny = [&]() {
+                  if (output && actual_size) memset(output, 0, actual_size);
+                  actual_size = 0U;
+                  return fs_failure(FsOperation::read, FsStatus::permission_denied);
+              };
+
+              if (!zgdb::precheck(input, output, actual_size)) return deny();
+              if (package_manager::allow_execution(input, output, actual_size)) {
+                  if (!package_manager::activate_capabilities(input, output, actual_size)) {
+                      serial::line("ZENPKG_SYSCALL_CAPABILITY_ACTIVATION_FAILED");
+                      return deny();
+                  }
+                  return read;
+              }
+              if (!security_guard::allow_execution(input, output, actual_size)) return deny();
+              if (!process::activate_capability_profile(input, output, actual_size)) {
+                  serial::line("SYSCALL_CAPABILITY_ACTIVATION_FAILED");
+                  return deny();
+              }
+              return read;
+          }
+
+          bool security_read_file(const char* input, uint8_t* output, uint32_t capacity,
+                                  uint32_t& actual_size) {
+              return fs_record_result(
+                  security_read_file_result(input, output, capacity, actual_size)).ok();
+          }
+
+          void guarded_cat(const char* input) {
+              uint32_t size = 0U;
+              const FsResult result = fs_record_result(
+                  guarded_read_file_result(input, file_buffer, max_file_bytes(), size));
+              if (!result.ok()) {
+                  console::write("Read failed: ");
+                  console::line(fs_status_name(result.status));
+                  return;
+              }
+              for (uint32_t i = 0U; i < size; ++i) console::put(static_cast<char>(file_buffer[i]));
+              if (!size || file_buffer[size - 1U] != '\n') console::put('\n');
+          }
+          } // namespace storage
+          EOF
+
+          git add "${inherited_paths[@]}" kernel/parts/security_io.inc kernel/parts/storage_zenovfs_commands.inc
+          expected_paths=("${inherited_paths[@]}" kernel/parts/security_io.inc kernel/parts/storage_zenovfs_commands.inc)
+          printf '%s\n' "${expected_paths[@]}" | sort > /tmp/expected-paths
+          git diff --cached --name-only | sort > /tmp/actual-paths
+          diff -u /tmp/expected-paths /tmp/actual-paths | tee ci-logs/path-set.log
+          ! grep -Fxq 'kernel/parts/storage.inc' /tmp/actual-paths
+          grep -Fq 'FsResult guarded_read_file_result(' kernel/parts/security_io.inc
+          grep -Fq 'FsResult security_read_file_result(' kernel/parts/security_io.inc
+          grep -Fq 'FsStatus::permission_denied' kernel/parts/security_io.inc
+          grep -Fq 'void guarded_cat(const char* input)' kernel/parts/security_io.inc
+          ! grep -Fq 'void cat(const char* input)' kernel/parts/storage_zenovfs_commands.inc
+          git diff --cached --check | tee ci-logs/diff-check.log
+          bash -n tests/qemu_smoke.sh
+          bash -n tools/check_antimalware.sh
+
+      - name: Run strict host and freestanding checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean check 2>&1 | tee ci-logs/make-check.log
+          grep -Fq 'ZENOVFS_RESULT_TEST_OK cases=39 abi=typed syscall-errors=distinct recovery=pending requests=3 completed=2 failed=1' ci-logs/make-check.log
+
+      - name: Run complete QEMU security lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          make qemu 2>&1 | tee ci-logs/qemu.log
+          grep -Fq 'ZENOV_GUARD_READ_AUDIT path=/samples/pua-test.bin' build/qemu/serial-phase1.log
+          grep -Fq 'ZENOV_GUARD_READ_BLOCKED path=/samples/ransomware-test.bin' build/qemu/serial-phase1.log
+          grep -Fq 'ZENOV_GUARD_READ_BLOCKED path=/samples/malware-v2.bin' build/qemu/serial-phase1.log
+          test "$(grep -Foc 'ZENOV_PUA_TEST_V1' build/qemu/serial-phase1.log)" -eq 2
+          test "$(grep -Foc 'ZENOV_RANSOMWARE_TEST_V1' build/qemu/serial-phase1.log)" -eq 1
+          test "$(grep -Foc 'ZENOV_MALWARE_TEST_V2' build/qemu/serial-phase1.log || true)" -eq 0
+          grep -Fq 'ZENOV_SECURITY_RUNTIME_IMAGE_OK' ci-logs/qemu.log
+          grep -Fq 'ZENOV_SECURITY_GATE_OK' ci-logs/qemu.log
+
+      - name: Run typed block and filesystem runtime gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          make block-status-qemu 2>&1 | tee ci-logs/block-status-qemu.log
+          grep -Fq 'BLOCK_STATUS_QEMU_OK command="disk status" typed-results=2 typed-abi=1 fs-results=1 syscall-map=1 counters=consistent' build/qemu/block-status/summary.log
+          grep -Fq 'ZENOVFS_RESULT_API_OK version=1' build/qemu/block-status/serial.log
+          grep -Fq 'ZENOVFS_SYSCALL_ERROR_MAPPING_OK version=1' build/qemu/block-status/serial.log
+
+      - name: Prove deterministic rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          make deterministic 2>&1 | tee ci-logs/deterministic.log
+          grep -Fq 'deterministic rebuild: OK' ci-logs/deterministic.log
+
+      - name: Package exact clean production tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch_tree="$(git write-tree)"
+          printf 'verified_branch_tree=%s\n' "$branch_tree" | tee ci-logs/verified-branch-tree.log
+          git diff --cached --stat | tee ci-logs/verified-diff-stat.log
+
+          rm -f /tmp/production.index
+          GIT_INDEX_FILE=/tmp/production.index git read-tree "${TARGET_BASE}^{tree}"
+          while IFS= read -r path; do
+            GIT_INDEX_FILE=/tmp/production.index git add -- "$path"
+          done < /tmp/expected-paths
+          production_tree="$(GIT_INDEX_FILE=/tmp/production.index git write-tree)"
+          printf 'verified_production_tree=%s\n' "$production_tree" | tee ci-logs/verified-production-tree.log
+
+          tar --format=posix --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -cf /tmp/on-access-typed-fs-production.tar -T /tmp/expected-paths
+          tar_sha="$(sha256sum /tmp/on-access-typed-fs-production.tar | awk '{print $1}')"
+          {
+            printf 'target_base=%s\n' "$TARGET_BASE"
+            printf 'production_tree=%s\n' "$production_tree"
+            printf 'tar_sha256=%s\n' "$tar_sha"
+            while IFS= read -r path; do
+              mode="$(git ls-files -s -- "$path" | awk '{print $1}')"
+              blob="$(git hash-object "$path")"
+              printf 'path=%s\tmode=%s\tblob=%s\n' "$path" "$mode" "$blob"
+            done < /tmp/expected-paths
+          } > /tmp/on-access-typed-fs-manifest.txt
+          cat /tmp/on-access-typed-fs-manifest.txt | tee ci-logs/production-manifest.log
+
+      - name: Upload integration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: on-access-typed-fs-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            /tmp/on-access-typed-fs-production.tar
+            /tmp/on-access-typed-fs-manifest.txt
+            /tmp/expected-paths
+            /tmp/actual-paths
+            ci-logs/
+            build/qemu/serial*.log
+            build/qemu/block-status/summary.log
+            build/qemu/block-status/serial.log
+            build/build-manifest.json
