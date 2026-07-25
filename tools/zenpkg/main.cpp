@@ -172,9 +172,9 @@ int run_command(const std::string& command, const Arguments& arguments) {
         arguments.reject_unknown({"name", "version", "license", "source", "asset-policy", "output"});
         const auto input = arguments.require_positional("native executable path");
         const auto output = arguments.require_one("output");
-        (void)zenpkg::require_native_import_candidate(input);
+        const auto candidate = zenpkg::require_native_import_candidate(input);
         const auto package = zenpkg::import_native(
-            input, arguments.require_one("name"), arguments.require_one("version"),
+            candidate, arguments.require_one("name"), arguments.require_one("version"),
             arguments.require_one("license"), arguments.require_one("source"),
             arguments.require_one("asset-policy"), output);
         std::cout << "IMPORT_NATIVE_OK " << package.manifest.name << '@' << package.manifest.version
