@@ -1,38 +1,65 @@
 name: Publish ZenovOS v0.1.1
 
 on:
-  push:
-    branches: [main]
+  pull_request:
+    branches:
+      - main
     paths:
-      - ".github/workflows/release-v0.1.1.yml"
-      - "boot/**"
-      - "kernel/**"
-      - "user/**"
-      - "packaging/**"
-      - "tools/**"
-      - "tests/**"
-      - "Makefile"
-      - "Zenov.toml"
-      - "README.md"
-      - "docs/**"
+      - '.github/workflows/release-v0.1.1.yml'
+      - 'boot/**'
+      - 'kernel/**'
+      - 'user/**'
+      - 'packaging/**'
+      - 'tools/package_release.sh'
+      - 'tests/**'
+      - 'Makefile'
+      - 'GNUmakefile'
+      - 'Zenov.toml'
+      - 'docs/ABI_0.1.1.md'
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Exact 40-character commit SHA on main to publish as v0.1.1'
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: zenov-os-v0.1.1-release
+  group: zenov-os-v0.1.1-${{ github.event_name }}-${{ github.event.pull_request.number || inputs.source_sha || github.ref }}
   cancel-in-progress: false
 
+env:
+  RELEASE_TAG: v0.1.1
+
 jobs:
-  publish:
-    if: github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip release]')
+  validate-package:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source revision and release policy
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          actual_revision="$(git rev-parse HEAD)"
+          test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
+          grep -Fq 'workflow_dispatch:' .github/workflows/release-v0.1.1.yml
+          ! grep -Fq 'git push origin HEAD:main' .github/workflows/release-v0.1.1.yml
+          ! grep -Fq 'gh release delete-asset' .github/workflows/release-v0.1.1.yml
+          ! grep -Fq 'actions/checkout@v' .github/workflows/release-v0.1.1.yml
+          ! grep -Fq 'actions/upload-artifact@v' .github/workflows/release-v0.1.1.yml
+          echo "tested-source-revision=$actual_revision"
 
       - name: Install native toolchain and QEMU
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86 zip unzip
@@ -40,8 +67,9 @@ jobs:
       - name: Verify native 0.1.1 build
         run: make clean test
 
-      - name: Build deterministic installation package
+      - name: Build and verify deterministic installation package
         run: |
+          set -euo pipefail
           bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
           grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
           grep -q PMM_OK build/qemu/serial.log
@@ -56,24 +84,100 @@ jobs:
           test "$(grep -c 'APP_EXIT code=0' build/qemu/serial.log)" -ge 2
           test "$(grep -c PERSISTENCE_0_1_1_OK build/qemu/serial.log)" -ge 2
           test "$(grep -c FILE_SYSCALL_PERSIST_OK build/qemu/serial.log)" -ge 2
+          test -s dist/ZenovOS-0.1.1-x86.img
+          test -s dist/ZenovOS-0.1.1-x86.zip
+          test -s dist/INSTALL.txt
+          test -s dist/SHA256SUMS.txt
+          sha256sum -c dist/SHA256SUMS.txt
 
-      - name: Create immutable v0.1.1 tag
+      - name: Upload release-validation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-v0.1.1-release-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/zenov-data.img
+            build/build-manifest.json
+            build/qemu/serial.log
+            build/qemu/serial-phase1.log
+            build/qemu/serial-phase2.log
+            build/qemu/screenshot.ppm
+
+  publish:
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ZENOV_SOURCE_REVISION: ${{ inputs.source_sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify explicit source is an exact main commit
         run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          if git rev-parse v0.1.1 >/dev/null 2>&1; then
-            test "$(git rev-list -n1 v0.1.1)" = "$GITHUB_SHA"
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          actual_revision="$(git rev-parse HEAD)"
+          test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$actual_revision" origin/main
+          test -z "$(git status --porcelain)"
+          echo "release-source-revision=$actual_revision"
+
+      - name: Install native toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils qemu-system-x86 zip unzip
+
+      - name: Verify native 0.1.1 build
+        run: make clean test
+
+      - name: Build deterministic installation package
+        run: |
+          set -euo pipefail
+          bash tools/package_release.sh build/zenov-os.img build/zenov-data.img dist package
+          grep -q ZENOVOS_BOOT_OK build/qemu/serial.log
+          grep -q ZENOVFS_MOUNT_OK build/qemu/serial.log
+          grep -q PROCESS_ABI_0_1_1_OK build/qemu/serial.log
+          grep -q ZENOVFS_FSCK_OK build/qemu/serial.log
+          sha256sum -c dist/SHA256SUMS.txt
+
+      - name: Verify or create immutable release tag
+        run: |
+          set -euo pipefail
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            test "$(git rev-list -n1 "$RELEASE_TAG")" = "$ZENOV_SOURCE_REVISION"
           else
-            git tag -a v0.1.1 "$GITHUB_SHA" -m "ZenovOS 0.1.1"
-            git push origin refs/tags/v0.1.1
+            tag_object="$(gh api \
+              --method POST \
+              "repos/$GITHUB_REPOSITORY/git/tags" \
+              -f tag="$RELEASE_TAG" \
+              -f message='ZenovOS 0.1.1' \
+              -f object="$ZENOV_SOURCE_REVISION" \
+              -f type='commit' \
+              --jq '.sha')"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$RELEASE_TAG" \
+              -f sha="$tag_object" >/dev/null
           fi
 
       - name: Write release notes
         run: |
+          set -euo pipefail
           cat > /tmp/release-notes.md <<'NOTES'
           # ZenovOS 0.1.1
 
-          Bootable 32-bit x86 system with paging, persistent ATA storage and isolated ZEX1/ELF32 applications.
+          Bootable 32-bit x86 system with paging, persistent ATA storage, typed ZenovFS error propagation and isolated ZEX1/ELF32 applications.
 
           ## Recommended download
 
@@ -85,87 +189,78 @@ jobs:
           - `INSTALL.txt` — setup, memory, storage, application and controls reference
           - `SHA256SUMS.txt` — public download verification
 
-          The ZIP contains both required images. Version 0.1.1 adds an E820 physical frame allocator, 4 KiB paging, a validated static ELF32 loader, expanded file syscalls, kernel/host ZenovFS integrity checks and persistent configuration.
-
           Windows PE and DOS MZ `.exe` files are not supported.
           NOTES
 
-      - name: Publish GitHub Release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Publish once or verify immutable assets
         run: |
           set -euo pipefail
-          if gh release view v0.1.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit v0.1.1 \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "ZenovOS 0.1.1" \
-              --notes-file /tmp/release-notes.md \
-              --latest
-            while IFS= read -r asset; do
-              [[ -z "$asset" ]] || gh release delete-asset v0.1.1 "$asset" --repo "$GITHUB_REPOSITORY" --yes
-            done < <(gh release view v0.1.1 --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          assets=(
+            dist/ZenovOS-0.1.1-x86.img
+            dist/ZenovOS-0.1.1-x86.zip
+            dist/INSTALL.txt
+            dist/SHA256SUMS.txt
+          )
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            target="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')"
+            test "$target" = "$ZENOV_SOURCE_REVISION"
+            draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
+            if [[ "$draft" == true ]]; then
+              gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+              gh release edit "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title 'ZenovOS 0.1.1' \
+                --notes-file /tmp/release-notes.md \
+                --draft=false \
+                --latest
+            else
+              rm -rf /tmp/published-assets
+              mkdir -p /tmp/published-assets
+              gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir /tmp/published-assets
+              for asset in "${assets[@]}"; do
+                cmp "$asset" "/tmp/published-assets/$(basename "$asset")"
+              done
+            fi
           else
-            gh release create v0.1.1 \
+            gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "ZenovOS 0.1.1" \
+              --target "$ZENOV_SOURCE_REVISION" \
+              --title 'ZenovOS 0.1.1' \
               --notes-file /tmp/release-notes.md \
-              --latest
+              --draft
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
           fi
-          gh release upload v0.1.1 \
-            dist/ZenovOS-0.1.1-x86.img \
-            dist/ZenovOS-0.1.1-x86.zip \
-            dist/INSTALL.txt \
-            dist/SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY"
-          test "$(gh release view v0.1.1 --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')" -eq 4
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')" -eq 4
 
-      - name: Record verified release publication
+      - name: Record publication evidence without modifying main
         run: |
           set -euo pipefail
-          mkdir -p docs/releases
-          cat > docs/releases/v0.1.1.md <<STATUS
+          mkdir -p build/release-evidence
+          cat > build/release-evidence/v0.1.1.md <<STATUS
           # ZenovOS v0.1.1 publication status
 
           Status: **published and verified**
 
-          Source commit: \`$GITHUB_SHA\`
+          Source commit: \`$ZENOV_SOURCE_REVISION\`
           Workflow run: \`$GITHUB_RUN_ID\`
-          Target: \`i686-zenov-none\`
-          Python runtime: \`false\`
-          Memory: \`E820 PMM / 4 KiB paging\`
-          Persistent storage: \`ATA PIO / ZenovFS1\`
-          Application ABI: \`ZEX1 + static ELF32 ring 3 / INT 0x80\`
-
-          Public installation assets:
-
-          - \`ZenovOS-0.1.1-x86.img\`
-          - \`ZenovOS-0.1.1-x86.zip\`
-          - \`INSTALL.txt\`
-          - \`SHA256SUMS.txt\`
-
-          The ZIP contains the boot image, writable data image, installation guide and QEMU launchers. Kernel symbols, maps, logs, manifests, native app files and screenshots remain internal CI evidence.
+          Release tag: \`$RELEASE_TAG\`
           STATUS
-          git add docs/releases/v0.1.1.md
-          git commit -m "docs: record v0.1.1 release publication [skip release]"
-          git push origin HEAD:main
 
-      - name: Upload CI evidence
+      - name: Upload publication evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: zenov-os-v0.1.1-paging-elf-evidence
+          name: zenov-os-v0.1.1-publication-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
+          retention-days: 30
           path: |
             dist/
+            build/release-evidence/
             build/KERNEL.BIN
             build/kernel.elf
             build/kernel.map
             build/zenov-data.img
-            build/HELLO.ZEX
-            build/hello-user.elf
-            build/FILEIO.ELF
             build/build-manifest.json
             build/qemu/serial.log
             build/qemu/serial-phase1.log
