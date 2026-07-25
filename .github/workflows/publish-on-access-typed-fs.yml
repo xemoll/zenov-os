@@ -1,0 +1,125 @@
+name: Publish verified typed on-access tree
+
+on:
+  push:
+    branches:
+      - agent/on-access-read-typed-fs-verify
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-content-addressed-tree:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      EVIDENCE_RUN_ID: '30176964568'
+      EVIDENCE_NAME: on-access-typed-fs-30176964568-1
+      TARGET_BASE: 87219b0931ad2318e3a677ac69293fcb3388f3cb
+      TARGET_TREE: 630bfb3337be753d8630fd31c733ad738410ac61
+      TARGET_BRANCH: agent/on-access-read-typed-fs-production
+      TAR_SHA256: 4fec31943fefb29e59890239bf2b93139ea3581138d222c35f2a8af0d2851fb8
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ env.TARGET_BASE }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download exact green integration artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/evidence
+          curl --fail-with-body -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${EVIDENCE_RUN_ID}/artifacts?per_page=100" \
+            > /tmp/artifacts.json
+          artifact_id="$(python3 - <<'PY'
+          import json
+          import os
+
+          data = json.load(open('/tmp/artifacts.json', encoding='utf-8'))
+          matches = [item for item in data.get('artifacts', [])
+                     if item.get('name') == os.environ['EVIDENCE_NAME'] and not item.get('expired')]
+          assert len(matches) == 1, [(item.get('id'), item.get('name')) for item in data.get('artifacts', [])]
+          print(matches[0]['id'])
+          PY
+          )"
+          curl --fail-with-body -L -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+            -o /tmp/evidence.zip
+          unzip -q /tmp/evidence.zip -d /tmp/evidence
+
+      - name: Verify and reconstruct exact production tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$(find /tmp/evidence -type f -name on-access-typed-fs-manifest.txt -print -quit)"
+          payload="$(find /tmp/evidence -type f -name on-access-typed-fs-production.tar -print -quit)"
+          test -n "$manifest" && test -n "$payload"
+          test "$(grep '^target_base=' "$manifest" | cut -d= -f2)" = "$TARGET_BASE"
+          test "$(grep '^production_tree=' "$manifest" | cut -d= -f2)" = "$TARGET_TREE"
+          test "$(grep '^tar_sha256=' "$manifest" | cut -d= -f2)" = "$TAR_SHA256"
+          test "$(sha256sum "$payload" | awk '{print $1}')" = "$TAR_SHA256"
+
+          tar -xf "$payload" -C "$GITHUB_WORKSPACE" --no-same-owner
+          grep '^path=' "$manifest" | sed -E 's/^path=([^\t]+).*/\1/' | sort > /tmp/expected-paths
+          git status --porcelain=v1 --untracked-files=all | cut -c4- | sort > /tmp/actual-paths
+          diff -u /tmp/expected-paths /tmp/actual-paths
+          ! grep -Fxq 'kernel/parts/storage.inc' /tmp/actual-paths
+          git diff --check
+
+          rm -f /tmp/production.index
+          GIT_INDEX_FILE=/tmp/production.index git read-tree "${TARGET_BASE}^{tree}"
+          while IFS= read -r path; do
+            GIT_INDEX_FILE=/tmp/production.index git add -- "$path"
+          done < /tmp/expected-paths
+          actual_tree="$(GIT_INDEX_FILE=/tmp/production.index git write-tree)"
+          test "$actual_tree" = "$TARGET_TREE"
+          printf 'VERIFIED_TYPED_ON_ACCESS_TREE_OK tree=%s paths=%s\n' \
+            "$actual_tree" "$(wc -l < /tmp/expected-paths)"
+
+          export GIT_AUTHOR_NAME='github-actions[bot]'
+          export GIT_AUTHOR_EMAIL='41898282+github-actions[bot]@users.noreply.github.com'
+          export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+          export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+          commit="$(printf '%s\n\n%s\n' \
+            'security: integrate typed synchronous on-access reads' \
+            'Verified with strict build, full QEMU security lifecycle, typed filesystem runtime evidence and deterministic rebuild.' \
+            | git commit-tree "$actual_tree" -p "$TARGET_BASE")"
+          printf '%s\n' "$commit" > /tmp/production-commit
+          printf 'VERIFIED_TYPED_ON_ACCESS_COMMIT_OK commit=%s\n' "$commit"
+
+      - name: Publish non-force clean branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit="$(cat /tmp/production-commit)"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          existing="$(git ls-remote "$remote" "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')"
+          if [[ -n "$existing" && "$existing" != "$commit" ]]; then
+            echo "refusing to overwrite ${TARGET_BRANCH} at ${existing}" >&2
+            exit 1
+          fi
+          if [[ -z "$existing" ]]; then
+            git push "$remote" "${commit}:refs/heads/${TARGET_BRANCH}"
+          fi
+          test "$(git ls-remote "$remote" "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')" = "$commit"
+          printf 'PUBLISHED_TYPED_ON_ACCESS_OK branch=%s commit=%s tree=%s\n' \
+            "$TARGET_BRANCH" "$commit" "$TARGET_TREE"
