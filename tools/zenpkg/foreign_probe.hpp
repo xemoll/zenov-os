@@ -119,18 +119,99 @@ inline StreamingForeignProbe probe_foreign_streaming(const std::filesystem::path
     };
 }
 
-inline StreamingForeignProbe require_native_import_candidate(const std::filesystem::path& path) {
-    const auto probe = probe_foreign_streaming(path);
-    if (probe.file_size > zenov_package_limit) {
+inline ForeignProbe require_native_import_candidate(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) throw Error("cannot open native import input: " + path.string());
+
+    stream.seekg(0, std::ios::end);
+    const auto end = stream.tellg();
+    if (end < 0) throw Error("cannot determine native import input size: " + path.string());
+    const auto file_size = static_cast<std::uint64_t>(end);
+    if (file_size > zenov_package_limit) {
         throw Error("native import input exceeds the current 64 KiB package limit");
     }
-    if (probe.detection.format != package_foreign::Format::zex1 &&
-        probe.detection.format != package_foreign::Format::elf) {
-        throw Error(std::string("format ") + foreign_format_id(probe.detection.format) +
-                    " is not eligible for native import; support=" +
-                    package_foreign::support_text(probe.detection.support));
+
+    stream.clear();
+    stream.seekg(0, std::ios::beg);
+    if (!stream) throw Error("cannot seek native import input: " + path.string());
+
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(file_size));
+    if (!bytes.empty()) {
+        stream.read(reinterpret_cast<char*>(bytes.data()),
+                    static_cast<std::streamsize>(bytes.size()));
+        if (stream.gcount() != static_cast<std::streamsize>(bytes.size())) {
+            throw Error("native import input changed or was truncated while reading");
+        }
     }
-    return probe;
+
+    char extra = 0;
+    stream.read(&extra, 1);
+    if (stream.gcount() != 0) {
+        throw Error("native import input changed or grew while reading");
+    }
+    if (!stream.eof()) throw Error("native import input read failed: " + path.string());
+
+    const std::string filename = path.filename().string();
+    const auto detection = package_foreign::classify(
+        bytes.data(), static_cast<std::uint32_t>(bytes.size()), filename.c_str());
+    if (detection.format != package_foreign::Format::zex1 &&
+        detection.format != package_foreign::Format::elf) {
+        throw Error(std::string("format ") + foreign_format_id(detection.format) +
+                    " is not eligible for native import; support=" +
+                    package_foreign::support_text(detection.support));
+    }
+    return ForeignProbe{std::move(bytes), detection, sha256_hex(bytes)};
+}
+
+inline Package import_native(const ForeignProbe& probe, const std::string& name,
+                             const std::string& version, const std::string& license,
+                             const std::string& source, const std::string& asset_policy,
+                             const std::filesystem::path& output_path) {
+    if (!kernel_safe_package_name(name)) throw Error("name must be a lowercase ZenovOS package identifier of at most 31 characters");
+    if (!kernel_safe_package_version(version)) throw Error("version must fit the ZenovOS 0.1.1 package database");
+    if (!is_printable_text(license, 96U)) throw Error("license is required and must fit 96 printable characters");
+    if (!is_printable_text(source, 256U)) throw Error("source is required and must fit 256 printable characters");
+    if (asset_policy != "redistributable") {
+        throw Error("0.1.1 native import accepts only asset_policy=redistributable");
+    }
+
+    Manifest manifest;
+    manifest.format = "zenpkg-manifest-1";
+    manifest.name = name;
+    manifest.version = version;
+    manifest.architecture = "i686";
+    manifest.target = "i686-zenov-none";
+    manifest.kind = "application";
+    manifest.runtime = "native";
+    manifest.min_os = "0.1.1";
+    manifest.license = license;
+    manifest.source = source;
+    manifest.asset_policy = asset_policy;
+    manifest.capabilities = {"kernel.ring3", "storage.zenovfs1"};
+
+    if (probe.detection.format == package_foreign::Format::zex1) {
+        validate_zex1_import(probe.bytes);
+        manifest.payload_type = "zex1";
+        manifest.entrypoint = "/data/apps/pkg-" + name + "-" + version + ".zex";
+        manifest.capabilities.push_back("abi.zex1.v1");
+    } else if (probe.detection.format == package_foreign::Format::elf) {
+        validate_elf32_i386_import(probe.bytes);
+        manifest.payload_type = "elf32";
+        manifest.entrypoint = "/data/apps/pkg-" + name + "-" + version + ".elf";
+        manifest.capabilities.push_back("abi.elf32.i386.static");
+    } else {
+        throw Error("internal native import candidate format mismatch");
+    }
+    if (manifest.entrypoint.size() > 47U) {
+        throw Error("name and version produce an entrypoint longer than the 0.1.1 kernel path limit");
+    }
+
+    const auto package_bytes = build_package_bytes(manifest, probe.bytes);
+    if (package_bytes.size() > zenov_package_limit) {
+        throw Error("imported package exceeds the current 64 KiB ZenovFS/package-manager limit");
+    }
+    write_binary_atomic(output_path, package_bytes);
+    return read_package(output_path);
 }
 
 } // namespace zenpkg
