@@ -25,7 +25,7 @@ Applications use `INT 0x80`; `EAX` contains the number and result, while `EBX`, 
 | 1 | `write_console` | `EBX=buffer`, `ECX=length` | bytes written |
 | 2 | `get_ticks` | none | PIT ticks |
 | 3 | `file_read` | `EBX=path`, `ECX=output`, `EDX=capacity` | bytes read |
-| 4 | `file_write` | `EBX=path`, `ECX=data`, `EDX=length`, `ESI=append` | bytes written |
+| 4 | `file_write` | `EBX=path`, `ECX=data`, `EDX=length`, `ESI=append` | bytes accepted |
 | 5 | `file_stat` | `EBX=path`, `ECX=UserFileInfo*` | zero |
 | 6 | `get_version` | `EBX=output`, `ECX=capacity` | string length |
 | 7 | `sync` | none | zero |
@@ -38,14 +38,19 @@ The syscall table is an ABI surface, not an automatic grant. After final-read tr
 Stable errors:
 
 ```text
-0xFFFFFFFF invalid argument
-0xFFFFFFFE not found
-0xFFFFFFFD insufficient capacity
-0xFFFFFFFC I/O failure
-0xFFFFFFFB invalid/unmapped/non-writable user pointer
-0xFFFFFFFA unsupported operation
-0xFFFFFFF9 capability or path-scope denied
+0xFFFFFFFF ERROR_INVALID       invalid argument, path or object type
+0xFFFFFFFE ERROR_NOT_FOUND     path does not exist
+0xFFFFFFFD ERROR_NO_SPACE      output capacity or persistent capacity is insufficient
+0xFFFFFFFC ERROR_IO            device unavailable, timeout or other transport I/O failure
+0xFFFFFFFB ERROR_FAULT         invalid/unmapped/non-writable user pointer
+0xFFFFFFFA ERROR_UNSUPPORTED   unsupported syscall or operation
+0xFFFFFFF9 ERROR_DENIED        capability, path-scope, protected-path or security-policy denial
+0xFFFFFFF8 ERROR_CORRUPT       checksum mismatch or structurally invalid filesystem metadata
 ```
+
+The typed ZenovFS result boundary preserves the distinction between lookup failure, capacity failure, policy denial, corruption and transport I/O. `file_read` clears bytes copied before a final transport failure and clears the complete returned payload after checksum failure. A security appraisal denial also clears the output and returns `ERROR_DENIED`; it is never reported as `ERROR_NOT_FOUND`.
+
+A transactional write can be committed while post-commit cleanup still requires recovery. This state is treated as a successful write for the application-visible byte count, is recorded internally as `recovery-pending`, and is finalized by the normal ZenovFS recovery pass before the volume is exposed again.
 
 All user ranges are checked for overflow, mapping presence and required write permission. Capability checks do not replace pointer validation: an authorized operation with an invalid pointer still returns the pointer fault error.
 
