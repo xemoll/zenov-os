@@ -367,7 +367,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  "graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop",' \
 	 '  "input": "PS2 keyboard and 3-byte PS2 mouse packets",' \
 	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
-	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 executable policy / ZCAP1 syscall policy / ZMID1 signed malware intelligence / ZRWP1 controlled-folder and behavior policy / on-write prevention / protected quarantine / RSA-PSS / ZGAL1 hash chain / fail-closed boot",' \
+	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 executable policy / ZCAP1 syscall policy / ZMID1 signed malware intelligence / ZRWP1 controlled-folder and behavior policy / on-write and synchronous on-access read prevention / protected quarantine / RSA-PSS / ZGAL1 hash chain / fail-closed boot",' \
 	 '  "zgdb_schema": 2,' \
 	 '  "zgdb_compiled_floor": 3,' \
 	 '  "zgdb_root_key_id": "6f788074c018f5aa",' \
@@ -387,6 +387,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 "  \"zmid_v1_sha256\": \"$$zmid_v1_hash\"," \
 	 "  \"zmid_v2_sha256\": \"$$zmid_v2_hash\"," \
 	 '  "zmid_rule_model": "bounded SHA-256 and byte-pattern rules / block-quarantine-audit actions / 32 rules / 32-byte patterns",' \
+	 '  "on_access_read": "shell and ring-3 file reads / infected block and output scrub / suspicious durable audit / internal policy namespaces excluded",' \
 	 '  "zrwp_schema": 1,' \
 	 '  "zrwp_compiled_floor": 1,' \
 	 '  "zrwp_root_key_id": "7186b2bd819e47dc",' \
@@ -443,6 +444,7 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	@grep -q '"zmid_root_key_id": "6ca6a5275544c533"' $(BUILD)/build-manifest.json
 	@grep -q '"zmid_v1_sha256": "$(ZMID_V1_SHA256)"' $(BUILD)/build-manifest.json
 	@grep -q '"zmid_v2_sha256": "$(ZMID_V2_SHA256)"' $(BUILD)/build-manifest.json
+	@grep -q '"on_access_read": "shell and ring-3 file reads / infected block and output scrub / suspicious durable audit / internal policy namespaces excluded"' $(BUILD)/build-manifest.json
 	@grep -q '"zrwp_schema": 1' $(BUILD)/build-manifest.json
 	@grep -q '"zrwp_compiled_floor": 1' $(BUILD)/build-manifest.json
 	@grep -q '"zrwp_root_key_id": "7186b2bd819e47dc"' $(BUILD)/build-manifest.json
@@ -464,7 +466,7 @@ qemu: all $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zen
 	$(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zenov-data-runtime.img --require-nonempty --emit-tampered $(BUILD)/qemu/zenov-data-audit-tampered.img
 	@if $(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zenov-data-audit-tampered.img --require-nonempty; then echo 'tampered ZGAL1 fixture unexpectedly verified' >&2; exit 1; fi
 	bash tools/check_antimalware.sh $(BUILD)/qemu/serial.log $(BUILD)/qemu/zenov-data-runtime.img $(BUILD)/zenovfs-antimalware-verify $(BUILD)/qemu/antimalware-evidence.txt
-	@echo 'persistent audit and antimalware verification: OK (runtime chain valid; signed ZMID update; prevention/quarantine state verified)'
+	@echo 'persistent audit and antimalware verification: OK (runtime chain valid; signed ZMID update; on-access/read-write prevention and quarantine state verified)'
 
 test: check qemu deterministic
 

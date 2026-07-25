@@ -94,13 +94,15 @@ guard log verify
 
 Signed ZGDB2, ZCAP1, ZMID1 and ZRWP1 updates are verified twice before activation, must be exactly version `N+1`, and are stored through ZenovFS copy-on-write replacement. Each active policy object is committed before its corresponding version file. Boot reconciles a newer valid signed policy with older version state, while an active policy older than stored state is rejected.
 
-Every BOOT, SCAN, EXEC, QUARANTINE, write-prevention and ransomware-policy event replaces the complete 8,288-byte journal through the same copy-on-write mechanism. If an audit append fails, ZenovGuard restores the prior in-memory state, marks the journal unavailable and locks subsequent application execution.
+Every BOOT, SCAN, EXEC, QUARANTINE, write-prevention, on-access read and ransomware-policy event replaces the complete 8,288-byte journal through the same copy-on-write mechanism. If an audit append fails, ZenovGuard restores the prior in-memory state, marks the journal unavailable and locks subsequent application execution.
 
 The audit transaction is now exercised against two exact transitions: empty journal to one record and full 64-record ring rotation. Across 1,662 deterministic fault cases, the only accepted outcomes are the exact previous journal, the exact new journal or explicit fail-closed rejection. A synthetic journal must also pass a SHA-256 known-answer test and a fixed ZGAL1 record-hash vector before crash images are generated.
 
 Three complete data images are booted by QEMU: a pre-commit interruption that recovers the old journal, a post-commit interruption that recovers the new journal, and a committed replacement with one missing payload sector that must panic before `ZENOVOS_UI_READY`.
 
 The trusted applications, active ZGDB2/ZCAP1/ZMID1/ZRWP1 policies, their version state, the audit journal and quarantine payload/metadata are protected from ordinary shell and userspace write, append, remove, rename and copy-over operations.
+
+User-visible shell and ring-3 file reads pass through synchronous ZMID1 classification after ZenovFS checksum verification. Infected reads are recorded as `READ-BLOCK`, their destination bytes are scrubbed, and the operation fails. Suspicious reads are released only after a durable `READ-AUDIT`. Internal signed-policy, repository-state and quarantine reads remain on their dedicated parsers to prevent recursive appraisal.
 
 Quarantine uses an atomic ZenovFS metadata rename plus a protected sidecar:
 
@@ -127,6 +129,8 @@ ZENOV_GUARD_TRUST_BASELINE_OK
 ZENOV_GUARD_READY
 ZENOV_GUARD_DETECTED
 ZENOV_GUARD_QUARANTINE_OK
+ZENOV_GUARD_READ_BLOCKED
+ZENOV_GUARD_READ_AUDIT
 ZENOV_GUARD_UNTRUSTED_BLOCKED
 ZENOV_GUARD_EXEC_ALLOWED
 ZGDB_ROOT_KEY_OK id=6f788074c018f5aa
@@ -156,8 +160,8 @@ ZMID_ROLLBACK_REJECTED
 ZMID_DATABASE_VERSION_OK version=2
 ZENOV_GUARD_WRITE_BLOCKED
 ZENOV_GUARD_WRITE_AUDIT
-ZENOV_ANTIMALWARE_RUNTIME_IMAGE_OK
-ZENOV_ANTIMALWARE_GATE_OK
+ZENOV_SECURITY_RUNTIME_IMAGE_OK
+ZENOV_SECURITY_GATE_OK
 ```
 
 ## Memory and isolation
