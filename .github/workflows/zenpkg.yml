@@ -12,16 +12,22 @@ on:
       - 'tools/zenpkg_blkdebug_seed.cpp'
       - 'tools/zenpkg_blkdebug_qemu_test.cpp'
       - 'tests/zenpkg_test.sh'
+      - 'tests/zenpkg_foreign_test.sh'
+      - 'tests/zenpkg_streaming_test.sh'
       - 'tests/zenrepo_test.sh'
+      - 'tests/package_foreign_format_test.cpp'
       - 'tests/package_repository_kernel_test.cpp'
       - 'tests/package_transport_journal_test.cpp'
       - 'tests/qemu_zenpkg.sh'
+      - 'tests/qemu_zenpkg_foreign.sh'
       - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'tests/qemu_zenpkg_transport_faults.sh'
       - 'tests/qemu_zenpkg_blkdebug_breakpoints.sh'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
+      - 'kernel/parts/package_foreign_format.inc'
+      - 'kernel/parts/package_foreign_policy.inc'
       - 'kernel/parts/package_repository.inc'
       - 'kernel/parts/package_repository/**'
       - 'kernel/parts/package_manager.inc'
@@ -50,16 +56,22 @@ on:
       - 'tools/zenpkg_blkdebug_seed.cpp'
       - 'tools/zenpkg_blkdebug_qemu_test.cpp'
       - 'tests/zenpkg_test.sh'
+      - 'tests/zenpkg_foreign_test.sh'
+      - 'tests/zenpkg_streaming_test.sh'
       - 'tests/zenrepo_test.sh'
+      - 'tests/package_foreign_format_test.cpp'
       - 'tests/package_repository_kernel_test.cpp'
       - 'tests/package_transport_journal_test.cpp'
       - 'tests/qemu_zenpkg.sh'
+      - 'tests/qemu_zenpkg_foreign.sh'
       - 'tests/qemu_zenpkg_transport_recovery.sh'
       - 'tests/qemu_zenpkg_transport_faults.sh'
       - 'tests/qemu_zenpkg_blkdebug_breakpoints.sh'
       - 'packages/**'
       - 'security/zenrepo_crypto_material.hpp'
       - 'kernel/parts/package_format.inc'
+      - 'kernel/parts/package_foreign_format.inc'
+      - 'kernel/parts/package_foreign_policy.inc'
       - 'kernel/parts/package_repository.inc'
       - 'kernel/parts/package_repository/**'
       - 'kernel/parts/package_manager.inc'
@@ -77,9 +89,17 @@ on:
       - 'docs/PACKAGE_COMPATIBILITY_ARCHITECTURE.md'
       - '.github/workflows/zenpkg.yml'
       - '.github/workflows/zenrepo.yml'
+  merge_group:
+    types:
+      - checks_requested
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   CXX: g++
@@ -92,9 +112,10 @@ jobs:
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 2
+          persist-credentials: false
       - name: Verify tested source revision
         run: |
           [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
@@ -102,14 +123,20 @@ jobs:
           echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
       - name: Install strict native and QEMU toolchain
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
+      - name: Validate shell harnesses
+        run: |
+          bash -n tests/zenpkg_foreign_test.sh
+          bash -n tests/zenpkg_streaming_test.sh
+          bash -n tests/qemu_zenpkg_foreign.sh
+          bash -n tests/qemu_zenpkg_blkdebug_breakpoints.sh
       - name: Build signed-package image and host regressions
         run: |
           rm -f /tmp/zenpkg-check.log
           if ! make clean zenpkg-check > /tmp/zenpkg-check.log 2>&1; then
-            tail -n 280 /tmp/zenpkg-check.log
+            tail -n 320 /tmp/zenpkg-check.log
             exit 1
           fi
-          tail -n 160 /tmp/zenpkg-check.log
+          tail -n 180 /tmp/zenpkg-check.log
       - name: Run standalone ZenPkg format suite
         run: bash tests/zenpkg_test.sh
       - name: Run standalone signed repository suite
@@ -117,6 +144,18 @@ jobs:
       - name: Compile parsers and crash tools with sanitizers
         run: |
           mkdir -p build/sanitized
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/package_foreign_format_test.cpp -o build/sanitized/package-foreign-format-test
+          build/sanitized/package-foreign-format-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tools/zenpkg/main.cpp -o build/sanitized/zenpkg
+          rm -rf build/sanitized/zenpkg-foreign-test build/sanitized/zenpkg-streaming-test
+          bash tests/zenpkg_foreign_test.sh \
+            build/sanitized/zenpkg build/HELLO.ZEX build/sanitized/zenpkg-foreign-test
+          bash tests/zenpkg_streaming_test.sh \
+            build/sanitized/zenpkg build/sanitized/zenpkg-streaming-test
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             tests/package_repository_kernel_test.cpp -o build/sanitized/package-repository-kernel-test
@@ -138,7 +177,6 @@ jobs:
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             tools/zenpkg_blkdebug_qemu_test.cpp -o build/sanitized/zenpkg-qmp-hmp-client
           build/sanitized/zenpkg-qmp-hmp-client --self-test
-          bash -n tests/qemu_zenpkg_blkdebug_breakpoints.sh
       - name: Compile release host tools
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenpkg/main.cpp -o build/zenpkg-release
@@ -171,10 +209,10 @@ jobs:
         run: |
           rm -f /tmp/zenpkg-qemu.log
           if ! make zenpkg-qemu > /tmp/zenpkg-qemu.log 2>&1; then
-            tail -n 300 /tmp/zenpkg-qemu.log
+            tail -n 320 /tmp/zenpkg-qemu.log
             exit 1
           fi
-          tail -n 160 /tmp/zenpkg-qemu.log
+          tail -n 180 /tmp/zenpkg-qemu.log
       - name: Boot three phases and prove journal recovery across reboot
         run: |
           rm -f /tmp/zenpkg-transport-qemu.log
@@ -202,9 +240,14 @@ jobs:
       - name: Verify crash-consistency evidence
         run: |
           lifecycle=build/qemu/zenpkg/serial.log
+          foreign=build/qemu/zenpkg-foreign
           recovery=build/qemu/zenpkg-transport/serial.log
           faults=build/qemu/zenpkg-faults/serial.log
           blkdebug=build/qemu/zenpkg-blkdebug
+          grep -Fq 'PACKAGE_FOREIGN_FORMAT_TEST_OK cases=46 generations=legacy-current' /tmp/zenpkg-check.log
+          grep -Fq 'ZENPKG_FOREIGN_TEST_OK probes=39 native-import=zex1,elf32 deterministic=2 rejection=7 generations=legacy-current streaming=1' /tmp/zenpkg-check.log
+          grep -Fq 'ZENPKG_STREAMING_TEST_OK cases=2 hash=full probe=head65536+tail512 overlap=none' /tmp/zenpkg-check.log
+          grep -Fq 'ZENPKG_FOREIGN_QEMU_OK formats=1 probe=zenpkg install=1 run=1 fsck=1' "$foreign/summary.log"
           grep -Fq 'ZENPKG_TRANSPORT_COW_FAULT_MATRIX_OK cases=3173 writes=167' /tmp/zenpkg-check.log
           grep -Fq 'ZENPKG_TRANSPORT_OLD_OR_RESUMABLE_OR_NEW_OR_FAIL_CLOSED_ONLY' /tmp/zenpkg-check.log
           grep -Fq 'ZENPKG_TRANSPORT_BEGIN name=hello-native version=0.2.0 offset=0' "$lifecycle"
@@ -229,17 +272,39 @@ jobs:
           test "$(grep -Fl 'ZENPKG_CACHE_VERIFY_OK objects=1 partials=0' "$blkdebug"/serial-*-recovery.log | wc -l)" -eq 2
           test "$(grep -Fl 'ZENOVFS_FSCK_OK' "$blkdebug"/serial-*-recovery.log | wc -l)" -eq 2
           test "$(find "$blkdebug" -name 'qemu-*.stderr' -type f -size +0c | wc -l)" -eq 0
-          ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$lifecycle" "$recovery" "$faults" "$blkdebug"/serial-*.log
+          ! grep -Eq 'PANIC|ASSERT|DOUBLE FAULT|ZENPKG_TRANSPORT_RETRY_EXHAUSTED' "$lifecycle" "$foreign"/serial.log "$recovery" "$faults" "$blkdebug"/serial-*.log
+      - name: Publish ZenPkg verification summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo '## ZenPkg 0.1.1 verification'
+            echo "- Source revision: \`$ZENOV_SOURCE_REVISION\`"
+            echo "- Workflow attempt: \`${{ github.run_attempt }}\`"
+            if [[ -f /tmp/zenpkg-check.log ]]; then
+              marker="$(grep -F 'ZENPKG_FOREIGN_TEST_OK' /tmp/zenpkg-check.log | tail -n 1 || true)"
+              [[ -z "$marker" ]] || echo "- Host intake: \`$marker\`"
+              marker="$(grep -F 'ZENPKG_STREAMING_TEST_OK' /tmp/zenpkg-check.log | tail -n 1 || true)"
+              [[ -z "$marker" ]] || echo "- Streaming: \`$marker\`"
+            fi
+            if [[ -f build/qemu/zenpkg-foreign/summary.log ]]; then
+              marker="$(tail -n 1 build/qemu/zenpkg-foreign/summary.log)"
+              echo "- Guest intake: \`$marker\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload ZenPkg QEMU evidence
-        if: always()
-        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
         with:
-          name: zenpkg-qemu-evidence-${{ github.run_id }}
+          name: zenpkg-qemu-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            build/zenpkg-foreign-test/**
+            build/sanitized/zenpkg-foreign-test/**
+            build/sanitized/zenpkg-streaming-test/**
             build/qemu/zenpkg/serial.log
             build/qemu/zenpkg/serial-*.log
             build/qemu/zenpkg/monitor-*.log
             build/qemu/zenpkg/qemu-*.stderr
+            build/qemu/zenpkg-foreign/**
             build/qemu/zenpkg-transport/serial.log
             build/qemu/zenpkg-transport/serial-*.log
             build/qemu/zenpkg-transport/monitor-*.log
@@ -253,21 +318,26 @@ jobs:
             build/qemu/zenpkg-blkdebug/**
             build/qemu/zenpkg-blkdebug-fixtures/**
             /tmp/zenpkg-check.log
+            /tmp/zenpkg-qemu.log
             /tmp/zenpkg-blkdebug-qemu.log
           if-no-files-found: warn
           retention-days: 14
       - name: Upload ZenPkg diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
         with:
-          name: zenpkg-diagnostics-${{ github.run_id }}
+          name: zenpkg-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             /tmp/zenpkg-check.log
             /tmp/zenpkg-qemu.log
             /tmp/zenpkg-transport-qemu.log
             /tmp/zenpkg-transport-fault-qemu.log
             /tmp/zenpkg-blkdebug-qemu.log
+            build/zenpkg-foreign-test/**
+            build/sanitized/zenpkg-foreign-test/**
+            build/sanitized/zenpkg-streaming-test/**
             build/qemu/zenpkg/**
+            build/qemu/zenpkg-foreign/**
             build/qemu/zenpkg-transport/**
             build/qemu/zenpkg-faults/**
             build/qemu/zenpkg-fault-*.img

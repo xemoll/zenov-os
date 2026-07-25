@@ -1,0 +1,100 @@
+name: ZenPkg Native Snapshot
+
+on:
+  push:
+    paths:
+      - 'GNUmakefile'
+      - 'tools/zenpkg/**'
+      - 'tests/zenpkg_native_snapshot_test.cpp'
+      - 'kernel/parts/package_foreign_format.inc'
+      - 'kernel/parts/package_foreign_policy.inc'
+      - '.github/workflows/zenpkg-native-snapshot.yml'
+  pull_request:
+    paths:
+      - 'GNUmakefile'
+      - 'tools/zenpkg/**'
+      - 'tests/zenpkg_native_snapshot_test.cpp'
+      - 'kernel/parts/package_foreign_format.inc'
+      - 'kernel/parts/package_foreign_policy.inc'
+      - '.github/workflows/zenpkg-native-snapshot.yml'
+  merge_group:
+    types:
+      - checks_requested
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CXX: g++
+  SOURCE_DATE_EPOCH: '0'
+
+jobs:
+  native-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Install strict host toolchain
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils
+      - name: Build fixture and strict snapshot regression
+        run: |
+          set -Eeuo pipefail
+          make clean
+          mkdir -p build/ci-logs
+          make build/HELLO.ZEX build/zenpkg-native-snapshot-test \
+            2>&1 | tee build/ci-logs/native-snapshot-build.log
+          build/zenpkg-native-snapshot-test \
+            build/HELLO.ZEX build/native-snapshot-test \
+            2>&1 | tee build/ci-logs/native-snapshot-test.log
+          grep -Fqx \
+            'ZENPKG_NATIVE_SNAPSHOT_TEST_OK cases=8 bounded=1 digest=1 path-independent=1' \
+            build/ci-logs/native-snapshot-test.log
+      - name: Run snapshot regression under ASan and UBSan
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build/sanitized
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/zenpkg_native_snapshot_test.cpp \
+            -o build/sanitized/zenpkg-native-snapshot-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            build/sanitized/zenpkg-native-snapshot-test \
+              build/HELLO.ZEX build/sanitized/native-snapshot-test \
+              2>&1 | tee build/ci-logs/native-snapshot-sanitized.log
+          grep -Fqx \
+            'ZENPKG_NATIVE_SNAPSHOT_TEST_OK cases=8 bounded=1 digest=1 path-independent=1' \
+            build/ci-logs/native-snapshot-sanitized.log
+      - name: Publish verification summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo '## ZenPkg native snapshot verification'
+            echo "- Source: \`${{ github.event.pull_request.head.sha || github.sha }}\`"
+            for log in build/ci-logs/native-snapshot-test.log \
+                       build/ci-logs/native-snapshot-sanitized.log; do
+              if [[ -f "$log" ]]; then
+                marker="$(grep -F 'ZENPKG_NATIVE_SNAPSHOT_TEST_OK' "$log" | tail -n 1 || true)"
+                [[ -z "$marker" ]] || echo "- \`$marker\`"
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload snapshot evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: zenpkg-native-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/ci-logs/**
+            build/native-snapshot-test/**
+            build/sanitized/native-snapshot-test/**
+          if-no-files-found: warn
+          retention-days: 14
