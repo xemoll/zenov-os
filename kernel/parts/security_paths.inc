@@ -90,14 +90,21 @@ void report_protected_path(const char* operation, const char* path) {
 } // namespace security_policy
 
 namespace storage {
-bool guarded_write_file(const char* path, const uint8_t* data, uint32_t size, bool append) {
+FsResult guarded_write_file_result(const char* path, const uint8_t* data, uint32_t size, bool append) {
+    if (!path || (!data && size)) return fs_failure(FsOperation::write, FsStatus::invalid_argument);
     if (security_policy::protected_path(path)) {
         security_policy::report_protected_path("write", path);
-        return false;
+        return fs_failure(FsOperation::write, FsStatus::permission_denied);
     }
-    if (!security_guard::allow_persistent_write(path, data, size, append)) return false;
-    if (!zrwp::authorize_write(path, size)) return false;
-    return write_file(path, data, size, append);
+    if (!security_guard::allow_persistent_write(path, data, size, append) ||
+        !zrwp::authorize_write(path, size)) {
+        return fs_failure(FsOperation::write, FsStatus::permission_denied);
+    }
+    return write_file_result(path, data, size, append);
+}
+
+bool guarded_write_file(const char* path, const uint8_t* data, uint32_t size, bool append) {
+    return guarded_write_file_result(path, data, size, append).ok();
 }
 
 bool guarded_remove(const char* path) {
