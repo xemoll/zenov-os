@@ -47,8 +47,9 @@ jobs:
       - name: Build fixture and strict snapshot regression
         run: |
           set -Eeuo pipefail
+          make clean
           mkdir -p build/ci-logs
-          make clean build/HELLO.ZEX build/zenpkg-native-snapshot-test \
+          make build/HELLO.ZEX build/zenpkg-native-snapshot-test \
             2>&1 | tee build/ci-logs/native-snapshot-build.log
           build/zenpkg-native-snapshot-test \
             build/HELLO.ZEX build/native-snapshot-test \
