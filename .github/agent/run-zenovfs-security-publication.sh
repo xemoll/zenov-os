@@ -88,15 +88,29 @@ PY
 apply_patch zenovfs-read-failure-scrub.patch --include=kernel/parts/storage.inc
 apply_patch zmid-update-rollback.patch --include=kernel/parts/zmid_policy.inc --include=.github/workflows/antimalware.yml
 apply_patch quarantine-digest-prefix.patch --include=kernel/parts/security_guard.inc --include=.github/workflows/antimalware.yml
-apply_patch quarantine-read-block.patch --include=kernel/parts/security_guard.inc --include=tests/qemu_smoke.sh --include=tools/zenovfs_antimalware_verify.cpp --include=.github/workflows/antimalware.yml
+apply_patch quarantine-read-block.patch --include=kernel/parts/security_guard.inc --include=tools/zenovfs_antimalware_verify.cpp --include=.github/workflows/antimalware.yml
 apply_patch zmid-action-constant-sharing.patch
 apply_patch zenovfs-mount-index.patch
+
+python3 - <<'PY'
+from pathlib import Path
+
+script = Path('tests/qemu_smoke.sh')
+text = script.read_text()
+anchor = '  send_command "guard quarantine list"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_LIST_OK entries=2" || { echo quit; return 1; }\n'
+block = '''  local quarantine_payload_count\n  quarantine_payload_count="$(grep -Foc 'prefix-ZENOV_RANSOMWARE_TEST_V1-suffix' "$serial" || true)"\n  send_command "cat /data/quarantine/q-92ec69273708e45efb43afbe.qtn"\n  wait_for_serial "$serial" "ZENOV_GUARD_READ_BLOCKED path=/quarantine/q-92ec69273708e45efb43afbe.qtn verdict=INFECTED signature=Quarantine.ReadDenied" || { echo quit; return 1; }\n  test "$(grep -Foc 'prefix-ZENOV_RANSOMWARE_TEST_V1-suffix' "$serial" || true)" -eq "$quarantine_payload_count" || { echo quit; return 1; }\n'''
+assert text.count(anchor) == 1
+assert 'local quarantine_payload_count' not in text
+script.write_text(text.replace(anchor, anchor + block, 1))
+PY
 
 cp /tmp/zenovfs-mount-hardening.final.yml .github/workflows/zenovfs-mount-hardening.yml
 cp /tmp/ZENOVFS_MOUNT_HARDENING_0.1.1.final.md docs/ZENOVFS_MOUNT_HARDENING_0.1.1.md
 cp /tmp/ANTIMALWARE_0.1.1.final.md docs/ANTIMALWARE_0.1.1.md
 cp /tmp/ON_ACCESS_PROTECTION_0.1.1.final.md docs/ON_ACCESS_PROTECTION_0.1.1.md
 
+bash -n tests/qemu_smoke.sh 2>&1 | tee ci-logs/qemu-smoke-syntax.log
+bash -n tests/qemu_zenovfs_mount_reject.sh 2>&1 | tee ci-logs/qemu-mount-reject-syntax.log
 git diff --check >ci-logs/final-diff-check.log 2>&1
 cat > /tmp/expected-files <<'EOF'
 .github/workflows/antimalware.yml
