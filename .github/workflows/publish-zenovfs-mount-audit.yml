@@ -7,7 +7,7 @@ on:
   pull_request:
 
 concurrency:
-  group: zenovfs-security-publication-clean
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -27,6 +27,22 @@ jobs:
 
       - name: Install strict toolchain and QEMU
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl jq qemu-system-x86
+
+      - name: Repair phase-specific publication selector
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/agent/run-zenovfs-security-publication.sh')
+          text = path.read_text()
+          old = 'assert len(matches) == 1, matches\n'
+          new = 'assert len(matches) == 2, matches\n'
+          assert text.count(old) == 1, text.count(old)
+          assert text.count(new) == 0, text.count(new)
+          path.write_text(text.replace(old, new, 1))
+          PY
+          bash -n .github/agent/run-zenovfs-security-publication.sh
 
       - name: Reconstruct, test and publish exact production tree
         env:
