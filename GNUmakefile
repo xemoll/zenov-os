@@ -7,6 +7,7 @@ include universe.mk
 # zenpkg-check validates the generated manifest in its recipe. Extending the
 # target here makes that dependency explicit without duplicating zenpkg.mk.
 ZENPKG_FOREIGN_FORMAT_TEST := $(BUILD)/package-foreign-format-test
+ZENPKG_NATIVE_SNAPSHOT_TEST := $(BUILD)/zenpkg-native-snapshot-test
 ZENPKG_FOREIGN_CHECK_OUT := $(BUILD)/zenpkg-foreign-test
 ZENPKG_FOREIGN_CHECK_STAMP := $(ZENPKG_FOREIGN_CHECK_OUT)/.stamp
 ZENPKG_FOREIGN_QEMU_OUT := $(BUILD)/qemu/zenpkg-foreign
@@ -33,10 +34,14 @@ BLOCK_STATUS_QEMU_STAMP := $(BLOCK_STATUS_QEMU_OUT)/.stamp
 $(ZENPKG_FOREIGN_FORMAT_TEST): tests/package_foreign_format_test.cpp $(ZENPKG_FOREIGN_FORMAT_SRC) | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
-$(ZENPKG_FOREIGN_CHECK_STAMP): $(ZENPKG_FOREIGN_FORMAT_TEST) $(BUILD)/zenpkg $(BUILD)/HELLO.ZEX tests/zenpkg_foreign_test.sh tests/zenpkg_streaming_test.sh $(ZENPKG_FOREIGN_HOST_SRC) $(ZENPKG_FOREIGN_FORMAT_SRC)
+$(ZENPKG_NATIVE_SNAPSHOT_TEST): tests/zenpkg_native_snapshot_test.cpp $(ZENPKG_FOREIGN_HOST_SRC) $(ZENPKG_FOREIGN_FORMAT_SRC) | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+$(ZENPKG_FOREIGN_CHECK_STAMP): $(ZENPKG_FOREIGN_FORMAT_TEST) $(ZENPKG_NATIVE_SNAPSHOT_TEST) $(BUILD)/zenpkg $(BUILD)/HELLO.ZEX tests/zenpkg_foreign_test.sh tests/zenpkg_streaming_test.sh $(ZENPKG_FOREIGN_HOST_SRC) $(ZENPKG_FOREIGN_FORMAT_SRC)
 	@rm -rf $(ZENPKG_FOREIGN_CHECK_OUT)
 	@mkdir -p $(ZENPKG_FOREIGN_CHECK_OUT)
 	$(ZENPKG_FOREIGN_FORMAT_TEST)
+	$(ZENPKG_NATIVE_SNAPSHOT_TEST) $(BUILD)/HELLO.ZEX $(ZENPKG_FOREIGN_CHECK_OUT)/snapshot
 	bash tests/zenpkg_foreign_test.sh $(BUILD)/zenpkg $(BUILD)/HELLO.ZEX $(ZENPKG_FOREIGN_CHECK_OUT)
 	bash tests/zenpkg_streaming_test.sh $(BUILD)/zenpkg $(ZENPKG_FOREIGN_CHECK_OUT)/streaming
 	@touch $@
