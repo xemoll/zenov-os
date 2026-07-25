@@ -97,10 +97,13 @@ from pathlib import Path
 
 script = Path('tests/qemu_smoke.sh')
 lines = script.read_text().splitlines(keepends=True)
+first_start = next(index for index, line in enumerate(lines) if line.startswith('controller_first()'))
+second_start = next(index for index, line in enumerate(lines) if line.startswith('controller_second()'))
+assert first_start < second_start
 matches = [
-    index for index, line in enumerate(lines)
-    if 'send_command "guard quarantine list"' in line
-    and 'ZENOV_GUARD_QUARANTINE_LIST_OK entries=2' in line
+    index for index in range(first_start, second_start)
+    if 'send_command "guard quarantine list"' in lines[index]
+    and 'ZENOV_GUARD_QUARANTINE_LIST_OK entries=2' in lines[index]
 ]
 assert len(matches) == 1, matches
 assert not any('quarantine_payload_count' in line for line in lines)
