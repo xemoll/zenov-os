@@ -1,9 +1,9 @@
 name: Publish verified typed on-access tree
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/on-access-read-typed-fs-verify
+      - main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   publish-content-addressed-tree:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event.pull_request.head.ref == 'agent/on-access-read-typed-fs-verify'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
