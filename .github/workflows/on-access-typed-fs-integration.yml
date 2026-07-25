@@ -148,11 +148,8 @@ jobs:
 
           void guarded_cat(const char* input) {
               uint32_t size = 0U;
-              const FsResult result = fs_record_result(
-                  guarded_read_file_result(input, file_buffer, max_file_bytes(), size));
-              if (!result.ok()) {
-                  console::write("Read failed: ");
-                  console::line(fs_status_name(result.status));
+              if (!guarded_read_file(input, file_buffer, max_file_bytes(), size)) {
+                  console::warning("File unavailable or blocked by ZenovGuard on-access scanning.");
                   return;
               }
               for (uint32_t i = 0U; i < size; ++i) console::put(static_cast<char>(file_buffer[i]));
