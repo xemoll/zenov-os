@@ -120,7 +120,9 @@ FsResult check_integrity_result(bool emit_details) {
     return fs_success(FsOperation::query, files + directories);
 }
 
-bool check_integrity(bool emit_details) { return check_integrity_result(emit_details).ok(); }
+[[maybe_unused]] bool check_integrity(bool emit_details) {
+    return check_integrity_result(emit_details).ok();
+}
 
 void print_integrity() {
     const FsResult result = check_integrity_result(true);
