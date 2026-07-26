@@ -1,0 +1,109 @@
+name: Verify final ZVRT1 QEMU tree
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-publish:
+    if: github.event.pull_request.head.ref == 'agent/zvrt-qemu-verify'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      TARGET_BASE: 9d085f7b8a8bf320d6d95e37491fcaeeac8cc843
+      TARGET_BRANCH: agent/zvrt-final
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact source provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "${{ github.event.pull_request.base.sha }}" = "$TARGET_BASE"
+          test "$(git merge-base HEAD origin/main)" = "$TARGET_BASE"
+          test -z "$(git status --porcelain=v1)"
+          printf 'ZVRT_FINAL_PROVENANCE_OK head=%s base=%s\n' \
+            "$(git rev-parse HEAD)" "$TARGET_BASE"
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
+
+      - name: Run final verification driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n .github/agent/run-zvrt-qemu-verification.sh
+          bash .github/agent/run-zvrt-qemu-verification.sh
+
+      - name: Upload exact final evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zvrt-final-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            /tmp/zvrt-final.tar
+            /tmp/zvrt-final-manifest.txt
+            /tmp/zvrt-final-paths
+            ci-logs/zvrt-qemu-verification/
+            build/KERNEL.BIN
+            build/kernel.map
+            build/zenov-os.img
+            build/zenov-data.img
+            build/build-manifest.json
+            build/verified-reads-*.zvrt
+            build/qemu/zvrt/
+
+      - name: Publish exact clean final branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest=/tmp/zvrt-final-manifest.txt
+          test "$(grep '^target_base=' "$manifest" | cut -d= -f2)" = "$TARGET_BASE"
+          expected_tree="$(grep '^final_tree=' "$manifest" | cut -d= -f2)"
+          expected_tar_sha="$(grep '^tar_sha256=' "$manifest" | cut -d= -f2)"
+          test "$(sha256sum /tmp/zvrt-final.tar | awk '{print $1}')" = "$expected_tar_sha"
+          actual_tree="$(GIT_INDEX_FILE=/tmp/zvrt-final.index git write-tree)"
+          test "$actual_tree" = "$expected_tree"
+          test "$(wc -l < /tmp/zvrt-final-paths)" -eq 21
+          ! grep -Eq '^\.github/agent/|zvrt-qemu-verify.yml' /tmp/zvrt-final-paths
+
+          export GIT_AUTHOR_NAME='github-actions[bot]'
+          export GIT_AUTHOR_EMAIL='41898282+github-actions[bot]@users.noreply.github.com'
+          export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+          export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+          export GIT_AUTHOR_DATE="$(git show -s --format=%aI "$TARGET_BASE")"
+          export GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
+          commit="$(printf '%s\n\n%s\n' \
+            'security: add ZVRT1 authenticated read integrity' \
+            'Verified by strict build, independent signed-format and image verifiers, valid multichunk QEMU execution, fail-closed manifest corruption, checksum-repaired protected-data blocking, durable audit replay, deterministic rebuild, supervisor memory contracts, and the unchanged VGA aperture assertion.' \
+            | git commit-tree "$actual_tree" -p "$TARGET_BASE")"
+
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          existing="$(git ls-remote "$remote" "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')"
+          if [[ -n "$existing" && "$existing" != "$commit" ]]; then
+            echo "refusing to overwrite ${TARGET_BRANCH} at ${existing}" >&2
+            exit 1
+          fi
+          if [[ -z "$existing" ]]; then
+            git push "$remote" "${commit}:refs/heads/${TARGET_BRANCH}"
+          fi
+          test "$(git ls-remote "$remote" "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')" = "$commit"
+          printf 'PUBLISHED_ZVRT_FINAL_OK branch=%s commit=%s tree=%s files=21\n' \
+            "$TARGET_BRANCH" "$commit" "$actual_tree"
