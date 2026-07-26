@@ -2,6 +2,8 @@ name: ZenRepo Trust Chain
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'tools/zenrepo/**'
       - 'tests/zenrepo_test.sh'
@@ -12,6 +14,8 @@ on:
       - 'kernel/parts/rsa_pss.inc'
       - '.github/workflows/zenrepo.yml'
   pull_request:
+    branches:
+      - main
     paths:
       - 'tools/zenrepo/**'
       - 'tests/zenrepo_test.sh'
@@ -21,20 +25,45 @@ on:
       - 'kernel/parts/package_repository/**'
       - 'kernel/parts/rsa_pss.inc'
       - '.github/workflows/zenrepo.yml'
+  merge_group:
+    types:
+      - checks_requested
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
+
+env:
+  ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   trust-chain:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact tested source revision
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          actual_revision="$(git rev-parse HEAD)"
+          test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
+          git cat-file -e "$actual_revision^{commit}"
+          test -z "$(git status --porcelain)"
+          echo "tested-source-revision=$actual_revision"
       - name: Compile strict verifier
         run: g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tools/zenrepo/main.cpp -o /tmp/zenrepo
       - name: Verify current root rotation and delegated repository
         run: |
+          set -euo pipefail
           bash tools/zenrepo/materialize_fixtures.sh /tmp/all-metadata >/dev/null
           mkdir -p /tmp/current
           for name in root-bootstrap root targets native-apps snapshot timestamp; do
@@ -46,10 +75,12 @@ jobs:
         run: bash tests/zenrepo_test.sh
       - name: Compile and execute the kernel metadata parser
         run: |
+          set -euo pipefail
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic tests/package_repository_kernel_test.cpp -o /tmp/package-repository-kernel-test
           /tmp/package-repository-kernel-test build/zenrepo-test/fixtures
       - name: Ensure no private key material is committed
         run: |
+          set -euo pipefail
           if git grep -nE 'BEGIN (RSA )?PRIVATE KEY|BEGIN PRIVATE KEY' -- . \
             ':(exclude)tests/**' ':(exclude).github/workflows/**'; then
             echo 'private signing key material must not be committed' >&2
@@ -57,6 +88,7 @@ jobs:
           fi
       - name: Verify metadata inventory
         run: |
+          set -euo pipefail
           bash tools/zenrepo/materialize_fixtures.sh /tmp/zenrepo-inventory >/dev/null
           for name in root-bootstrap root targets native-apps snapshot timestamp; do
             test -s "/tmp/zenrepo-inventory/$name.zrm"
