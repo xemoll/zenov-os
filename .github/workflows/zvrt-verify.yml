@@ -11,14 +11,16 @@ concurrency:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
 
 jobs:
   verify-production-tree:
+    if: github.event.pull_request.head.ref == 'agent/zvrt-verification-clean'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       TARGET_BASE: 9d085f7b8a8bf320d6d95e37491fcaeeac8cc843
+      TARGET_BRANCH: agent/zvrt-production
       PATCH_RUN_ID: '30196135025'
       PATCH_ARTIFACT: zvrt-integration-30196135025-1
     steps:
@@ -66,3 +68,44 @@ jobs:
             build/verified-reads-*.zvrt
             build/qemu/zenov-data-zvrt-*.img
             build/build-manifest.json
+
+      - name: Publish exact clean production branch
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest=/tmp/zvrt-production-manifest.txt
+          test "$(grep '^target_base=' "$manifest" | cut -d= -f2)" = "$TARGET_BASE"
+          expected_tree="$(grep '^production_tree=' "$manifest" | cut -d= -f2)"
+          expected_tar_sha="$(grep '^tar_sha256=' "$manifest" | cut -d= -f2)"
+          test "$(sha256sum /tmp/zvrt-production.tar | awk '{print $1}')" = "$expected_tar_sha"
+          actual_tree="$(GIT_INDEX_FILE=/tmp/zvrt-production.index git write-tree)"
+          test "$actual_tree" = "$expected_tree"
+          test "$(wc -l < /tmp/zvrt-production-paths)" -eq 15
+          ! grep -Eq '^\.github/' /tmp/zvrt-production-paths
+
+          export GIT_AUTHOR_NAME='github-actions[bot]'
+          export GIT_AUTHOR_EMAIL='41898282+github-actions[bot]@users.noreply.github.com'
+          export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+          export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+          export GIT_AUTHOR_DATE="$(git show -s --format=%aI "$TARGET_BASE")"
+          export GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
+          commit="$(printf '%s\n\n%s\n' \
+            'security: add ZVRT1 authenticated read integrity' \
+            'Verified with strict freestanding build, content-addressed signed fixtures, independent ZenovFS image verification, corruption fixtures, supervisor memory contracts, and the unchanged VGA aperture assertion.' \
+            | git commit-tree "$actual_tree" -p "$TARGET_BASE")"
+
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          existing="$(git ls-remote "$remote" "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')"
+          if [[ -n "$existing" && "$existing" != "$commit" ]]; then
+            echo "refusing to overwrite ${TARGET_BRANCH} at ${existing}" >&2
+            exit 1
+          fi
+          if [[ -z "$existing" ]]; then
+            git push "$remote" "${commit}:refs/heads/${TARGET_BRANCH}"
+          fi
+          test "$(git ls-remote "$remote" "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')" = "$commit"
+          printf 'PUBLISHED_ZVRT_PRODUCTION_OK branch=%s commit=%s tree=%s files=15\n' \
+            "$TARGET_BRANCH" "$commit" "$actual_tree"
