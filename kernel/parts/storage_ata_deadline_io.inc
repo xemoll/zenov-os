@@ -1,3 +1,22 @@
+void ata2_serial_uint(uint32_t value) {
+    char digits[10];
+    uint32_t count = 0U;
+    do {
+        digits[count++] = static_cast<char>('0' + value % 10U);
+        value /= 10U;
+    } while (value != 0U && count < sizeof(digits));
+    while (count != 0U) serial::put(digits[--count]);
+}
+
+void ata2_record_retry_exhausted(const char* operation, const BlockResult& failure) {
+    serial::write("ATA_RECOVERY_RETRY_EXHAUSTED op=");
+    serial::write(operation);
+    serial::write(" attempts=");
+    ata2_serial_uint(failure.attempts);
+    serial::write(" status=");
+    serial::line(block_status_name(failure.status));
+}
+
 AtaOperationResult ata2_read_once(uint32_t lba, uint8_t* output, uint8_t attempts) {
     ata_policy::Result result = ata2_wait(false, ata2_command_timeout_ms, attempts);
     if (!result.ok()) return AtaOperationResult{result, BlockOperation::read};
@@ -41,7 +60,11 @@ BlockResult ata2_read_result(uint32_t lba, uint8_t* output) {
         }
         ata2_record_attempt_failure("read", result.operation, lba, result.transport);
         const BlockResult failure = ata2_block_result(result.operation, lba, result.transport);
-        if (attempt == ata2_max_attempts || !block_retryable(failure.status)) return ata2_complete_request(failure);
+        if (!block_retryable(failure.status)) return ata2_complete_request(failure);
+        if (attempt == ata2_max_attempts) {
+            ata2_record_retry_exhausted("read", failure);
+            return ata2_complete_request(failure);
+        }
         ++ata_diagnostics.retries;
         if (!ata2_soft_reset(attempt).ok()) {
             return ata2_complete_request(ata2_block_result(BlockOperation::reset, lba, ata_last_result));
@@ -96,7 +119,11 @@ BlockResult ata2_write_result(uint32_t lba, const uint8_t* input) {
         }
         ata2_record_attempt_failure("write", result.operation, lba, result.transport);
         const BlockResult failure = ata2_block_result(result.operation, lba, result.transport);
-        if (attempt == ata2_max_attempts || !block_retryable(failure.status)) return ata2_complete_request(failure);
+        if (!block_retryable(failure.status)) return ata2_complete_request(failure);
+        if (attempt == ata2_max_attempts) {
+            ata2_record_retry_exhausted("write", failure);
+            return ata2_complete_request(failure);
+        }
         ++ata_diagnostics.retries;
         if (!ata2_soft_reset(attempt).ok()) {
             return ata2_complete_request(ata2_block_result(BlockOperation::reset, lba, ata_last_result));
