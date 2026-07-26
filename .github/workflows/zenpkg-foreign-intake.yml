@@ -1,0 +1,171 @@
+name: ZenPkg Foreign Intake
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'GNUmakefile'
+      - 'tools/zenpkg/**'
+      - 'tests/package_foreign_format_test.cpp'
+      - 'tests/zenpkg_foreign_test.sh'
+      - 'tests/zenpkg_streaming_test.sh'
+      - 'tests/zenpkg_native_snapshot_test.cpp'
+      - 'tests/zenpkg_sha256_test.cpp'
+      - 'tests/qemu_zenpkg_foreign.sh'
+      - 'kernel/parts/package_foreign_format.inc'
+      - 'kernel/parts/package_foreign_policy.inc'
+      - 'kernel/parts/package_manager.inc'
+      - 'kernel/parts/package_manager/**'
+      - '.github/workflows/zenpkg-foreign-intake.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'GNUmakefile'
+      - 'tools/zenpkg/**'
+      - 'tests/package_foreign_format_test.cpp'
+      - 'tests/zenpkg_foreign_test.sh'
+      - 'tests/zenpkg_streaming_test.sh'
+      - 'tests/zenpkg_native_snapshot_test.cpp'
+      - 'tests/zenpkg_sha256_test.cpp'
+      - 'tests/qemu_zenpkg_foreign.sh'
+      - 'kernel/parts/package_foreign_format.inc'
+      - 'kernel/parts/package_foreign_policy.inc'
+      - 'kernel/parts/package_manager.inc'
+      - 'kernel/parts/package_manager/**'
+      - '.github/workflows/zenpkg-foreign-intake.yml'
+  merge_group:
+    types:
+      - checks_requested
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_DATE_EPOCH: '0'
+
+jobs:
+  foreign-intake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact tested source revision
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          actual_revision="$(git rev-parse HEAD)"
+          test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
+          git cat-file -e "$actual_revision^{commit}"
+          test -z "$(git status --porcelain)"
+          echo "tested-source-revision=$actual_revision"
+
+      - name: Install strict host toolchains
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang
+
+      - name: Validate shell harnesses
+        run: |
+          set -euo pipefail
+          bash -n tests/zenpkg_foreign_test.sh
+          bash -n tests/zenpkg_streaming_test.sh
+          bash -n tests/qemu_zenpkg_foreign.sh
+
+      - name: Build kernel and complete foreign intake regression
+        run: |
+          set -euo pipefail
+          rm -f /tmp/zenpkg-foreign-check.log
+          if ! make clean zenpkg-check all > /tmp/zenpkg-foreign-check.log 2>&1; then
+            tail -n 360 /tmp/zenpkg-foreign-check.log
+            mkdir -p build/ci-logs
+            cp /tmp/zenpkg-foreign-check.log build/ci-logs/foreign-check.log
+            exit 1
+          fi
+          mkdir -p build/ci-logs
+          cp /tmp/zenpkg-foreign-check.log build/ci-logs/foreign-check.log
+          tail -n 200 /tmp/zenpkg-foreign-check.log
+          grep -Fq 'ZENPKG_SHA256_TEST_OK vectors=3 streaming=1 explicit_mod32=1' /tmp/zenpkg-foreign-check.log
+          grep -Fq 'PACKAGE_FOREIGN_FORMAT_TEST_OK' /tmp/zenpkg-foreign-check.log
+          grep -Fq 'ZENPKG_FOREIGN_TEST_OK' /tmp/zenpkg-foreign-check.log
+          grep -Fq 'ZENPKG_STREAMING_TEST_OK' /tmp/zenpkg-foreign-check.log
+          grep -Fq 'ZENPKG_NATIVE_SNAPSHOT_TEST_OK' /tmp/zenpkg-foreign-check.log
+          test -s build/kernel.map
+          kernel_end="$(awk '$2 == "__kernel_end" {print $1}' build/kernel.map | tail -n 1)"
+          [[ "$kernel_end" =~ ^0x[0-9a-fA-F]+$ ]]
+          python3 - "$kernel_end" <<'PY'
+          import sys
+          end = int(sys.argv[1], 16)
+          limit = 0x000A0000
+          assert end <= limit, f'kernel end {end:#x} overlaps VGA aperture {limit:#x}'
+          print(f'ZENOV_KERNEL_LOW_MEMORY_OK end={end:#010x} limit={limit:#010x} gap={limit-end}')
+          PY
+
+      - name: Run classifier and snapshot under Clang sanitizers
+        run: |
+          set -euo pipefail
+          mkdir -p build/clang-sanitized build/ci-logs
+          flags=(
+            -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change
+            -fno-sanitize-recover=all -fno-omit-frame-pointer
+          )
+          if ! {
+            clang++ "${flags[@]}" tests/zenpkg_sha256_test.cpp \
+              -o build/clang-sanitized/zenpkg-sha256-test
+            clang++ "${flags[@]}" tests/package_foreign_format_test.cpp \
+              -o build/clang-sanitized/package-foreign-format-test
+            clang++ "${flags[@]}" tests/zenpkg_native_snapshot_test.cpp \
+              -o build/clang-sanitized/zenpkg-native-snapshot-test
+            clang++ "${flags[@]}" tools/zenpkg/main.cpp \
+              -o build/clang-sanitized/zenpkg
+          } > build/ci-logs/clang-build.log 2>&1; then
+            cat build/ci-logs/clang-build.log
+            exit 1
+          fi
+          cat build/ci-logs/clang-build.log
+          export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
+          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+          build/clang-sanitized/zenpkg-sha256-test \
+            2>&1 | tee build/ci-logs/sha256-sanitized.log
+          build/clang-sanitized/package-foreign-format-test \
+            2>&1 | tee build/ci-logs/foreign-format-sanitized.log
+          build/clang-sanitized/zenpkg-native-snapshot-test \
+            build/HELLO.ZEX build/clang-sanitized/native-snapshot \
+            2>&1 | tee build/ci-logs/native-snapshot-sanitized.log
+          bash tests/zenpkg_foreign_test.sh \
+            build/clang-sanitized/zenpkg build/HELLO.ZEX build/clang-sanitized/foreign \
+            2>&1 | tee build/ci-logs/foreign-intake-sanitized.log
+          bash tests/zenpkg_streaming_test.sh \
+            build/clang-sanitized/zenpkg build/clang-sanitized/streaming \
+            2>&1 | tee build/ci-logs/streaming-sanitized.log
+          grep -Fqx 'ZENPKG_SHA256_TEST_OK vectors=3 streaming=1 explicit_mod32=1' build/ci-logs/sha256-sanitized.log
+          grep -Fq 'PACKAGE_FOREIGN_FORMAT_TEST_OK' build/ci-logs/foreign-format-sanitized.log
+          grep -Fq 'ZENPKG_NATIVE_SNAPSHOT_TEST_OK' build/ci-logs/native-snapshot-sanitized.log
+          grep -Fq 'ZENPKG_FOREIGN_TEST_OK' build/ci-logs/foreign-intake-sanitized.log
+          grep -Fq 'ZENPKG_STREAMING_TEST_OK' build/ci-logs/streaming-sanitized.log
+
+      - name: Upload foreign intake evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenpkg-foreign-intake-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            build/ci-logs/
+            build/kernel.map
+            build/KERNEL.BIN
+            build/zenpkg-foreign-test/
+            build/clang-sanitized/

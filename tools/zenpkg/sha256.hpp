@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstring>
+#include <limits>
 
 namespace zenpkg {
 
@@ -18,7 +19,11 @@ public:
     void update(const std::uint8_t* data, std::size_t length) {
         if (finalized_) throw Error("SHA-256 context already finalized");
         if (!data && length) throw Error("SHA-256 received a null buffer");
-        total_bytes_ += static_cast<std::uint64_t>(length);
+        const auto length64 = static_cast<std::uint64_t>(length);
+        if (length64 > std::numeric_limits<std::uint64_t>::max() - total_bytes_) {
+            throw Error("SHA-256 input length overflow");
+        }
+        total_bytes_ += length64;
         while (length) {
             const std::size_t available = block_.size() - block_size_;
             const std::size_t chunk = std::min(available, length);
@@ -40,6 +45,9 @@ public:
 
     Digest final() {
         if (finalized_) return digest_;
+        if (total_bytes_ > std::numeric_limits<std::uint64_t>::max() / 8U) {
+            throw Error("SHA-256 input is too large to encode its bit length");
+        }
         const std::uint64_t total_bits = total_bytes_ * 8U;
         block_[block_size_++] = 0x80U;
         if (block_size_ > 56) {
@@ -91,6 +99,13 @@ private:
         return (value >> count) | (value << (32U - count));
     }
 
+    template <typename... Values>
+    static std::uint32_t add_mod32(Values... values) {
+        const std::uint64_t sum =
+            (std::uint64_t{0} + ... + static_cast<std::uint64_t>(values));
+        return static_cast<std::uint32_t>(sum & 0xffffffffULL);
+    }
+
     void reset() {
         state_ = {0x6a09e667U,0xbb67ae85U,0x3c6ef372U,0xa54ff53aU,0x510e527fU,0x9b05688cU,0x1f83d9abU,0x5be0cd19U};
         block_.fill(0);
@@ -111,7 +126,7 @@ private:
         for (std::size_t i = 16; i < words.size(); ++i) {
             const std::uint32_t s0 = rotate_right(words[i - 15], 7) ^ rotate_right(words[i - 15], 18) ^ (words[i - 15] >> 3U);
             const std::uint32_t s1 = rotate_right(words[i - 2], 17) ^ rotate_right(words[i - 2], 19) ^ (words[i - 2] >> 10U);
-            words[i] = words[i - 16] + s0 + words[i - 7] + s1;
+            words[i] = add_mod32(words[i - 16], s0, words[i - 7], s1);
         }
 
         std::uint32_t a = state_[0], b = state_[1], c = state_[2], d = state_[3];
@@ -119,15 +134,27 @@ private:
         for (std::size_t i = 0; i < words.size(); ++i) {
             const std::uint32_t s1 = rotate_right(e, 6) ^ rotate_right(e, 11) ^ rotate_right(e, 25);
             const std::uint32_t choose = (e & f) ^ ((~e) & g);
-            const std::uint32_t temp1 = h + s1 + choose + k_[i] + words[i];
+            const std::uint32_t temp1 = add_mod32(h, s1, choose, k_[i], words[i]);
             const std::uint32_t s0 = rotate_right(a, 2) ^ rotate_right(a, 13) ^ rotate_right(a, 22);
             const std::uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
-            const std::uint32_t temp2 = s0 + majority;
-            h = g; g = f; f = e; e = d + temp1;
-            d = c; c = b; b = a; a = temp1 + temp2;
+            const std::uint32_t temp2 = add_mod32(s0, majority);
+            h = g;
+            g = f;
+            f = e;
+            e = add_mod32(d, temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = add_mod32(temp1, temp2);
         }
-        state_[0] += a; state_[1] += b; state_[2] += c; state_[3] += d;
-        state_[4] += e; state_[5] += f; state_[6] += g; state_[7] += h;
+        state_[0] = add_mod32(state_[0], a);
+        state_[1] = add_mod32(state_[1], b);
+        state_[2] = add_mod32(state_[2], c);
+        state_[3] = add_mod32(state_[3], d);
+        state_[4] = add_mod32(state_[4], e);
+        state_[5] = add_mod32(state_[5], f);
+        state_[6] = add_mod32(state_[6], g);
+        state_[7] = add_mod32(state_[7], h);
     }
 
     std::array<std::uint32_t, 8> state_{};
