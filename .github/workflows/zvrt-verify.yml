@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -18,6 +19,8 @@ jobs:
     timeout-minutes: 90
     env:
       TARGET_BASE: 9d085f7b8a8bf320d6d95e37491fcaeeac8cc843
+      PATCH_RUN_ID: '30196135025'
+      PATCH_ARTIFACT: zvrt-integration-30196135025-1
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -37,9 +40,11 @@ jobs:
             "$(git rev-parse HEAD)" "$TARGET_BASE"
 
       - name: Install strict toolchain
-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl unzip
 
       - name: Validate and execute verification driver
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -53,7 +58,7 @@ jobs:
           name: zvrt-verification-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
           path: |
-            .github/agent/zvrt-integration.patch
+            /tmp/zvrt-integration.patch
             /tmp/zvrt-production.tar
             /tmp/zvrt-production-manifest.txt
             /tmp/zvrt-production-paths
