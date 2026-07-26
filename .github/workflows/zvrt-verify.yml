@@ -1,0 +1,63 @@
+name: Verify ZVRT1 production tree
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-production-tree:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      TARGET_BASE: 9d085f7b8a8bf320d6d95e37491fcaeeac8cc843
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact source provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "${{ github.event.pull_request.base.sha }}" = "$TARGET_BASE"
+          test "$(git merge-base HEAD origin/main)" = "$TARGET_BASE"
+          test -z "$(git status --porcelain=v1)"
+          printf 'ZVRT_VERIFICATION_PROVENANCE_OK head=%s base=%s\n' \
+            "$(git rev-parse HEAD)" "$TARGET_BASE"
+
+      - name: Install strict toolchain
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl
+
+      - name: Validate and execute verification driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n .github/agent/run-zvrt-verification.sh
+          bash .github/agent/run-zvrt-verification.sh
+
+      - name: Upload exact verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zvrt-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            .github/agent/zvrt-integration.patch
+            /tmp/zvrt-production.tar
+            /tmp/zvrt-production-manifest.txt
+            /tmp/zvrt-production-paths
+            ci-logs/zvrt-verification/
+            build/verified-reads-*.zvrt
+            build/qemu/zenov-data-zvrt-*.img
+            build/build-manifest.json
