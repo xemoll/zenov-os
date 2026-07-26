@@ -1,0 +1,188 @@
+name: ZVRT1 integration compile rerun
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  apply-evidence-patch-and-compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PATCH_RUN_ID: '30196135025'
+      PATCH_ARTIFACT: zvrt-integration-30196135025-1
+      TARGET_BASE: 9d085f7b8a8bf320d6d95e37491fcaeeac8cc843
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact PR head and clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test -z "$(git status --porcelain=v1)"
+          test "${{ github.event.pull_request.base.sha }}" = "$TARGET_BASE"
+          test "$(git merge-base HEAD origin/main)" = "$TARGET_BASE"
+          printf 'ZVRT_RERUN_PROVENANCE_OK head=%s base=%s\n' \
+            "$(git rev-parse HEAD)" "$TARGET_BASE"
+
+      - name: Install strict toolchain
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl unzip
+
+      - name: Download exact integration patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/zvrt-evidence
+          curl --fail-with-body -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${PATCH_RUN_ID}/artifacts?per_page=100" \
+            > /tmp/artifacts.json
+          artifact_id="$(python3 - <<'PY'
+          import json, os
+          data = json.load(open('/tmp/artifacts.json', encoding='utf-8'))
+          matches = [a for a in data.get('artifacts', []) if a.get('name') == os.environ['PATCH_ARTIFACT'] and not a.get('expired')]
+          assert len(matches) == 1, [(a.get('id'), a.get('name')) for a in data.get('artifacts', [])]
+          print(matches[0]['id'])
+          PY
+          )"
+          curl --fail-with-body -L -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+            -o /tmp/zvrt-evidence.zip
+          unzip -q /tmp/zvrt-evidence.zip -d /tmp/zvrt-evidence
+          patch_file="$(find /tmp/zvrt-evidence -type f -name zvrt-integration.patch -print -quit)"
+          test -n "$patch_file"
+          cp "$patch_file" /tmp/zvrt-integration.patch
+          sha256sum /tmp/zvrt-integration.patch | tee /tmp/zvrt-patch.sha256
+
+      - name: Apply patch and fix shell caller
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs/zvrt-rerun
+          git apply --index --check /tmp/zvrt-integration.patch
+          git apply --index /tmp/zvrt-integration.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('kernel/parts/security_io.inc')
+          text = path.read_text()
+          old = '''          void guarded_cat(const char* input) {
+              uint32_t size = 0U;
+              const FsResult result = fs_record_result(guarded_read_file_result(input, file_buffer, max_file_bytes(), size));
+              if (!result.ok()) {
+                  console::write("Read failed: "); console::line(fs_status_name(result.status));
+                  return;
+              }
+'''
+          new = '''          void guarded_cat(const char* input) {
+              uint32_t size = 0U;
+              if (!guarded_read_file(input, file_buffer, max_file_bytes(), size)) {
+                  console::warning("File unavailable, corrupt or blocked by ZenovGuard.");
+                  return;
+              }
+'''
+          assert text.count(old) == 1, text.count(old)
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git add kernel/parts/security_io.inc
+          git diff --cached --check
+          git diff --cached --stat | tee ci-logs/zvrt-rerun/runtime-diff-stat.log
+
+      - name: Run strict build and image verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean check 2>&1 | tee ci-logs/zvrt-rerun/make-check.log
+          grep -Fq 'ZENOV_ZVRT_IMAGE_OK version=1 records=4 leaves=5 multichunk=1 key=d28215ec62269ffc' ci-logs/zvrt-rerun/make-check.log
+          grep -Fq 'zvrt-verify: OK version=1 records=4 chunk=4096 leaves=5 multichunk=1 key=d28215ec62269ffc' ci-logs/zvrt-rerun/make-check.log
+          test -s build/qemu/zenov-data-zvrt-manifest-corrupt.img
+          test -s build/qemu/zenov-data-zvrt-data-corrupt.img
+
+      - name: Package exact production tree
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/zvrt-expected-paths <<'EOF'
+          Makefile
+          kernel/kernel.cpp
+          kernel/parts/security_io.inc
+          kernel/parts/security_paths.inc
+          kernel/parts/zvrt_policy.inc
+          security/zvrt-root-public.pem
+          security/zvrt_crypto_material.hpp
+          tools/zenovfs_builder.cpp
+          tools/zenovfs_zvrt_corrupt.cpp
+          tools/zenovfs_zvrt_verify.cpp
+          tools/zvrt_builder.cpp
+          tools/zvrt_verify.cpp
+          EOF
+          sort -o /tmp/zvrt-expected-paths /tmp/zvrt-expected-paths
+          {
+            git diff --name-only "$TARGET_BASE" HEAD
+            git diff --cached --name-only
+          } | sort -u | grep -v '^\.github/workflows/zvrt-integration-rerun.yml$' > /tmp/zvrt-production-paths
+          diff -u /tmp/zvrt-expected-paths /tmp/zvrt-production-paths
+
+          rm -f /tmp/zvrt-production.index
+          GIT_INDEX_FILE=/tmp/zvrt-production.index git read-tree "${TARGET_BASE}^{tree}"
+          while IFS= read -r path; do
+            GIT_INDEX_FILE=/tmp/zvrt-production.index git add -- "$path"
+          done < /tmp/zvrt-production-paths
+          production_tree="$(GIT_INDEX_FILE=/tmp/zvrt-production.index git write-tree)"
+          printf '%s\n' "$production_tree" | tee ci-logs/zvrt-rerun/verified-production-tree.log
+
+          tar --format=posix --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
+            -cf /tmp/zvrt-production.tar -T /tmp/zvrt-production-paths
+          tar_sha="$(sha256sum /tmp/zvrt-production.tar | awk '{print $1}')"
+          patch_sha="$(sha256sum /tmp/zvrt-integration.patch | awk '{print $1}')"
+          {
+            printf 'target_base=%s\n' "$TARGET_BASE"
+            printf 'production_tree=%s\n' "$production_tree"
+            printf 'tar_sha256=%s\n' "$tar_sha"
+            printf 'patch_sha256=%s\n' "$patch_sha"
+            while IFS= read -r path; do
+              mode="$(git ls-files -s -- "$path" | awk '{print $1}')"
+              blob="$(git hash-object "$path")"
+              printf 'path=%s\tmode=%s\tblob=%s\n' "$path" "$mode" "$blob"
+            done < /tmp/zvrt-production-paths
+          } > /tmp/zvrt-production-manifest.txt
+          cat /tmp/zvrt-production-manifest.txt | tee ci-logs/zvrt-rerun/production-manifest.log
+          git diff --stat "$TARGET_BASE" -- $(cat /tmp/zvrt-production-paths) | tee ci-logs/zvrt-rerun/production-diff-stat.log
+
+      - name: Upload rerun evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zvrt-rerun-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            /tmp/zvrt-integration.patch
+            /tmp/zvrt-patch.sha256
+            /tmp/zvrt-production.tar
+            /tmp/zvrt-production-manifest.txt
+            /tmp/zvrt-production-paths
+            ci-logs/zvrt-rerun/
+            build/verified-reads-*.zvrt
+            build/qemu/zenov-data-zvrt-*.img
+            build/build-manifest.json
