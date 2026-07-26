@@ -56,8 +56,8 @@ git apply --index "$patch_file"
 python3 - <<'PY'
 from pathlib import Path
 
-path = Path('kernel/parts/security_io.inc')
-text = path.read_text()
+security_io = Path('kernel/parts/security_io.inc')
+text = security_io.read_text()
 old = '''void guarded_cat(const char* input) {
     uint32_t size = 0U;
     const FsResult result = fs_record_result(guarded_read_file_result(input, file_buffer, max_file_bytes(), size));
@@ -74,10 +74,41 @@ new = '''void guarded_cat(const char* input) {
     }
 '''
 assert text.count(old) == 1, text.count(old)
-path.write_text(text.replace(old, new, 1))
+security_io.write_text(text.replace(old, new, 1))
+
+policy = Path('kernel/parts/zvrt_policy.inc')
+text = policy.read_text()
+old = '''enum class Validation : uint8_t { okay, malformed, digest, signature, rollback, engine, key, records };
+Record active_records[max_records]{};
+Record candidate_records[max_records]{};
+uint32_t active_record_count = 0U, active_manifest_version = 0U, persistent_manifest_version = 0U;
+'''
+new = '''enum class Validation : uint8_t { okay, malformed, digest, signature, rollback, engine, key, records };
+constexpr uintptr_t record_workspace_address = security_guard::write_scan_workspace_address + security_guard::write_scan_workspace_bytes;
+constexpr uint32_t record_workspace_bytes = 2U * max_records * sizeof(Record);
+static_assert(record_workspace_address == 0x00310000U);
+static_assert(record_workspace_bytes == 4096U);
+static_assert(record_workspace_address >= security_guard::write_scan_workspace_address + security_guard::write_scan_workspace_bytes);
+static_assert(record_workspace_address + record_workspace_bytes <= process::user_base);
+Record* active_records = reinterpret_cast<Record*>(record_workspace_address);
+Record* candidate_records = active_records + max_records;
+uint32_t active_record_count = 0U, active_manifest_version = 0U, persistent_manifest_version = 0U;
+'''
+assert text.count(old) == 1, text.count(old)
+text = text.replace(old, new, 1)
+old = '    memset(active_records, 0, sizeof(active_records));\n'
+new = '    memset(active_records, 0, max_records * sizeof(Record));\n'
+assert text.count(old) == 1, text.count(old)
+text = text.replace(old, new, 1)
+old = '    serial::line("ZVRT_ROOT_KEY_OK id=d28215ec62269ffc");\n'
+new = '''    serial::line("ZVRT_ROOT_KEY_OK id=d28215ec62269ffc");
+    serial::line("ZVRT_WORKSPACE_OK address=0x00310000 bytes=4096 supervisor-only=yes");
+'''
+assert text.count(old) == 1, text.count(old)
+policy.write_text(text.replace(old, new, 1))
 PY
 
-git add kernel/parts/security_io.inc
+git add kernel/parts/security_io.inc kernel/parts/zvrt_policy.inc
 git diff --cached --check
 git diff --cached --stat | tee "$log_dir/runtime-diff-stat.log"
 
