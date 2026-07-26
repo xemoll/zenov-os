@@ -1,0 +1,96 @@
+name: ZenovOS ATA Read Faults
+
+on:
+  push:
+    paths:
+      - 'GNUmakefile'
+      - 'kernel/parts/storage_ata_deadline_io.inc'
+      - 'tests/qemu_ata_read_faults.sh'
+      - 'tests/blkdebug/ata-read-eio-*.conf'
+      - '.github/workflows/ata-read-faults.yml'
+  pull_request:
+    paths:
+      - 'GNUmakefile'
+      - 'kernel/parts/storage_ata_deadline_io.inc'
+      - 'tests/qemu_ata_read_faults.sh'
+      - 'tests/blkdebug/ata-read-eio-*.conf'
+      - '.github/workflows/ata-read-faults.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ata-read-faults:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verify exact tested source revision
+        run: |
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+          echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
+
+      - name: Install native toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
+
+      - name: Verify harness and source contract
+        run: |
+          bash -n tests/qemu_ata_read_faults.sh
+          grep -Fq 'event = "read_aio"' tests/blkdebug/ata-read-eio-once.conf
+          grep -Fq 'iotype = "read"' tests/blkdebug/ata-read-eio-once.conf
+          grep -Fq 'sector = "8"' tests/blkdebug/ata-read-eio-once.conf
+          grep -Fq 'once = "on"' tests/blkdebug/ata-read-eio-once.conf
+          grep -Fq 'event = "read_aio"' tests/blkdebug/ata-read-eio-always.conf
+          grep -Fq 'iotype = "read"' tests/blkdebug/ata-read-eio-always.conf
+          grep -Fq 'sector = "8"' tests/blkdebug/ata-read-eio-always.conf
+          ! grep -Fq 'once = "on"' tests/blkdebug/ata-read-eio-always.conf
+          grep -Fq 'ATA_RECOVERY_RETRY_EXHAUSTED op=' kernel/parts/storage_ata_deadline_io.inc
+          grep -Fq 'if (!block_retryable(failure.status))' kernel/parts/storage_ata_deadline_io.inc
+
+      - name: Build strict native system and host contracts
+        run: |
+          mkdir -p ci-logs/ata-read-faults
+          set -o pipefail
+          make clean check 2>&1 | tee ci-logs/ata-read-faults/native-check.log
+          grep -Fq 'ATA_POLICY_TEST_OK cases=22' ci-logs/ata-read-faults/native-check.log
+          grep -Fq 'BLOCK_RESULT_TEST_OK cases=17' ci-logs/ata-read-faults/native-check.log
+          grep -Fq 'BLOCK_DEVICE_ABI_TEST_OK' ci-logs/ata-read-faults/native-check.log
+          grep -Fq 'ZENOVFS_RESULT_TEST_OK' ci-logs/ata-read-faults/native-check.log
+
+      - name: Inject recoverable and persistent read EIO
+        run: |
+          set -o pipefail
+          make ata-read-fault-qemu 2>&1 | tee ci-logs/ata-read-faults/qemu.log
+
+      - name: Verify exact runtime evidence
+        run: |
+          out=build/qemu/ata-read-faults
+          grep -Fq 'ATA_READ_FAULT_MATRIX_OK sector=8 recovered_attempts=2 exhausted_attempts=2 resets_each=1 ui_after_recovery=1 ui_after_exhaustion=0' "$out/summary.log"
+          grep -Fq 'ATA_RECOVERY_RETRY_OK op=read attempts=2' "$out/recovered/serial.log"
+          grep -Fq 'ZENOVFS_MOUNT_OK' "$out/recovered/serial.log"
+          grep -Fq 'ZENOVFS_FSCK_OK' "$out/recovered/serial.log"
+          grep -Fq 'ZENOVOS_UI_READY' "$out/recovered/serial.log"
+          grep -Fq 'ATA_RECOVERY_RETRY_EXHAUSTED op=read attempts=2 status=command-aborted' "$out/exhausted/serial.log"
+          grep -Fq 'Storage: ZenovFS mount failed' "$out/exhausted/serial.log"
+          ! grep -Fq 'ZENOVFS_MOUNT_OK' "$out/exhausted/serial.log"
+          ! grep -Fq 'ZENOVOS_UI_READY' "$out/exhausted/serial.log"
+          test ! -s "$out/recovered/qemu.stderr"
+          test ! -s "$out/exhausted/qemu.stderr"
+
+      - name: Upload ATA read fault evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ata-read-faults-${{ github.run_id }}
+          path: |
+            ci-logs/ata-read-faults/**
+            build/qemu/ata-read-faults/**
+          if-no-files-found: warn
+          retention-days: 14

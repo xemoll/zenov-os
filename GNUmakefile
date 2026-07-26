@@ -15,10 +15,12 @@ BLOCK_DEVICE_ABI_TEST := $(BUILD)/storage-block-device-abi-test
 ZENOVFS_RESULT_TEST := $(BUILD)/storage-fs-result-test
 ATA_EIO_QEMU_OUT := $(BUILD)/qemu/ata-eio-retry
 ATA_EIO_QEMU_STAMP := $(ATA_EIO_QEMU_OUT)/.stamp
+ATA_READ_FAULT_OUT := $(BUILD)/qemu/ata-read-faults
+ATA_READ_FAULT_STAMP := $(ATA_READ_FAULT_OUT)/.stamp
 BLOCK_STATUS_QEMU_OUT := $(BUILD)/qemu/block-status
 BLOCK_STATUS_QEMU_STAMP := $(BLOCK_STATUS_QEMU_OUT)/.stamp
 
-.PHONY: ata-eio-qemu block-status-qemu
+.PHONY: ata-eio-qemu ata-read-fault-qemu block-status-qemu
 
 $(ATA_POLICY_TEST): tests/storage_ata_policy_test.cpp kernel/parts/storage_ata_policy.inc | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
@@ -54,6 +56,21 @@ $(ATA_EIO_QEMU_STAMP): all tests/qemu_ata_eio_retry.sh tests/blkdebug/ata-write-
 	@touch $@
 
 ata-eio-qemu: $(ATA_EIO_QEMU_STAMP)
+
+$(ATA_READ_FAULT_STAMP): all tests/qemu_ata_read_faults.sh tests/blkdebug/ata-read-eio-once.conf tests/blkdebug/ata-read-eio-always.conf $(BUILD)/zenovfs-verify
+	@rm -rf $(ATA_READ_FAULT_OUT)
+	@mkdir -p $(ATA_READ_FAULT_OUT)
+	bash tests/qemu_ata_read_faults.sh \
+	  $(BUILD)/zenov-os.img \
+	  $(BUILD)/zenov-data.img \
+	  tests/blkdebug/ata-read-eio-once.conf \
+	  tests/blkdebug/ata-read-eio-always.conf \
+	  $(ATA_READ_FAULT_OUT)
+	$(BUILD)/zenovfs-verify $(ATA_READ_FAULT_OUT)/recovered/runtime.img
+	$(BUILD)/zenovfs-verify $(ATA_READ_FAULT_OUT)/exhausted/runtime.img
+	@touch $@
+
+ata-read-fault-qemu: $(ATA_READ_FAULT_STAMP)
 
 $(BLOCK_STATUS_QEMU_STAMP): all tests/qemu_block_status.sh $(BUILD)/zenovfs-verify
 	@rm -rf $(BLOCK_STATUS_QEMU_OUT)
