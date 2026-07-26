@@ -3,9 +3,12 @@ constexpr uint32_t page_size = 4096U;
 constexpr uint32_t managed_limit = 128U * 1024U * 1024U;
 constexpr uint32_t frame_count = managed_limit / page_size;
 constexpr uint32_t bitmap_words = frame_count / 32U;
-constexpr uintptr_t reserved_end = 0x00800000U;
+constexpr uintptr_t reserved_end = supervisor_layout::pmm_reserved_end;
 constexpr uint32_t self_test_frames = 16U;
-uint32_t frame_bitmap[bitmap_words];
+constexpr uint32_t frame_bitmap_bytes = bitmap_words * sizeof(uint32_t);
+static_assert(frame_bitmap_bytes == supervisor_layout::pmm_bitmap_bytes);
+static_assert(supervisor_layout::pmm_bitmap + frame_bitmap_bytes <= supervisor_layout::user_base);
+uint32_t* frame_bitmap = reinterpret_cast<uint32_t*>(supervisor_layout::pmm_bitmap);
 uint32_t available_frames = 0, allocated_frames = 0;
 bool initialized = false;
 void mark_used(uint32_t frame) { frame_bitmap[frame / 32U] |= 1U << (frame % 32U); }
@@ -86,8 +89,8 @@ void init() {
 }
 
 namespace heap {
-constexpr uintptr_t start_address = 0x00100000U;
-constexpr uintptr_t limit_address = 0x00300000U;
+constexpr uintptr_t start_address = supervisor_layout::heap_start;
+constexpr uintptr_t limit_address = supervisor_layout::heap_end;
 constexpr uint32_t magic = 0x48454150U;
 constexpr uint32_t free_flag = 1U;
 constexpr uint32_t granularity = 16U;
