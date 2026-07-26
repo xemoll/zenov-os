@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
-      TARGET_BASE: 9d085f7b8a8bf320d6d95e37491fcaeeac8cc843
+      TARGET_BASE: 39caf2b9b98f3010cf02e5a441a33bf58bdaa149
       TARGET_BRANCH: agent/zvrt-final
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
