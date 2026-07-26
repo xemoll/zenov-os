@@ -2,14 +2,53 @@
 set -euo pipefail
 
 : "${TARGET_BASE:?TARGET_BASE is required}"
+: "${PATCH_RUN_ID:?PATCH_RUN_ID is required}"
+: "${PATCH_ARTIFACT:?PATCH_ARTIFACT is required}"
+: "${GH_TOKEN:?GH_TOKEN is required}"
+: "${GITHUB_API_URL:?GITHUB_API_URL is required}"
+: "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 
-readonly patch_file='.github/agent/zvrt-integration.patch'
+readonly patch_file='/tmp/zvrt-integration.patch'
 readonly patch_sha='e5bdc34cd91925457574fe0f7a48d13aa089143d877828caec4ae4ebab66ad37'
 readonly log_dir='ci-logs/zvrt-verification'
-mkdir -p "$log_dir"
+mkdir -p "$log_dir" /tmp/zvrt-evidence
+
+curl --fail-with-body -sS \
+  -H "Authorization: Bearer ${GH_TOKEN}" \
+  -H 'Accept: application/vnd.github+json' \
+  -H 'X-GitHub-Api-Version: 2022-11-28' \
+  "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${PATCH_RUN_ID}/artifacts?per_page=100" \
+  > /tmp/zvrt-artifacts.json
+
+artifact_id="$(python3 - <<'PY'
+import json
+import os
+
+with open('/tmp/zvrt-artifacts.json', encoding='utf-8') as source:
+    data = json.load(source)
+matches = [
+    artifact for artifact in data.get('artifacts', [])
+    if artifact.get('name') == os.environ['PATCH_ARTIFACT'] and not artifact.get('expired')
+]
+assert len(matches) == 1, [(artifact.get('id'), artifact.get('name')) for artifact in data.get('artifacts', [])]
+print(matches[0]['id'])
+PY
+)"
+
+curl --fail-with-body -L -sS \
+  -H "Authorization: Bearer ${GH_TOKEN}" \
+  -H 'Accept: application/vnd.github+json' \
+  -H 'X-GitHub-Api-Version: 2022-11-28' \
+  "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+  -o /tmp/zvrt-evidence.zip
+unzip -q /tmp/zvrt-evidence.zip -d /tmp/zvrt-evidence
+source_patch="$(find /tmp/zvrt-evidence -type f -name zvrt-integration.patch -print -quit)"
+test -n "$source_patch"
+cp "$source_patch" "$patch_file"
 
 printf '%s  %s\n' "$patch_sha" "$patch_file" | sha256sum -c - \
   | tee "$log_dir/patch-sha256.log"
+test "$(stat -c '%s' "$patch_file")" -eq 21841
 
 git apply --index --check "$patch_file"
 git apply --index "$patch_file"
