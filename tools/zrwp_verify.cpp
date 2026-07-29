@@ -45,9 +45,9 @@ bool zero(const std::uint8_t* data, std::size_t size) {
     std::uint8_t value = 0; for (std::size_t i = 0; i < size; ++i) value = static_cast<std::uint8_t>(value | data[i]); return value == 0;
 }
 bool canonical_path(const Record& record) {
-    if (!record.path_length || record.path_length >= sizeof(record.path) || record.path[record.path_length] != '\0') return false;
-    for (std::size_t i = 0U; i < record.path_length; ++i) if (record.path[i] == '\0') return false;
-    return security_policy_format::canonical_absolute_path(record.path, sizeof(record.path), false);
+    return security_policy_format::canonical_absolute_path_with_length(
+        record.path, static_cast<unsigned int>(sizeof(record.path)),
+        static_cast<unsigned int>(record.path_length), false);
 }
 bool canonical_path_self_test() {
     Record valid{};
@@ -58,6 +58,9 @@ bool canonical_path_self_test() {
     Record early_nul = valid;
     early_nul.path_length = static_cast<std::uint16_t>(valid.path_length + 1U);
 
+    Record short_length = valid;
+    short_length.path_length = static_cast<std::uint16_t>(valid.path_length - 1U);
+
     Record unterminated{};
     unterminated.path_length = static_cast<std::uint16_t>(sizeof(unterminated.path) - 1U);
     for (std::size_t i = 0U; i < sizeof(unterminated.path); ++i) unterminated.path[i] = 'x';
@@ -66,7 +69,8 @@ bool canonical_path_self_test() {
     Record out_of_range = valid;
     out_of_range.path_length = static_cast<std::uint16_t>(sizeof(out_of_range.path));
 
-    return canonical_path(valid) && !canonical_path(early_nul) && !canonical_path(unterminated) && !canonical_path(out_of_range);
+    return canonical_path(valid) && !canonical_path(early_nul) && !canonical_path(short_length) &&
+        !canonical_path(unterminated) && !canonical_path(out_of_range);
 }
 }
 
