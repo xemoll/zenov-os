@@ -109,19 +109,9 @@ bool rsa_pss_verify(const uint8_t signature[signature_bytes], const uint8_t dige
 }
 
 bool record_name_valid(const Record& record) {
-    if (record.type < record_trusted || record.type > record_revoked || record.flags != 0U ||
-        !record.name_length || record.name_length >= sizeof(record.name) || record.name[record.name_length] != 0) return false;
-    for (uint32_t i = 0U; i < record.name_length; ++i) {
-        const uint8_t byte = static_cast<uint8_t>(record.name[i]);
-        if (byte < 0x20U || byte > 0x7EU) return false;
-    }
+    if (!record.name_length || record.name_length >= sizeof(record.name) || record.name[record.name_length] != 0) return false;
     for (uint32_t i = record.name_length + 1U; i < sizeof(record.name); ++i) if (record.name[i] != 0) return false;
-    if (record.type == record_trusted) {
-        return security_policy_format::canonical_absolute_path_with_length(
-            record.name, static_cast<unsigned int>(sizeof(record.name)),
-            static_cast<unsigned int>(record.name_length), false);
-    }
-    return true;
+    return record.type >= record_trusted && record.type <= record_revoked && record.flags == 0;
 }
 int32_t compiled_trust_index(const Record& record) {
     if (record.type != record_trusted) return -1;
@@ -199,24 +189,36 @@ void build_result(security_guard::ScanResult& result, const char* path, const ui
     else storage::path_copy(result.path, path ? path : "<memory>", sizeof(result.path));
     storage::path_copy(result.signature, signature, sizeof(result.signature));
 }
-
-bool scan(const char* path, const uint8_t* data, uint32_t size, security_guard::ScanResult& result) {
-    if (!ready || (!data && size)) return false;
-    uint8_t digest[32]; security_guard::sha256(data, size, digest);
-    if (matching_record(record_revoked, digest)) { build_result(result, path, digest, security_guard::Verdict::untrusted, "ZenovGuard.Revoked", size); return true; }
-    const Record* threat = matching_record(record_threat, digest);
-    if (threat) { build_result(result, path, digest, security_guard::Verdict::infected, threat->name, size); return true; }
-    const Record* trusted = matching_record(record_trusted, digest);
-    if (trusted && path && string_equal(path, trusted->name)) { build_result(result, path, digest, security_guard::Verdict::trusted, "ZenovGuard.SignedDB", size); return true; }
-    build_result(result, path, digest, security_guard::Verdict::untrusted, "ZenovGuard.Untrusted", size); return true;
+bool quarantine_detected(const security_guard::ScanResult& result) {
+    if (!security_guard::ensure_quarantine_directory() || security_guard::starts_with_quarantine(result.path)) return false;
+    char destination[48]; security_guard::build_quarantine_path(result.digest, destination);
+    if (!storage::rename_entry(result.path, destination)) return false;
+    ++security_guard::quarantined; security_guard::record(security_guard::AuditAction::quarantine, result);
+    security_guard::serial_decision("ZENOV_GUARD_QUARANTINE_OK", result); return true;
 }
 
-const char* validation_name(Validation value) {
-    switch (value) {
+bool precheck(const char* path, const uint8_t* data, uint32_t size) {
+    if (!ready) { serial::line("ZGDB_POLICY_NOT_READY"); return false; }
+    uint8_t digest[32]; security_guard::sha256(data, size, digest);
+    if (const Record* revoked = matching_record(record_revoked, digest)) {
+        security_guard::ScanResult result{}; build_result(result, path, digest, security_guard::Verdict::untrusted, revoked->name, size);
+        security_guard::record(security_guard::AuditAction::execute, result);
+        serial::write("ZGDB_REVOCATION_BLOCKED path="); serial::write(result.path); serial::write(" rule="); serial::line(revoked->name); return false;
+    }
+    if (const Record* threat = matching_record(record_threat, digest)) {
+        security_guard::ScanResult result{}; build_result(result, path, digest, security_guard::Verdict::infected, threat->name, size);
+        security_guard::record(security_guard::AuditAction::execute, result); security_guard::serial_decision("ZENOV_GUARD_DETECTED", result);
+        (void)quarantine_detected(result); return false;
+    }
+    return true;
+}
+
+const char* validation_name(Validation validation) {
+    switch (validation) {
         case Validation::digest: return "payload-digest"; case Validation::signature: return "pss-signature";
         case Validation::rollback: return "rollback"; case Validation::sequence: return "non-sequential";
-        case Validation::engine: return "engine"; case Validation::key: return "unknown-key"; case Validation::trust: return "trust-bijection";
-        default: return "malformed";
+        case Validation::engine: return "engine"; case Validation::key: return "unknown-key";
+        case Validation::trust: return "trust-baseline"; default: return "malformed";
     }
 }
 
@@ -224,27 +226,27 @@ bool update(const char* candidate_path) {
     Validation validation{}; uint32_t next_version = 0U;
     if (!security_policy_format::next_version(active_policy_version, next_version)) {
         serial::line("ZGDB_SEQUENCE_REJECTED reason=version-exhausted"); return false;
-    }
-    uint32_t candidate_version = 0, candidate_count = 0;
-    if (!candidate_path || !*candidate_path || !read_database(candidate_path, next_version, validation, candidate_version, candidate_count)) {
+    } uint32_t version = 0, count = 0;
+    if (!candidate_path || !*candidate_path || !read_database(candidate_path, next_version, validation, version, count)) {
         if (validation == Validation::rollback) serial::write("ZGDB_ROLLBACK_REJECTED reason=");
         else if (validation == Validation::key) serial::write("ZGDB_KEY_REJECTED reason=");
-        else serial::write("ZGDB_TAMPER_REJECTED reason="); serial::line(validation_name(validation)); return false;
+        else serial::write("ZGDB_TAMPER_REJECTED reason=");
+        serial::line(validation_name(validation)); return false;
     }
-    if (candidate_version != next_version) { serial::line("ZGDB_SEQUENCE_REJECTED reason=non-sequential"); return false; }
-    uint32_t candidate_size = 0;
-    if (!storage::read_file(candidate_path, process::application_buffer, max_database_bytes, candidate_size)) return false;
-    uint32_t final_version = 0, final_count = 0;
-    validation = validate(process::application_buffer, candidate_size, next_version, candidate_records, final_count, final_version);
-    if (validation != Validation::okay || final_version != candidate_version || final_count != candidate_count) return false;
-    if (!storage::write_file("/security/zenovguard.zgdb", process::application_buffer, candidate_size, false)) return false;
-    if (!write_version(candidate_version)) return false;
-    activate(candidate_records, candidate_count, candidate_version); persistent_policy_version = candidate_version; ready = true;
-    serial::write("ZGDB_ATOMIC_UPDATE_OK version="); process::serial_u32(candidate_version); serial::write("\r\n"); return true;
+    if (version != next_version) { serial::line("ZGDB_SEQUENCE_REJECTED reason=non-sequential"); return false; }
+    uint32_t size = 0;
+    if (!storage::read_file(candidate_path, process::application_buffer, max_database_bytes, size)) return false;
+    uint32_t final_count = 0, final_version = 0;
+    validation = validate(process::application_buffer, size, next_version, candidate_records, final_count, final_version);
+    if (validation != Validation::okay || final_version != version || final_count != count) return false;
+    if (!storage::write_file("/security/zenovguard.zgdb", process::application_buffer, size, false)) return false;
+    if (!write_version(version)) return false;
+    activate(candidate_records, count, version); persistent_policy_version = version; ready = true;
+    serial::write("ZGDB_ATOMIC_UPDATE_OK version="); process::serial_u32(version); serial::write("\r\n"); return true;
 }
 
 bool init() {
-    uint8_t version_buffer[16]{}; uint32_t version_size = 0;
+    uint8_t version_buffer[16]{}; uint32_t version_size = 0U;
     if (!storage::read_file("/security/zenovguard.version", version_buffer, sizeof(version_buffer), version_size) ||
         !parse_version(version_buffer, version_size, persistent_policy_version)) {
         serial::line("ZGDB_INIT_FAILED reason=version-state"); ready = false; return false;
@@ -255,15 +257,16 @@ bool init() {
     activate(candidate_records, count, version);
     if (persistent_policy_version < version && !write_version(version)) { ready = false; return false; }
     persistent_policy_version = version; ready = true;
-    serial::line("ZGDB_ROOT_KEY_OK id=f5d3fbd8b45c086a"); serial::line("ZGDB_PSS_SIGNATURE_OK");
-    serial::write("ZGDB_POLICY_VERSION_OK version="); process::serial_u32(version); serial::write("\r\n");
-    serial::write("ZGDB_RECORDS_OK count="); process::serial_u32(active_record_count); serial::write("\r\n"); return true;
+    serial::line("ZGDB_ROOT_KEY_OK id=6f788074c018f5aa"); serial::line("ZGDB_PSS_SIGNATURE_OK");
+    serial::write("ZGDB_POLICY_VERSION_OK version="); process::serial_u32(version); serial::write("\r\n"); serial::line("ZGDB_READY"); return true;
 }
 
 void print_status() {
-    console::write("  Trust DB       "); console::line(ready ? "signature-valid / enforced" : "unavailable / fail-closed");
-    console::write("  Policy         "); console::unsigned_dec(active_policy_version); console::put('\n');
-    console::write("  Root ID        "); console::line("f5d3fbd8b45c086a");
-    console::write("  Records        "); console::unsigned_dec(active_record_count); console::put('\n');
+    console::write("  Database      "); console::line(ready ? "signature-valid / enforced" : "unavailable / execution locked");
+    console::write("  Policy        "); console::unsigned_dec(active_policy_version); console::put('\n');
+    console::write("  Floor         "); console::unsigned_dec(compiled_policy_floor); console::put('\n');
+    console::write("  Records       "); console::unsigned_dec(active_record_count); console::put('\n');
+    console::line("  Root ID       6f788074c018f5aa");
+    console::line("  Signature     RSA-2048 / PSS / SHA-256 / salt-32");
 }
 } // namespace zgdb
