@@ -1,6 +1,8 @@
+#define init init_unhardened
 #define update update_unhardened
 #include "zgdb_policy.inc"
 #undef update
+#undef init
 
 namespace zgdb {
 bool transaction_write_version(uint32_t value) {
@@ -8,6 +10,50 @@ bool transaction_write_version(uint32_t value) {
     uint32_t count = 0U;
     if (!security_policy_format::format_nonzero_decimal_u32(value, text, sizeof(text), count)) return false;
     return storage::write_file("/security/zenovguard.version", reinterpret_cast<const uint8_t*>(text), count, false);
+}
+
+bool init() {
+    uint8_t version_buffer[16]{};
+    uint32_t version_size = 0U;
+    if (!storage::read_file("/security/zenovguard.version", version_buffer,
+            sizeof(version_buffer), version_size) ||
+        !parse_version(version_buffer, version_size, persistent_policy_version)) {
+        serial::line("ZGDB_INIT_FAILED reason=version-state");
+        ready = false;
+        return false;
+    }
+
+    uint32_t minimum = compiled_policy_floor;
+    if (persistent_policy_version > minimum) minimum = persistent_policy_version;
+    Validation validation{};
+    uint32_t version = 0U, count = 0U;
+    if (!read_database("/security/zenovguard.zgdb", minimum,
+            validation, version, count)) {
+        serial::write("ZGDB_INIT_FAILED reason=");
+        serial::line(validation_name(validation));
+        ready = false;
+        return false;
+    }
+
+    activate(candidate_records, count, version);
+    if (persistent_policy_version < version &&
+        (!transaction_write_version(version) ||
+         !security_policy_transaction::version_matches(
+             "/security/zenovguard.version", version) ||
+         !storage::sync_metadata())) {
+        ready = false;
+        serial::line("ZGDB_INIT_FAILED reason=version-commit");
+        return false;
+    }
+    persistent_policy_version = version;
+    ready = true;
+    serial::line("ZGDB_ROOT_KEY_OK id=6f788074c018f5aa");
+    serial::line("ZGDB_PSS_SIGNATURE_OK");
+    serial::write("ZGDB_POLICY_VERSION_OK version=");
+    process::serial_u32(version);
+    serial::write("\r\n");
+    serial::line("ZGDB_READY");
+    return true;
 }
 
 bool transaction_restore_update(uint32_t previous_version, uint32_t previous_size) {
