@@ -39,15 +39,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build/sanitized
+          mkdir -p ci-artifacts ci-logs
+          clang++ --version | tee ci-logs/clang-version.txt
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
             -fsanitize=address,undefined,unsigned-integer-overflow,implicit-conversion \
             -fno-sanitize-recover=all -fno-omit-frame-pointer \
-            tests/security_policy_format_test.cpp -o build/sanitized/security-policy-format-test
+            tests/security_policy_format_test.cpp -o ci-artifacts/security-policy-format-test
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
           UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
-            build/sanitized/security-policy-format-test | tee build/security-policy-format-test.log
-          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=11 version-wrap=blocked' build/security-policy-format-test.log
+            ci-artifacts/security-policy-format-test | tee ci-logs/security-policy-format-test.log
+          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=11 version-wrap=blocked' ci-logs/security-policy-format-test.log
 
       - name: Run strict host and freestanding checks
         run: make clean check
@@ -72,6 +73,8 @@ jobs:
           grep -Fq 'ASSERT(__kernel_end <= 0x000A0000' kernel/linker.ld
           grep -Fq '"zvrt_root_key_id": "d28215ec62269ffc"' build/build-manifest.json
           grep -Fq 'ZENOV_ZVRT_QEMU_OK valid=yes manifest_fail_closed=yes data_blocked=yes payload_disclosure=no multichunk=2 audit=durable' build/qemu/zvrt/summary.log
+          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=11 version-wrap=blocked' ci-logs/security-policy-format-test.log
+          test -x ci-artifacts/security-policy-format-test
           echo 'ZVRT_SOURCE_CONTRACT_OK schema=1 pss=sha256-salt32 chunk=4096 records=4 leaves=5 typed-failure=yes'
 
       - name: Upload ZVRT1 evidence
@@ -88,8 +91,9 @@ jobs:
             build/build-manifest.json
             build/verified-reads-*.zvrt
             build/qemu/zvrt/
-            build/security-policy-format-test.log
-            build/sanitized/security-policy-format-test
+            ci-logs/clang-version.txt
+            ci-logs/security-policy-format-test.log
+            ci-artifacts/security-policy-format-test
             kernel/parts/security_policy_format.inc
             tests/security_policy_format_test.cpp
             security/zvrt-root-public.pem
