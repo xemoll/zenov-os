@@ -136,3 +136,5 @@ $(BLOCK_STATUS_QEMU_STAMP): all tests/qemu_block_status.sh $(BUILD)/zenovfs-veri
 	@touch $@
 
 block-status-qemu: $(BLOCK_STATUS_QEMU_STAMP)
+
+include fs_surface.mk
