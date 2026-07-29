@@ -2,12 +2,21 @@
 set -euo pipefail
 
 QEMU="${QEMU:-qemu-system-i386}"
+QEMU_PHASE_TIMEOUT_SECONDS="${QEMU_PHASE_TIMEOUT_SECONDS:-150}"
+[[ "$QEMU_PHASE_TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || {
+  echo "qemu-zenpkg: QEMU_PHASE_TIMEOUT_SECONDS must be an integer" >&2
+  exit 2
+}
+(( QEMU_PHASE_TIMEOUT_SECONDS >= 30 && QEMU_PHASE_TIMEOUT_SECONDS <= 600 )) || {
+  echo "qemu-zenpkg: QEMU_PHASE_TIMEOUT_SECONDS must be between 30 and 600" >&2
+  exit 2
+}
 BOOT_IMAGE="${1:-build/zenov-os.img}"
 DATA_IMAGE="${2:-build/qemu/zenpkg-runtime.img}"
 OUT="${3:-build/qemu/zenpkg}"
 PROMPT="zenov> "
 mkdir -p "$OUT"
-rm -f "$OUT"/serial-*.log "$OUT"/monitor-*.log "$OUT"/qemu-*.stderr "$OUT"/serial.log
+rm -f "$OUT"/serial-*.log "$OUT"/monitor-*.log "$OUT"/qemu-*.stderr "$OUT"/serial.log "$OUT"/phase-timings.log
 
 wait_for_serial() {
   local file="$1" text="$2"
@@ -162,16 +171,20 @@ controller_final_removed_persists() {
 run_phase() {
   local controller="$1" name="$2"
   local serial="$OUT/serial-$name.log" monitor="$OUT/monitor-$name.log" stderr="$OUT/qemu-$name.stderr"
+  local started=$SECONDS
   set +e
-  "$controller" "$serial" | timeout 80s "$QEMU" \
+  "$controller" "$serial" | timeout --foreground --kill-after=5s "${QEMU_PHASE_TIMEOUT_SECONDS}s" "$QEMU" \
     -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
     -drive "file=$DATA_IMAGE,format=raw,if=ide,index=0,media=disk" \
     -boot a -m 32M -machine pc,vmport=off -vga std -display none \
     -serial "file:$serial" -monitor stdio -no-reboot -no-shutdown \
     >"$monitor" 2>"$stderr"
   local status=$?; set -e
+  local elapsed=$((SECONDS - started))
+  printf 'QEMU_ZENPKG_PHASE name=%s elapsed=%ss timeout=%ss status=%s\n' \
+    "$name" "$elapsed" "$QEMU_PHASE_TIMEOUT_SECONDS" "$status" | tee -a "$OUT/phase-timings.log"
   if [[ $status -ne 0 ]]; then
-    echo "qemu-zenpkg: phase $name failed with status $status" >&2
+    echo "qemu-zenpkg: phase $name failed with status $status after ${elapsed}s (limit ${QEMU_PHASE_TIMEOUT_SECONDS}s)" >&2
     cat "$monitor" >&2 || true; cat "$stderr" >&2 || true; cat "$serial" >&2 || true
     return 1
   fi
@@ -184,6 +197,10 @@ run_phase controller_removed_then_repository_install repository-install
 run_phase controller_repository_install_persists_and_remove repository-remove
 run_phase controller_final_removed_persists final-removed
 cat "$OUT"/serial-install.log "$OUT"/serial-remove.log "$OUT"/serial-repository-install.log "$OUT"/serial-repository-remove.log "$OUT"/serial-final-removed.log > "$OUT/serial.log"
+[[ "$(grep -c '^QEMU_ZENPKG_PHASE ' "$OUT/phase-timings.log")" -eq 5 ]] || {
+  echo "qemu-zenpkg: missing per-phase timing evidence" >&2
+  exit 1
+}
 
 for marker in \
   'ZENREPO_READY trust=verified packages=2' ZENREPO_PROTECTED_PATH_TEST_OK ZENREPO_STATUS_OK ZENREPO_TARGETS_OK PKG_REPOSITORY_CHECK_OK PKG_REPOSITORY_REFRESH_OK ZENPKG_SEARCH_OK ZENPKG_PLAN_INSTALL ZENREPO_POLICY_OK \
