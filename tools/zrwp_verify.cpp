@@ -49,6 +49,25 @@ bool canonical_path(const Record& record) {
     for (std::size_t i = 0U; i < record.path_length; ++i) if (record.path[i] == '\0') return false;
     return security_policy_format::canonical_absolute_path(record.path, sizeof(record.path), false);
 }
+bool canonical_path_self_test() {
+    Record valid{};
+    static constexpr char kValid[] = "/apps/file";
+    std::memcpy(valid.path, kValid, sizeof(kValid));
+    valid.path_length = static_cast<std::uint16_t>(sizeof(kValid) - 1U);
+
+    Record early_nul = valid;
+    early_nul.path_length = static_cast<std::uint16_t>(valid.path_length + 1U);
+
+    Record unterminated{};
+    unterminated.path_length = static_cast<std::uint16_t>(sizeof(unterminated.path) - 1U);
+    for (std::size_t i = 0U; i < sizeof(unterminated.path); ++i) unterminated.path[i] = 'x';
+    unterminated.path[0] = '/';
+
+    Record out_of_range = valid;
+    out_of_range.path_length = static_cast<std::uint16_t>(sizeof(out_of_range.path));
+
+    return canonical_path(valid) && !canonical_path(early_nul) && !canonical_path(unterminated) && !canonical_path(out_of_range);
+}
 }
 
 int main(int argc, char** argv) {
@@ -57,6 +76,7 @@ int main(int argc, char** argv) {
             std::cerr << "usage: zrwp-verify <policy.zrwp> --version N\n"; return 2;
         }
         const std::uint32_t expected = static_cast<std::uint32_t>(std::stoul(argv[3]));
+        if (!canonical_path_self_test()) throw std::runtime_error("canonical path self-test failed");
         if (!zenov_audit_host::sha256_self_test()) throw std::runtime_error("SHA-256 self-test failed");
         const auto bytes = read_all(argv[1]);
         if (bytes.size() < sizeof(Header) + 256U) throw std::runtime_error("truncated ZRWP");
