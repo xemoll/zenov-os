@@ -46,6 +46,7 @@ bool quarantine_write_metadata(const char*, const uint8_t*, uint32_t);
 bool quarantine_remove(const char*);
 }
 #include "parts/security_paths.inc"
+#include "parts/security_result_paths.inc"
 namespace package_manager {
 bool allow_execution(const char*, const uint8_t*, uint32_t);
 bool activate_capabilities(const char*, const uint8_t*, uint32_t);
@@ -88,9 +89,24 @@ bool sha256_self_test() { return security_guard::sha256_self_test(); }
 }
 #include "parts/rsa_pss.inc"
 #include "parts/package_format.inc"
+#define package_write_file package_write_file_recorded
+#define package_cache_write_partial package_cache_write_partial_recorded
+#define package_remove package_remove_recorded
+#define package_transport_remove package_transport_remove_recorded
+#define package_cache_remove package_cache_remove_recorded
+#define package_cache_rename package_cache_rename_recorded
+#define sync_metadata sync_metadata_recorded
 #include "parts/package_repository.inc"
 #include "parts/package_manager.inc"
+#undef sync_metadata
+#undef package_cache_rename
+#undef package_cache_remove
+#undef package_transport_remove
+#undef package_remove
+#undef package_cache_write_partial
+#undef package_write_file
 #include "parts/security_io.inc"
+#include "parts/storage_result_commands.inc"
 #include "parts/process_policy.inc"
 #include "parts/graphics.inc"
 #include "parts/mouse_regression.inc"
@@ -148,6 +164,8 @@ extern "C" void kernel_main() {
     if (!process::elf_policy_self_test()) panic("ELF W^X policy self-test failed.");
     serial::line("ELF_WX_POLICY_OK");
     storage::init_deadline();
+    if (!storage::fs_surface_contract_valid()) panic("Filesystem result surface contract failed.");
+    serial::line("ZENOVFS_SURFACE_CONTRACT_OK version=1");
     process::init();
     if (!security_audit::init()) panic("Persistent ZenovGuard audit journal validation failed.");
     if (!zgdb::init()) panic("Signed ZenovGuard database validation failed.");
