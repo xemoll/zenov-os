@@ -27,9 +27,19 @@ void fuzz_declared_paths() {
             byte = static_cast<char>(state & 0xFFU);
         }
         const uint32_t declared = state % 64U;
+        const uint32_t mode = call & 3U;
+        if (mode && declared < sizeof(data)) {
+            data[declared] = 0;
+            for (uint32_t i = declared + 1U; i < sizeof(data); ++i) data[i] = 0;
+        }
+        if (mode >= 2U && declared >= 2U && declared < sizeof(data)) {
+            data[0] = '/';
+            for (uint32_t i = 1U; i < declared; ++i) data[i] = static_cast<char>('a' + ((state + i) % 26U));
+            if (mode == 3U && declared > 6U) data[declared / 2U] = '/';
+        }
         (void)security_policy_format::canonical_absolute_path_with_length(data, sizeof(data), declared, false);
     }
-    std::cout << "SECURITY_POLICY_PATH_FUZZ_OK calls=400000\n";
+    std::cout << "SECURITY_POLICY_PATH_FUZZ_OK calls=400000 modes=raw,terminated,printable,segmented\n";
 }
 }
 
