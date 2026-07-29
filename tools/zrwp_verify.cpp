@@ -45,9 +45,9 @@ bool zero(const std::uint8_t* data, std::size_t size) {
     std::uint8_t value = 0; for (std::size_t i = 0; i < size; ++i) value = static_cast<std::uint8_t>(value | data[i]); return value == 0;
 }
 bool canonical_path(const Record& record) {
-    return record.path_length && record.path_length < sizeof(record.path) &&
-        std::strlen(record.path) == record.path_length &&
-        security_policy_format::canonical_absolute_path(record.path, sizeof(record.path), false);
+    if (!record.path_length || record.path_length >= sizeof(record.path) || record.path[record.path_length] != '\0') return false;
+    for (std::size_t i = 0U; i < record.path_length; ++i) if (record.path[i] == '\0') return false;
+    return security_policy_format::canonical_absolute_path(record.path, sizeof(record.path), false);
 }
 }
 
