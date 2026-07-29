@@ -31,13 +31,7 @@ uint32_t active_policy_version = 0, persistent_policy_version = 0;
 bool ready = false;
 
 bool canonical_string(const char* value, uint32_t capacity, bool allow_empty) {
-    if (!value || !capacity) return false;
-    uint32_t length = 0;
-    while (length < capacity && value[length]) ++length;
-    if (length == capacity || (!allow_empty && length == 0U)) return false;
-    for (uint32_t i = length + 1U; i < capacity; ++i) if (value[i] != 0) return false;
-    if (length && value[0] != '/') return false;
-    return true;
+    return security_policy_format::canonical_absolute_path(value, capacity, allow_empty);
 }
 
 const Record* find(const char* normalized_path) {
@@ -106,15 +100,8 @@ Validation validate(const uint8_t* data, uint32_t size, uint32_t minimum_version
     return Validation::okay;
 }
 
-uint32_t parse_version(const uint8_t* data, uint32_t size) {
-    uint32_t value = 0;
-    if (!data || !size) return 0;
-    for (uint32_t i = 0; i < size; ++i) {
-        if (data[i] == '\n' || data[i] == 0) break;
-        if (data[i] < '0' || data[i] > '9' || value > 1000000U) return 0;
-        value = value * 10U + static_cast<uint32_t>(data[i] - '0');
-    }
-    return value;
+bool parse_version(const uint8_t* data, uint32_t size, uint32_t& output) {
+    return security_policy_format::parse_nonzero_decimal_u32(data, size, output);
 }
 
 bool write_version(uint32_t value) {
@@ -156,22 +143,25 @@ const char* validation_name(Validation validation) {
 }
 
 bool update(const char* candidate_path) {
-    Validation validation{}; uint32_t version = 0;
-    if (!candidate_path || !*candidate_path || !read_policy(candidate_path, active_policy_version + 1U, validation, version)) {
+    Validation validation{}; uint32_t next_version = 0U;
+    if (!security_policy_format::next_version(active_policy_version, next_version)) {
+        serial::line("ZCAP_SEQUENCE_REJECTED reason=version-exhausted"); return false;
+    } uint32_t version = 0;
+    if (!candidate_path || !*candidate_path || !read_policy(candidate_path, next_version, validation, version)) {
         if (validation == Validation::rollback) serial::write("ZCAP_ROLLBACK_REJECTED reason=");
         else if (validation == Validation::key) serial::write("ZCAP_KEY_REJECTED reason=");
         else serial::write("ZCAP_TAMPER_REJECTED reason=");
         serial::line(validation_name(validation));
         return false;
     }
-    if (version != active_policy_version + 1U) {
+    if (version != next_version) {
         serial::line("ZCAP_SEQUENCE_REJECTED reason=non-sequential");
         return false;
     }
     uint32_t size = 0;
     if (!storage::read_file(candidate_path, process::application_buffer, max_policy_bytes, size)) return false;
     uint32_t final_version = 0;
-    validation = validate(process::application_buffer, size, active_policy_version + 1U, candidate_records, final_version);
+    validation = validate(process::application_buffer, size, next_version, candidate_records, final_version);
     if (validation != Validation::okay || final_version != version) return false;
     if (!storage::write_file("/security/syscall-capabilities.zcap", process::application_buffer, size, false)) return false;
     if (!write_version(version)) return false;
@@ -191,9 +181,11 @@ bool self_test() {
 }
 
 bool init() {
-    uint8_t version_buffer[16]; uint32_t version_size = 0;
-    persistent_policy_version = storage::read_file("/security/syscall-capabilities.version", version_buffer, sizeof(version_buffer), version_size)
-        ? parse_version(version_buffer, version_size) : 0U;
+    uint8_t version_buffer[16]{}; uint32_t version_size = 0U;
+    if (!storage::read_file("/security/syscall-capabilities.version", version_buffer, sizeof(version_buffer), version_size) ||
+        !parse_version(version_buffer, version_size, persistent_policy_version)) {
+        serial::line("ZCAP_INIT_FAILED reason=version-state"); ready = false; return false;
+    }
     uint32_t minimum = compiled_policy_floor;
     if (persistent_policy_version > minimum) minimum = persistent_policy_version;
     Validation validation{}; uint32_t version = 0;

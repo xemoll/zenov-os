@@ -84,15 +84,8 @@ Validation validate(const uint8_t* data, uint32_t size, uint32_t minimum_version
     return Validation::okay;
 }
 
-uint32_t parse_version(const uint8_t* data, uint32_t size) {
-    uint32_t value = 0U;
-    if (!data || !size) return 0U;
-    for (uint32_t i = 0U; i < size; ++i) {
-        if (data[i] == '\n' && i + 1U == size) break;
-        if (data[i] < '0' || data[i] > '9' || value > 429496729U) return 0U;
-        value = value * 10U + static_cast<uint32_t>(data[i] - '0');
-    }
-    return value;
+bool parse_version(const uint8_t* data, uint32_t size, uint32_t& output) {
+    return security_policy_format::parse_nonzero_decimal_u32(data, size, output);
 }
 
 bool write_version(uint32_t version) {
@@ -167,23 +160,26 @@ const char* validation_name(Validation validation) {
 }
 
 bool update(const char* candidate_path) {
-    Validation validation{};
+    Validation validation{}; uint32_t next_version = 0U;
+    if (!security_policy_format::next_version(active_database_version, next_version)) {
+        serial::line("ZMID_SEQUENCE_REJECTED reason=version-exhausted"); return false;
+    }
     uint32_t version = 0U, count = 0U;
-    if (!candidate_path || !*candidate_path || !read_database(candidate_path, active_database_version + 1U, validation, version, count)) {
+    if (!candidate_path || !*candidate_path || !read_database(candidate_path, next_version, validation, version, count)) {
         if (validation == Validation::rollback) serial::write("ZMID_ROLLBACK_REJECTED reason=");
         else if (validation == Validation::key) serial::write("ZMID_KEY_REJECTED reason=");
         else serial::write("ZMID_TAMPER_REJECTED reason=");
         serial::line(validation_name(validation));
         return false;
     }
-    if (version != active_database_version + 1U) {
+    if (version != next_version) {
         serial::line("ZMID_SEQUENCE_REJECTED reason=non-sequential");
         return false;
     }
     uint32_t size = 0U;
     if (!storage::read_file(candidate_path, process::application_buffer, max_database_bytes, size)) return false;
     uint32_t final_version = 0U, final_count = 0U;
-    validation = validate(process::application_buffer, size, active_database_version + 1U, candidate_records, final_count, final_version);
+    validation = validate(process::application_buffer, size, next_version, candidate_records, final_count, final_version);
     if (validation != Validation::okay || final_version != version || final_count != count) return false;
     if (!storage::write_file("/security/zenovguard-intelligence.zmid", process::application_buffer, size, false)) return false;
     if (!write_version(version)) return false;
@@ -222,10 +218,11 @@ bool self_test() {
 }
 
 bool init() {
-    uint8_t version_buffer[16];
-    uint32_t version_size = 0U;
-    persistent_database_version = storage::read_file("/security/zenovguard-intelligence.version", version_buffer, sizeof(version_buffer), version_size)
-        ? parse_version(version_buffer, version_size) : 0U;
+    uint8_t version_buffer[16]{}; uint32_t version_size = 0U;
+    if (!storage::read_file("/security/zenovguard-intelligence.version", version_buffer, sizeof(version_buffer), version_size) ||
+        !parse_version(version_buffer, version_size, persistent_database_version)) {
+        serial::line("ZMID_INIT_FAILED reason=version-state"); ready = false; return false;
+    }
     uint32_t minimum = compiled_database_floor;
     if (persistent_database_version > minimum) minimum = persistent_database_version;
     Validation validation{};

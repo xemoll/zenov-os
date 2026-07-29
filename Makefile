@@ -94,13 +94,16 @@ $(BUILD)/zcap-verify: tools/zcap_verify.cpp tools/zenov_audit_format.hpp securit
 $(BUILD)/zmid-verify: tools/zmid_verify.cpp tools/zenov_audit_format.hpp security/zmid_crypto_material.hpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tools/zmid_verify.cpp -o $@
 
-$(BUILD)/zrwp-verify: tools/zrwp_verify.cpp tools/zenov_audit_format.hpp security/zrwp_crypto_material.hpp | $(BUILD)
+$(BUILD)/zrwp-verify: tools/zrwp_verify.cpp tools/zenov_audit_format.hpp security/zrwp_crypto_material.hpp kernel/parts/security_policy_format.inc | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tools/zrwp_verify.cpp -o $@
+
+$(BUILD)/security-policy-format-test: tests/security_policy_format_test.cpp kernel/parts/security_policy_format.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tests/security_policy_format_test.cpp -o $@
 
 $(BUILD)/zvrt-builder: tools/zvrt_builder.cpp security/zvrt_crypto_material.hpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tools/zvrt_builder.cpp -o $@
 
-$(BUILD)/zvrt-verify: tools/zvrt_verify.cpp tools/zenov_audit_format.hpp security/zvrt_crypto_material.hpp | $(BUILD)
+$(BUILD)/zvrt-verify: tools/zvrt_verify.cpp tools/zenov_audit_format.hpp security/zvrt_crypto_material.hpp kernel/parts/security_policy_format.inc | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tools/zvrt_verify.cpp -o $@
 
 $(BUILD)/zenovfs-zvrt-corrupt: tools/zenovfs_zvrt_corrupt.cpp | $(BUILD)
@@ -468,7 +471,8 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  }' \
 	 '}' > $@
 
-check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(BUILD)/zenovfs-zvrt-verify $(BUILD)/zcap-verify $(BUILD)/zmid-verify $(BUILD)/zrwp-verify $(BUILD)/zvrt-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE) $(ZVRT_MANIFEST_CORRUPT_IMAGE) $(ZVRT_DATA_CORRUPT_IMAGE)
+check: $(BUILD)/security-policy-format-test $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(BUILD)/zenovfs-zvrt-verify $(BUILD)/zcap-verify $(BUILD)/zmid-verify $(BUILD)/zrwp-verify $(BUILD)/zvrt-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE) $(ZVRT_MANIFEST_CORRUPT_IMAGE) $(ZVRT_DATA_CORRUPT_IMAGE)
+	$(BUILD)/security-policy-format-test
 	$(BUILD)/zenov-stage0 --self-test
 	$(BUILD)/image-verify $(BUILD)/zenov-os.img
 	$(BUILD)/zenovfs-verify $(BUILD)/zenov-data.img

@@ -39,21 +39,7 @@ uint32_t verified_reads = 0U, blocked_reads = 0U, total_leaves = 0U, multichunk_
 bool ready = false;
 
 bool canonical_path(const char* value, uint32_t capacity) {
-    if (!value || capacity < 3U || value[0] != '/') return false;
-    uint32_t length = 0U;
-    while (length < capacity && value[length]) ++length;
-    if (length < 2U || length == capacity || value[length - 1U] == '/') return false;
-    for (uint32_t i = 0U; i < length; ++i) {
-        const uint8_t byte = static_cast<uint8_t>(value[i]);
-        if (byte < 0x20U || byte > 0x7eU || value[i] == '\\') return false;
-        if (i && value[i] == '/' && value[i - 1U] == '/') return false;
-    }
-    for (uint32_t i = length + 1U; i < capacity; ++i) if (value[i] != 0) return false;
-    for (uint32_t i = 0U; i + 2U < length; ++i) {
-        if (value[i] == '/' && value[i + 1U] == '.' &&
-            (value[i + 2U] == '/' || (value[i + 2U] == '.' && i + 3U < length && value[i + 3U] == '/'))) return false;
-    }
-    return true;
+    return security_policy_format::canonical_absolute_path(value, capacity, false);
 }
 
 bool digest_nonzero(const uint8_t value[32]) {
@@ -104,16 +90,8 @@ Validation validate(const uint8_t* data, uint32_t size, uint32_t minimum_version
     return Validation::okay;
 }
 
-uint32_t parse_version(const uint8_t* data, uint32_t size) {
-    if (!data || !size) return 0U;
-    uint32_t value = 0U, digits = 0U;
-    for (uint32_t i = 0U; i < size; ++i) {
-        if (data[i] == '\n' && i + 1U == size && digits) break;
-        if (data[i] < '0' || data[i] > '9' || value > 429496729U) return 0U;
-        value = value * 10U + static_cast<uint32_t>(data[i] - '0');
-        ++digits;
-    }
-    return digits ? value : 0U;
+bool parse_version(const uint8_t* data, uint32_t size, uint32_t& output) {
+    return security_policy_format::parse_nonzero_decimal_u32(data, size, output);
 }
 
 bool write_version(uint32_t version) {
@@ -282,10 +260,11 @@ bool self_test() {
 }
 
 bool init() {
-    uint8_t version_buffer[16]{};
-    uint32_t version_size = 0U;
-    persistent_manifest_version = storage::read_file("/security/verified-reads.version", version_buffer,
-        sizeof(version_buffer), version_size) ? parse_version(version_buffer, version_size) : 0U;
+    uint8_t version_buffer[16]{}; uint32_t version_size = 0U;
+    if (!storage::read_file("/security/verified-reads.version", version_buffer, sizeof(version_buffer), version_size) ||
+        !parse_version(version_buffer, version_size, persistent_manifest_version)) {
+        serial::line("ZVRT_INIT_FAILED reason=version-state"); ready = false; return false;
+    }
     uint32_t minimum = compiled_manifest_floor;
     if (persistent_manifest_version > minimum) minimum = persistent_manifest_version;
 

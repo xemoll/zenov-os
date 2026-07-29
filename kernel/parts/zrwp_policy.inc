@@ -52,9 +52,9 @@ bool zero_bytes(const uint8_t* data, uint32_t size) {
     uint8_t combined = 0U; for (uint32_t i = 0U; i < size; ++i) combined = static_cast<uint8_t>(combined | data[i]); return combined == 0U;
 }
 bool canonical_path(const Record& record) {
-    if (!record.path_length || record.path_length >= sizeof(record.path) || record.path[0] != '/' || record.path[record.path_length] != 0) return false;
-    for (uint32_t i = record.path_length + 1U; i < sizeof(record.path); ++i) if (record.path[i] != 0) return false;
-    return true;
+    return record.path_length && record.path_length < sizeof(record.path) &&
+        static_cast<uint32_t>(string_length(record.path)) == record.path_length &&
+        security_policy_format::canonical_absolute_path(record.path, sizeof(record.path), false);
 }
 bool path_matches(const char* path, const char* prefix) {
     if (!path || !prefix || !string_starts_with(path, prefix)) return false;
@@ -108,15 +108,8 @@ Validation validate(const uint8_t* data, uint32_t size, uint32_t minimum_version
     return Validation::okay;
 }
 
-uint32_t parse_version(const uint8_t* data, uint32_t size) {
-    uint32_t value = 0U;
-    if (!data || !size) return 0U;
-    for (uint32_t i = 0U; i < size; ++i) {
-        if (data[i] == '\n' && i + 1U == size) break;
-        if (data[i] < '0' || data[i] > '9' || value > 429496729U) return 0U;
-        value = value * 10U + static_cast<uint32_t>(data[i] - '0');
-    }
-    return value;
+bool parse_version(const uint8_t* data, uint32_t size, uint32_t& output) {
+    return security_policy_format::parse_nonzero_decimal_u32(data, size, output);
 }
 bool write_version(uint32_t version) {
     char text[12]{}; char reverse[10]{}; uint32_t count = 0U, value = version;
@@ -263,15 +256,18 @@ bool restore_update(const RuntimePolicy& previous, uint32_t previous_version, ui
 }
 
 bool update(const char* candidate_path) {
-    Validation validation{};
+    Validation validation{}; uint32_t next_version = 0U;
+    if (!security_policy_format::next_version(active.version, next_version)) {
+        serial::line("ZRWP_SEQUENCE_REJECTED reason=version-exhausted"); return false;
+    }
     RuntimePolicy proposed{};
-    if (!candidate_path || !*candidate_path || !read_policy(candidate_path, active.version + 1U, validation, proposed)) {
+    if (!candidate_path || !*candidate_path || !read_policy(candidate_path, next_version, validation, proposed)) {
         if (validation == Validation::rollback) serial::write("ZRWP_ROLLBACK_REJECTED reason=");
         else if (validation == Validation::key) serial::write("ZRWP_KEY_REJECTED reason=");
         else serial::write("ZRWP_TAMPER_REJECTED reason=");
         serial::line(validation_name(validation)); return false;
     }
-    if (proposed.version != active.version + 1U) { serial::line("ZRWP_SEQUENCE_REJECTED reason=non-sequential"); return false; }
+    if (proposed.version != next_version) { serial::line("ZRWP_SEQUENCE_REJECTED reason=non-sequential"); return false; }
 
     const RuntimePolicy previous = active;
     const uint32_t previous_version = persistent_policy_version;
@@ -283,13 +279,13 @@ bool update(const char* candidate_path) {
     uint32_t candidate_size = 0U;
     if (!storage::read_file(candidate_path, process::application_buffer, max_policy_bytes, candidate_size)) return false;
     RuntimePolicy final_policy{};
-    validation = validate(process::application_buffer, candidate_size, active.version + 1U, final_policy);
+    validation = validate(process::application_buffer, candidate_size, next_version, final_policy);
     if (validation != Validation::okay || final_policy.version != proposed.version) return false;
     if (!storage::write_file("/security/ransomware-policy.zrwp", process::application_buffer, candidate_size, false)) return false;
 
     uint32_t committed_size = 0U;
     if (!storage::read_file("/security/ransomware-policy.zrwp", process::application_buffer, max_policy_bytes, committed_size) ||
-        committed_size != candidate_size || validate(process::application_buffer, committed_size, active.version + 1U, final_policy) != Validation::okay ||
+        committed_size != candidate_size || validate(process::application_buffer, committed_size, next_version, final_policy) != Validation::okay ||
         final_policy.version != proposed.version) {
         (void)restore_update(previous, previous_version, previous_size);
         serial::line("ZRWP_UPDATE_READBACK_FAILED"); return false;
@@ -328,8 +324,10 @@ bool self_test() {
 
 bool init() {
     uint8_t version_buffer[16]{}; uint32_t version_size = 0U;
-    persistent_policy_version = storage::read_file("/security/ransomware-policy.version", version_buffer, sizeof(version_buffer), version_size)
-        ? parse_version(version_buffer, version_size) : 0U;
+    if (!storage::read_file("/security/ransomware-policy.version", version_buffer, sizeof(version_buffer), version_size) ||
+        !parse_version(version_buffer, version_size, persistent_policy_version)) {
+        serial::line("ZRWP_INIT_FAILED reason=version-state"); ready = false; return false;
+    }
     uint32_t minimum = persistent_policy_version > compiled_policy_floor ? persistent_policy_version : compiled_policy_floor;
     Validation validation{}; RuntimePolicy loaded{};
     if (!read_policy("/security/ransomware-policy.zrwp", minimum, validation, loaded)) {
