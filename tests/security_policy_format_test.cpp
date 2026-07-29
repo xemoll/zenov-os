@@ -15,6 +15,32 @@ bool parse(const char (&text)[N], uint32_t& value) {
     return security_policy_format::parse_nonzero_decimal_u32(
         reinterpret_cast<const uint8_t*>(text), static_cast<uint32_t>(N - 1U), value);
 }
+
+void fuzz_declared_paths() {
+    uint32_t state = 0x7F4A7C15U;
+    char data[48]{};
+    for (uint32_t call = 0U; call < 400000U; ++call) {
+        for (char& byte : data) {
+            state ^= state << 13U;
+            state ^= state >> 17U;
+            state ^= state << 5U;
+            byte = static_cast<char>(state & 0xFFU);
+        }
+        const uint32_t declared = state % 64U;
+        const uint32_t mode = call & 3U;
+        if (mode && declared < sizeof(data)) {
+            data[declared] = 0;
+            for (uint32_t i = declared + 1U; i < sizeof(data); ++i) data[i] = 0;
+        }
+        if (mode >= 2U && declared >= 2U && declared < sizeof(data)) {
+            data[0] = '/';
+            for (uint32_t i = 1U; i < declared; ++i) data[i] = static_cast<char>('a' + ((state + i) % 26U));
+            if (mode == 3U && declared > 6U) data[declared / 2U] = '/';
+        }
+        (void)security_policy_format::canonical_absolute_path_with_length(data, sizeof(data), declared, false);
+    }
+    std::cout << "SECURITY_POLICY_PATH_FUZZ_OK calls=400000 modes=raw,terminated,printable,segmented\n";
+}
 }
 
 int main() {
@@ -65,6 +91,7 @@ int main() {
         require(!security_policy_format::canonical_absolute_path(root, sizeof(root)), "reject root-only path");
         require(!security_policy_format::canonical_absolute_path(high_ascii, sizeof(high_ascii)), "reject non-ASCII path");
         require(!security_policy_format::canonical_absolute_path(unterminated, sizeof(unterminated)), "reject unterminated path");
+        require(string_length(unterminated) == sizeof(unterminated), "bound fixed-array string length");
 
         char declared_valid[16] = "/apps/file";
         require(security_policy_format::canonical_absolute_path_with_length(declared_valid, sizeof(declared_valid), 10U),
@@ -79,7 +106,8 @@ int main() {
         require(!security_policy_format::canonical_absolute_path_with_length(declared_padded, sizeof(declared_padded), 10U),
                 "reject nonzero bytes after declared terminator");
 
-        std::cout << "SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 declared-length=5 version-wrap=blocked\n";
+        fuzz_declared_paths();
+        std::cout << "SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 declared-length=5 bounded-array=yes version-wrap=blocked\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "security-policy-format-test: " << error.what() << '\n';
