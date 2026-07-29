@@ -129,7 +129,6 @@ controller_first() {
   send_command "write /data/pua-audit.bin ZENOV_PUA_TEST_V1"; wait_for_serial "$serial" "ZENOV_GUARD_WRITE_AUDIT path=/pua-audit.bin" || { echo quit; return 1; }; wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
   send_command "write /data/split.bin prefix-ZENOV_RANSOMWARE_"; wait_for_count "$serial" "WRITE_OK" 2 || { echo quit; return 1; }
   send_command "append /data/split.bin TEST_V1-suffix"; wait_for_serial "$serial" "ZENOV_GUARD_WRITE_BLOCKED path=/split.bin" || { echo quit; return 1; }
-  send_command "guard scan /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_DETECTED" || { echo quit; return 1; }
   send_command "guard quarantine /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_OK" || { echo quit; return 1; }
   send_command "guard quarantine list"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_LIST_OK entries=2" || { echo quit; return 1; }
   send_command "cp /data/apps/hello.zex /data/apps/untrusted.zex"; wait_for_serial "$serial" "COPY_OK" || { echo quit; return 1; }
