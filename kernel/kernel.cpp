@@ -14,6 +14,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/memory_compare.inc"
 #include "parts/hardware.inc"
 #include "parts/hardware_irq_staging.inc"
+#include "parts/supervisor_layout.inc"
 #include "parts/memory.inc"
 #include "parts/graphics_mapping.inc"
 #include "parts/user_window.inc"
@@ -81,6 +82,7 @@ namespace security_audit { bool append(uint32_t, uint8_t, uint8_t, const char*, 
 #include "parts/process_capabilities.inc"
 #include "parts/process_package_capabilities.inc"
 #include "parts/zrwp_policy.inc"
+#include "parts/zvrt_policy.inc"
 namespace crypto {
 constexpr uint32_t sha256_bytes = security_guard::sha256_bytes;
 void sha256(const uint8_t* data, uint32_t size, uint8_t output[sha256_bytes]) { security_guard::sha256(data, size, output); }
@@ -172,6 +174,7 @@ extern "C" void kernel_main() {
     if (!zcap::init()) panic("Signed syscall capability policy validation failed.");
     if (!zmid::init()) panic("Signed malware intelligence validation failed.");
     if (!zrwp::init()) panic("Signed ransomware policy validation failed.");
+    if (!zvrt::init()) panic("Signed verified-read manifest validation failed.");
     if (!security_guard::init()) panic("ZenovGuard cryptographic, intelligence or audit self-test failed.");
     if (!process::capability_init()) panic("Per-application syscall capability policy validation failed.");
     if (!package_repository::init()) panic("Signed ZenRepo metadata validation failed.");
@@ -185,6 +188,8 @@ extern "C" void kernel_main() {
     if (storage::guarded_write_file("/security/zenovguard-intelligence.version", &mutation_probe, 1U, false)) panic("Malware intelligence version mutation guard failed.");
     if (storage::guarded_write_file("/security/ransomware-policy.zrwp", &mutation_probe, 1U, false)) panic("Active ransomware policy mutation guard failed.");
     if (storage::guarded_write_file("/security/ransomware-policy.version", &mutation_probe, 1U, false)) panic("Ransomware policy version mutation guard failed.");
+    if (storage::guarded_write_file("/security/verified-reads.zvrt", &mutation_probe, 1U, false)) panic("Verified-read manifest mutation guard failed.");
+    if (storage::guarded_write_file("/security/verified-reads.version", &mutation_probe, 1U, false)) panic("Verified-read version mutation guard failed.");
     if (storage::guarded_write_file("/quarantine/security-probe.qtn", &mutation_probe, 1U, false)) panic("Quarantine mutation guard failed.");
     if (storage::guarded_write_file("/security/zenovguard.audit", &mutation_probe, 1U, false)) panic("Persistent security audit mutation guard failed.");
     if (storage::guarded_write_file("/repo/timestamp.zrm", &mutation_probe, 1U, false)) panic("Signed repository metadata mutation guard failed.");
@@ -214,7 +219,7 @@ extern "C" void kernel_main() {
     if (graphical && mouse_ready && !mouse_decoder_regression()) panic("PS/2 mouse decoder regression failed.");
     if (graphical && mouse_ready) serial::line("PS2_MOUSE_DECODER_OK");
 
-    serial::line("Kernel online. Desktop, signed policies, persistent audit, syscall capabilities, signed malware intelligence, controlled-folder defense, packages, security, storage and ring-3 services ready.");
+    serial::line("Kernel online. Desktop, signed policies, persistent audit, syscall capabilities, signed malware intelligence, authenticated reads, controlled-folder defense, packages, security, storage and ring-3 services ready.");
     console::show_home();
     if (graphical) graphics::sync_terminal_from_console();
     serial::line("ZENOVOS_UI_READY");

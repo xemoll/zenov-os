@@ -30,6 +30,8 @@ ZMID_FILES := $(BUILD)/zenovguard-intelligence-v1.zmid $(BUILD)/zenovguard-intel
 ZRWP_V1_SHA256 := e8fd9fd9542d2218265ca1300b948d0564b5ab2d4e75a6e43c13498d95caacec
 ZRWP_V2_SHA256 := 6506d1ece8322d72de3ca1a19846662b1622d839068497a17468a4af5a9b42da
 ZRWP_FILES := $(BUILD)/ransomware-policy-v1.zrwp $(BUILD)/ransomware-policy-v2.zrwp $(BUILD)/ransomware-policy-tampered.zrwp $(BUILD)/ransomware-policy-wrong-key.zrwp
+ZVRT_V1_SHA256 := f5b3917371666719439cd1b8cdd579d71cced540c3637c283ed4ba8daedc22b5
+ZVRT_FILES := $(BUILD)/verified-reads-v1.zvrt $(BUILD)/verified-reads-tampered.zvrt $(BUILD)/verified-reads-wrong-key.zvrt
 AUDIT_FAULT_STAMP := $(BUILD)/audit-cow-fault.stamp
 AUDIT_OLD_RECOVERY_IMAGE := $(BUILD)/qemu/zenov-data-audit-old-recovery.img
 AUDIT_NEW_RECOVERY_IMAGE := $(BUILD)/qemu/zenov-data-audit-new-recovery.img
@@ -37,8 +39,10 @@ AUDIT_CORRUPT_IMAGE := $(BUILD)/qemu/zenov-data-audit-corrupt.img
 ZCAP_CORRUPT_IMAGE := $(BUILD)/qemu/zenov-data-zcap-corrupt.img
 ZMID_CORRUPT_IMAGE := $(BUILD)/qemu/zenov-data-zmid-corrupt.img
 ZRWP_CORRUPT_IMAGE := $(BUILD)/qemu/zenov-data-zrwp-corrupt.img
+ZVRT_MANIFEST_CORRUPT_IMAGE := $(BUILD)/qemu/zenov-data-zvrt-manifest-corrupt.img
+ZVRT_DATA_CORRUPT_IMAGE := $(BUILD)/qemu/zenov-data-zvrt-data-corrupt.img
 
-.PHONY: all clean check test qemu deterministic inspect
+.PHONY: all clean check test qemu zvrt-qemu deterministic inspect
 
 all: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(BUILD)/build-manifest.json
 
@@ -92,6 +96,18 @@ $(BUILD)/zmid-verify: tools/zmid_verify.cpp tools/zenov_audit_format.hpp securit
 
 $(BUILD)/zrwp-verify: tools/zrwp_verify.cpp tools/zenov_audit_format.hpp security/zrwp_crypto_material.hpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tools/zrwp_verify.cpp -o $@
+
+$(BUILD)/zvrt-builder: tools/zvrt_builder.cpp security/zvrt_crypto_material.hpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tools/zvrt_builder.cpp -o $@
+
+$(BUILD)/zvrt-verify: tools/zvrt_verify.cpp tools/zenov_audit_format.hpp security/zvrt_crypto_material.hpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tools/zvrt_verify.cpp -o $@
+
+$(BUILD)/zenovfs-zvrt-corrupt: tools/zenovfs_zvrt_corrupt.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tools/zenovfs_zvrt_corrupt.cpp -o $@
+
+$(BUILD)/zenovfs-zvrt-verify: tools/zenovfs_zvrt_verify.cpp tools/zenov_audit_format.hpp security/zvrt_crypto_material.hpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) tools/zenovfs_zvrt_verify.cpp -o $@
 
 $(BUILD)/ransomware-policy-test: tests/ransomware_policy_test.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) tests/ransomware_policy_test.cpp -o $@
@@ -212,6 +228,19 @@ $(BUILD)/zrwp.stamp: $(BUILD)/zrwp-builder $(BUILD)/zrwp-verify $(BUILD)/ransomw
 $(ZRWP_FILES): $(BUILD)/zrwp.stamp
 	@test -s $@
 
+$(BUILD)/zvrt.stamp: $(BUILD)/zvrt-builder $(BUILD)/zvrt-verify security/zvrt_crypto_material.hpp security/zvrt-root-public.pem | $(BUILD)
+	$(BUILD)/zvrt-builder $(BUILD)/verified-reads-v1.zvrt $(BUILD)/verified-reads-tampered.zvrt $(BUILD)/verified-reads-wrong-key.zvrt
+	@printf '%s  %s\n' '$(ZVRT_V1_SHA256)' '$(BUILD)/verified-reads-v1.zvrt' | sha256sum -c -
+	$(BUILD)/zvrt-verify $(BUILD)/verified-reads-v1.zvrt --version 1
+	@head -c -256 $(BUILD)/verified-reads-v1.zvrt > $(BUILD)/zvrt-v1.signed
+	@tail -c 256 $(BUILD)/verified-reads-v1.zvrt > $(BUILD)/zvrt-v1.signature
+	$(OPENSSL) dgst -sha256 -verify security/zvrt-root-public.pem -signature $(BUILD)/zvrt-v1.signature -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 $(BUILD)/zvrt-v1.signed
+	@for negative in tampered wrong-key; do if $(BUILD)/zvrt-verify $(BUILD)/verified-reads-$$negative.zvrt --version 1 >/dev/null 2>&1; then echo "negative ZVRT fixture unexpectedly passed: $$negative" >&2; exit 1; fi; done
+	@touch $@
+
+$(ZVRT_FILES): $(BUILD)/zvrt.stamp
+	@test -s $@
+
 $(BUILD)/generated/zenov_config.hpp: kernel/main.zv $(ZENOV_CONFIG_SRC) $(BUILD)/zenov-stage0 | $(BUILD)
 	$(BUILD)/zenov-stage0 kernel/main.zv -o $@
 
@@ -232,7 +261,7 @@ $(BUILD)/interrupts.o: kernel/interrupts.S | $(BUILD)
 $(BUILD)/user-runtime.o: kernel/user.S | $(BUILD)
 	$(AS) --32 $< -o $@
 
-$(BUILD)/kernel.o: kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp $(BUILD)/generated/zenov_config.hpp | $(BUILD)
+$(BUILD)/kernel.o: kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp security/zvrt_crypto_material.hpp $(BUILD)/generated/zenov_config.hpp | $(BUILD)
 	$(HOST_CXX) $(KERNEL_FLAGS) -c $< -o $@
 
 $(BUILD)/kernel.elf: $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/kernel.o kernel/linker.ld
@@ -301,8 +330,8 @@ $(BUILD)/ZENOVAPP.ZEX: user/hello_zenov.zv $(BUILD)/zenov-app-compiler
 
 USER_APPS := $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF $(BUILD)/ARGS.ELF $(BUILD)/CONSOLE.ELF $(BUILD)/PROTECT.ELF $(BUILD)/KACCESS.ELF $(BUILD)/ZENOVAPP.ZEX
 
-$(BUILD)/zenov-data.img: $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
-	$(BUILD)/zenovfs-builder $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $@
+$(BUILD)/zenov-data.img: $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $(ZVRT_FILES) $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
+	$(BUILD)/zenovfs-builder $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $(ZVRT_FILES) $@
 	@test "$$(stat -c%s $@)" -eq 16777216
 	@test "$$(od -An -tc -N8 $@ | tr -d ' \n')" = "ZENOVFS1"
 	$(BUILD)/zenovfs-verify $@
@@ -336,12 +365,24 @@ $(ZRWP_CORRUPT_IMAGE): $(BUILD)/zenov-data.img $(BUILD)/zenovfs-zrwp-corrupt $(B
 	$(BUILD)/zenovfs-verify $@
 	@test -s $@
 
-$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp tools/zcap_builder.cpp tools/zcap_verify.cpp tools/zmid_builder.cpp tools/zmid_verify.cpp tools/zrwp_builder.cpp tools/zrwp_verify.cpp tools/zenovfs_audit_verify.cpp tools/zenovfs_audit_fault_test.cpp security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp security/zenovguard-root-public.pem security/zcap-root-public.pem security/zmid-root-public.pem security/zrwp-root-public.pem
+$(ZVRT_MANIFEST_CORRUPT_IMAGE): $(BUILD)/zenov-data.img $(BUILD)/zenovfs-zvrt-corrupt $(BUILD)/zenovfs-verify
+	@mkdir -p $(BUILD)/qemu
+	$(BUILD)/zenovfs-zvrt-corrupt $(BUILD)/zenov-data.img $@ manifest
+	$(BUILD)/zenovfs-verify $@
+	@test -s $@
+
+$(ZVRT_DATA_CORRUPT_IMAGE): $(BUILD)/zenov-data.img $(BUILD)/zenovfs-zvrt-corrupt $(BUILD)/zenovfs-verify
+	@mkdir -p $(BUILD)/qemu
+	$(BUILD)/zenovfs-zvrt-corrupt $(BUILD)/zenov-data.img $@ data
+	$(BUILD)/zenovfs-verify $@
+	@test -s $@
+
+$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp tools/zcap_builder.cpp tools/zcap_verify.cpp tools/zmid_builder.cpp tools/zmid_verify.cpp tools/zrwp_builder.cpp tools/zrwp_verify.cpp tools/zvrt_builder.cpp tools/zvrt_verify.cpp tools/zenovfs_zvrt_verify.cpp tools/zenovfs_zvrt_corrupt.cpp tools/zenovfs_audit_verify.cpp tools/zenovfs_audit_fault_test.cpp security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp security/zvrt_crypto_material.hpp security/zenovguard-root-public.pem security/zcap-root-public.pem security/zmid-root-public.pem security/zrwp-root-public.pem security/zvrt-root-public.pem
 	@boot_hash="$$(sha256sum $(BUILD)/BOOT.BIN | cut -d' ' -f1)"; \
 	 kernel_hash="$$(sha256sum $(BUILD)/KERNEL.BIN | cut -d' ' -f1)"; \
 	 image_hash="$$(sha256sum $(BUILD)/zenov-os.img | cut -d' ' -f1)"; \
 	 data_hash="$$(sha256sum $(BUILD)/zenov-data.img | cut -d' ' -f1)"; \
-	 source_hash="$$(cat kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp | sha256sum | cut -d' ' -f1)"; \
+	 source_hash="$$(cat kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp security/zvrt_crypto_material.hpp | sha256sum | cut -d' ' -f1)"; \
 	 compiler_hash="$$(sha256sum tools/zenov_app_compiler.cpp | cut -d' ' -f1)"; \
 	 zenov_app_hash="$$(sha256sum $(BUILD)/ZENOVAPP.ZEX | cut -d' ' -f1)"; \
 	 zgdb_v3_hash="$$(sha256sum $(BUILD)/zenovguard-v3.zgdb | cut -d' ' -f1)"; \
@@ -356,6 +397,8 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 zrwp_v1_hash="$$(sha256sum $(BUILD)/ransomware-policy-v1.zrwp | cut -d' ' -f1)"; \
 	 zrwp_v2_hash="$$(sha256sum $(BUILD)/ransomware-policy-v2.zrwp | cut -d' ' -f1)"; \
 	 zrwp_root_hash="$$(sha256sum security/zrwp-root-public.pem | cut -d' ' -f1)"; \
+	 zvrt_v1_hash="$$(sha256sum $(BUILD)/verified-reads-v1.zvrt | cut -d' ' -f1)"; \
+	 zvrt_root_hash="$$(sha256sum security/zvrt-root-public.pem | cut -d' ' -f1)"; \
 	 printf '%s\n' \
 	 '{' \
 	 '  "format": "zenov-os-build-v14",' \
@@ -367,7 +410,7 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  "graphics": "QEMU Standard VGA / Bochs VBE 800x600x32 / supervisor MMIO / software desktop",' \
 	 '  "input": "PS2 keyboard and 3-byte PS2 mouse packets",' \
 	 '  "persistent_storage": "ATA PIO / ZenovFS1 copy-on-write commit",' \
-	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 executable policy / ZCAP1 syscall policy / ZMID1 signed malware intelligence / ZRWP1 controlled-folder and behavior policy / on-write and synchronous on-access read prevention / protected quarantine / RSA-PSS / ZGAL1 hash chain / fail-closed boot",' \
+	 '  "security": "ZenovGuard final-read SHA-256 / ZGDB2 executable policy / ZCAP1 syscall policy / ZMID1 signed malware intelligence / ZRWP1 controlled-folder and behavior policy / ZVRT1 authenticated reads / on-write and synchronous on-access read prevention / protected quarantine / RSA-PSS / ZGAL1 hash chain / fail-closed boot",' \
 	 '  "zgdb_schema": 2,' \
 	 '  "zgdb_compiled_floor": 3,' \
 	 '  "zgdb_root_key_id": "6f788074c018f5aa",' \
@@ -388,6 +431,15 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 "  \"zmid_v2_sha256\": \"$$zmid_v2_hash\"," \
 	 '  "zmid_rule_model": "bounded SHA-256 and byte-pattern rules / block-quarantine-audit actions / 32 rules / 32-byte patterns",' \
 	 '  "on_access_read": "shell and ring-3 file reads / infected block and output scrub / suspicious durable audit / internal policy namespaces excluded",' \
+	 '  "zvrt_schema": 1,' \
+	 '  "zvrt_compiled_floor": 1,' \
+	 '  "zvrt_root_key_id": "d28215ec62269ffc",' \
+	 "  \"zvrt_root_public_sha256\": \"$$zvrt_root_hash\"," \
+	 "  \"zvrt_v1_sha256\": \"$$zvrt_v1_hash\"," \
+	 '  "zvrt_chunk_bytes": 4096,' \
+	 '  "zvrt_records": 4,' \
+	 '  "zvrt_leaves": 5,' \
+	 '  "authenticated_read": "ZenovFS checksum then signed path-size-chunk Merkle commitment before release or executable appraisal",' \
 	 '  "zrwp_schema": 1,' \
 	 '  "zrwp_compiled_floor": 1,' \
 	 '  "zrwp_root_key_id": "7186b2bd819e47dc",' \
@@ -416,10 +468,11 @@ $(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(US
 	 '  }' \
 	 '}' > $@
 
-check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(BUILD)/zcap-verify $(BUILD)/zmid-verify $(BUILD)/zrwp-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE)
+check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(BUILD)/zenovfs-zvrt-verify $(BUILD)/zcap-verify $(BUILD)/zmid-verify $(BUILD)/zrwp-verify $(BUILD)/zvrt-verify all $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE) $(ZVRT_MANIFEST_CORRUPT_IMAGE) $(ZVRT_DATA_CORRUPT_IMAGE)
 	$(BUILD)/zenov-stage0 --self-test
 	$(BUILD)/image-verify $(BUILD)/zenov-os.img
 	$(BUILD)/zenovfs-verify $(BUILD)/zenov-data.img
+	$(BUILD)/zenovfs-zvrt-verify $(BUILD)/zenov-data.img
 	$(BUILD)/zenovfs-audit-verify $(BUILD)/zenov-data.img
 	$(BUILD)/zenovfs-fault-test $(BUILD)/zenov-data.img
 	@for app in $(BUILD)/FILEIO.ELF $(BUILD)/ARGS.ELF $(BUILD)/CONSOLE.ELF $(BUILD)/PROTECT.ELF $(BUILD)/KACCESS.ELF; do \
@@ -445,6 +498,13 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	@grep -q '"zmid_v1_sha256": "$(ZMID_V1_SHA256)"' $(BUILD)/build-manifest.json
 	@grep -q '"zmid_v2_sha256": "$(ZMID_V2_SHA256)"' $(BUILD)/build-manifest.json
 	@grep -q '"on_access_read": "shell and ring-3 file reads / infected block and output scrub / suspicious durable audit / internal policy namespaces excluded"' $(BUILD)/build-manifest.json
+	@grep -q '"zvrt_schema": 1' $(BUILD)/build-manifest.json
+	@grep -q '"zvrt_compiled_floor": 1' $(BUILD)/build-manifest.json
+	@grep -q '"zvrt_root_key_id": "d28215ec62269ffc"' $(BUILD)/build-manifest.json
+	@grep -q '"zvrt_v1_sha256": "$(ZVRT_V1_SHA256)"' $(BUILD)/build-manifest.json
+	@grep -q '"zvrt_chunk_bytes": 4096' $(BUILD)/build-manifest.json
+	@grep -q '"zvrt_records": 4' $(BUILD)/build-manifest.json
+	@grep -q '"zvrt_leaves": 5' $(BUILD)/build-manifest.json
 	@grep -q '"zrwp_schema": 1' $(BUILD)/build-manifest.json
 	@grep -q '"zrwp_compiled_floor": 1' $(BUILD)/build-manifest.json
 	@grep -q '"zrwp_root_key_id": "7186b2bd819e47dc"' $(BUILD)/build-manifest.json
@@ -455,7 +515,7 @@ check: $(BUILD)/zenov-stage0 $(BUILD)/image-verify $(BUILD)/zenovfs-verify $(BUI
 	@grep -q '"audit_journal_bytes": 8288' $(BUILD)/build-manifest.json
 	@grep -q '"audit_fault_model":' $(BUILD)/build-manifest.json
 	@grep -q '"zenov_app_abi": "0.1.1"' $(BUILD)/build-manifest.json
-	@echo 'static checks: OK (0.1.1 ZGDB2 + ZCAP1 + ZMID1 + ZRWP1 RSA-PSS, ZGAL1 audit COW crash matrix, graphics, memory, ABI and transactional storage)'
+	@echo 'static checks: OK (0.1.1 ZGDB2 + ZCAP1 + ZMID1 + ZRWP1 + ZVRT1 RSA-PSS, ZGAL1 audit COW crash matrix, graphics, memory, ABI and transactional storage)'
 
 qemu: all $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zenovfs-audit-fault-test $(BUILD)/zenovfs-antimalware-verify $(AUDIT_FAULT_STAMP) $(ZCAP_CORRUPT_IMAGE) $(ZMID_CORRUPT_IMAGE) $(ZRWP_CORRUPT_IMAGE)
 	@mkdir -p $(BUILD)/qemu
@@ -468,7 +528,15 @@ qemu: all $(BUILD)/zenovfs-fault-test $(BUILD)/zenovfs-audit-verify $(BUILD)/zen
 	bash tools/check_antimalware.sh $(BUILD)/qemu/serial.log $(BUILD)/qemu/zenov-data-runtime.img $(BUILD)/zenovfs-antimalware-verify $(BUILD)/qemu/antimalware-evidence.txt
 	@echo 'persistent audit and antimalware verification: OK (runtime chain valid; signed ZMID update; on-access/read-write prevention and quarantine state verified)'
 
-test: check qemu deterministic
+zvrt-qemu: all $(BUILD)/zenovfs-zvrt-verify $(BUILD)/zenovfs-audit-verify $(ZVRT_MANIFEST_CORRUPT_IMAGE) $(ZVRT_DATA_CORRUPT_IMAGE)
+	@mkdir -p $(BUILD)/qemu/zvrt
+	bash tests/qemu_zvrt.sh $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(ZVRT_MANIFEST_CORRUPT_IMAGE) $(ZVRT_DATA_CORRUPT_IMAGE) $(BUILD)/qemu/zvrt
+	$(BUILD)/zenovfs-zvrt-verify $(BUILD)/qemu/zvrt/valid-runtime.img
+	$(BUILD)/zenovfs-audit-verify $(BUILD)/qemu/zvrt/data-corrupt-runtime.img --require-nonempty
+	@grep -Fq 'ZENOV_ZVRT_QEMU_OK valid=yes manifest_fail_closed=yes data_blocked=yes payload_disclosure=no multichunk=2 audit=durable' $(BUILD)/qemu/zvrt/summary.log
+	@echo 'ZVRT QEMU verification: OK (valid multichunk read; manifest fail-closed; checksum-repaired data blocked with durable audit)'
+
+test: check qemu zvrt-qemu deterministic
 
 deterministic: all
 	@rm -rf /tmp/zenov-os-deterministic
@@ -476,8 +544,8 @@ deterministic: all
 	@diff -u $(BUILD)/build-manifest.json /tmp/zenov-os-deterministic/build-manifest.json
 	@cmp $(BUILD)/zenov-data.img /tmp/zenov-os-deterministic/zenov-data.img
 	@for app in $(USER_APPS); do cmp $$app /tmp/zenov-os-deterministic/$$(basename $$app); done
-	@for policy in $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES); do cmp $$policy /tmp/zenov-os-deterministic/$$(basename $$policy); done
-	@echo 'deterministic rebuild: OK (system, ZGDB2/ZCAP1/ZMID1/ZRWP1 RSA-PSS policies, empty ZGAL1 seed, data volume and seven apps are byte-identical)'
+	@for policy in $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $(ZVRT_FILES); do cmp $$policy /tmp/zenov-os-deterministic/$$(basename $$policy); done
+	@echo 'deterministic rebuild: OK (system, ZGDB2/ZCAP1/ZMID1/ZRWP1/ZVRT1 RSA-PSS policies, empty ZGAL1 seed, data volume and seven apps are byte-identical)'
 
 inspect: all
 	readelf -h $(BUILD)/kernel.elf

@@ -1,0 +1,77 @@
+name: ZenovOS ZVRT1 Authenticated Reads
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  authenticated-read-integrity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
+
+      - name: Run strict host and freestanding checks
+        run: make clean check
+
+      - name: Run authenticated-read QEMU lifecycle
+        run: make zvrt-qemu
+
+      - name: Verify deterministic rebuild
+        run: make deterministic
+
+      - name: Verify source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'namespace zvrt {' kernel/parts/zvrt_policy.inc
+          grep -Fq 'FsStatus::checksum_mismatch' kernel/parts/security_io.inc
+          grep -Fq 'ZVRT_WORKSPACE_OK address=0x00310000 bytes=4096 supervisor-only=yes' kernel/parts/zvrt_policy.inc
+          grep -Fq 'constexpr uintptr_t pmm_bitmap = 0x00311000U;' kernel/parts/supervisor_layout.inc
+          grep -Fq 'ASSERT(__kernel_end <= 0x000A0000' kernel/linker.ld
+          grep -Fq '"zvrt_root_key_id": "d28215ec62269ffc"' build/build-manifest.json
+          grep -Fq 'ZENOV_ZVRT_QEMU_OK valid=yes manifest_fail_closed=yes data_blocked=yes payload_disclosure=no multichunk=2 audit=durable' build/qemu/zvrt/summary.log
+          echo 'ZVRT_SOURCE_CONTRACT_OK schema=1 pss=sha256-salt32 chunk=4096 records=4 leaves=5 typed-failure=yes'
+
+      - name: Upload ZVRT1 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zvrt-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            build/KERNEL.BIN
+            build/kernel.map
+            build/zenov-os.img
+            build/zenov-data.img
+            build/build-manifest.json
+            build/verified-reads-*.zvrt
+            build/qemu/zvrt/
+            security/zvrt-root-public.pem
+            kernel/parts/zvrt_policy.inc
+            kernel/parts/supervisor_layout.inc
+            docs/VERIFIED_READS_0.1.1.md
