@@ -38,25 +38,6 @@ bool fs_split_pair(char* arguments, char*& first, char*& second) {
     return *second != 0;
 }
 
-void fs_serial_result(const char* prefix, const char* action, const FsResult& result) {
-    serial::write(prefix);
-    serial::write(" action=");
-    serial::write(action);
-    serial::write(" status=");
-    serial::write(fs_status_name(result.status));
-    serial::write(" class=");
-    serial::write(fs_surface_class_name(fs_surface_class(result.status)));
-    if (result.has_block_error()) {
-        serial::write(" block=");
-        serial::write(block_status_name(result.block.status));
-        serial::write(" lba=");
-        ata2_serial_uint(result.block.lba);
-        serial::write(" attempts=");
-        ata2_serial_uint(result.block.attempts);
-    }
-    serial::write("\r\n");
-}
-
 void fs_print_failure(const char* action, const FsResult& result) {
     console::write("FS_COMMAND_FAILED action=");
     console::write(action);
@@ -76,7 +57,6 @@ void fs_print_failure(const char* action, const FsResult& result) {
         console::put('\n');
     }
     console::warning(fs_surface_message(result.status));
-    fs_serial_result("FS_COMMAND_FAILED", action, result);
 }
 
 bool fs_finish_command(const char* action, const char* success_marker, const FsResult& raw) {
@@ -88,12 +68,9 @@ bool fs_finish_command(const char* action, const char* success_marker, const FsR
     if (!result.durable()) {
         console::write("FS_COMMAND_RECOVERY_PENDING action=");
         console::line(action);
-        fs_serial_result("FS_COMMAND_RECOVERY_PENDING", action, result);
         return true;
     }
     console::success(success_marker);
-    serial::write(success_marker);
-    serial::write("\r\n");
     return true;
 }
 
