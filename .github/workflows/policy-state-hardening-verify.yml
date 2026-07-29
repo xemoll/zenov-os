@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/policy-state-hardening-verify
+  pull_request:
 
 concurrency:
   group: policy-state-hardening-verify
