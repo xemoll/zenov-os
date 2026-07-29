@@ -1,3 +1,10 @@
+template <decltype(sizeof(0)) N>
+decltype(sizeof(0)) string_length(const char (&text)[N]) {
+    decltype(sizeof(0)) length = 0U;
+    while (length < N && text[length]) ++length;
+    return length;
+}
+
 namespace security_policy_format {
 constexpr unsigned int u32_max = 0xFFFFFFFFU;
 
