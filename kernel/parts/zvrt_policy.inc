@@ -28,8 +28,12 @@ struct [[gnu::packed]] Record {
 static_assert(sizeof(Header) == 80U && sizeof(Record) == 128U);
 
 enum class Validation : uint8_t { okay, malformed, digest, signature, rollback, engine, key, records };
-Record active_records[max_records]{};
-Record candidate_records[max_records]{};
+constexpr uintptr_t record_workspace_address = supervisor_layout::zvrt_records;
+constexpr uint32_t record_workspace_bytes = 2U * max_records * sizeof(Record);
+static_assert(record_workspace_bytes == supervisor_layout::zvrt_records_bytes);
+static_assert(record_workspace_address + record_workspace_bytes <= supervisor_layout::pmm_bitmap);
+Record* active_records = reinterpret_cast<Record*>(record_workspace_address);
+Record* candidate_records = active_records + max_records;
 uint32_t active_record_count = 0U, active_manifest_version = 0U, persistent_manifest_version = 0U;
 uint32_t verified_reads = 0U, blocked_reads = 0U, total_leaves = 0U, multichunk_records = 0U;
 bool ready = false;
@@ -124,7 +128,7 @@ bool write_version(uint32_t version) {
 }
 
 void activate(const Record source[max_records], uint32_t count, uint32_t version) {
-    memset(active_records, 0, sizeof(active_records));
+    memset(active_records, 0, max_records * sizeof(Record));
     total_leaves = multichunk_records = 0U;
     for (uint32_t i = 0U; i < count; ++i) {
         active_records[i] = source[i];
@@ -302,6 +306,7 @@ bool init() {
     persistent_manifest_version = version;
     if (!self_test()) { serial::line("ZVRT_SELFTEST_FAILED"); ready = false; return false; }
     serial::line("ZVRT_ROOT_KEY_OK id=d28215ec62269ffc");
+    serial::line("ZVRT_WORKSPACE_OK address=0x00310000 bytes=4096 supervisor-only=yes");
     serial::line("ZVRT_PSS_SIGNATURE_OK");
     serial::write("ZVRT_MANIFEST_OK version="); process::serial_u32(active_manifest_version);
     serial::write(" records="); process::serial_u32(active_record_count);
