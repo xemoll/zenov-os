@@ -1,0 +1,122 @@
+name: Verify policy hardening on current main
+
+on:
+  pull_request:
+
+concurrency:
+  group: policy-state-hardening-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-current-main:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reconstruct exact production tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/agent/apply_policy_state_hardening.py /tmp/apply_policy_state_hardening.py
+          cp .github/agent/security_policy_format.inc /tmp/security_policy_format.inc
+          cp .github/agent/security_policy_format_test.cpp /tmp/security_policy_format_test.cpp
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/apply_policy_state_hardening.py')
+          text = path.read_text()
+          start = text.index('        pattern = re.compile(\n', text.index('def harden_init'))
+          end = text.index('        replacement = (\n', start)
+          replacement = '''        pattern = re.compile(
+              rf\'\'\'uint8_t\\s+version_buffer\\[16\\](?:\\{{\\}})?;?\\s*uint32_t\\s+version_size\\s*=\\s*0(?:U)?;\\s*\'\'\'
+              rf\'\'\'{re.escape(variable)}\\s*=\\s*storage::read_file\\(\\s*\\"{re.escape(version_path)}\\"\\s*,\\s*\'\'\'
+              rf\'\'\'version_buffer\\s*,\\s*sizeof\\(version_buffer\\)\\s*,\\s*version_size\\s*\\)\\s*\\?\\s*\'\'\'
+              rf\'\'\'parse_version\\(\\s*version_buffer\\s*,\\s*version_size\\s*\\)\\s*:\\s*0(?:U)?;\'\'\',
+              re.S,
+          )
+          '''
+          text = text[:start] + replacement + text[end:]
+          old = 'changed = {line.strip() for line in subprocess.check_output(["git", "diff", "--name-only"], text=True).splitlines() if line.strip()}'
+          new = old + '\nchanged.update(line.strip() for line in subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], text=True).splitlines() if line.strip())'
+          if text.count(old) != 1:
+              raise SystemExit('scope matcher replacement count != 1')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          python3 -m py_compile /tmp/apply_policy_state_hardening.py
+          git switch --detach 870cee8ee5b453d73d613e1f193dd3176c323cd9
+          test "$(git rev-parse HEAD)" = 870cee8ee5b453d73d613e1f193dd3176c323cd9
+          python3 /tmp/apply_policy_state_hardening.py | tee /tmp/policy-state-apply.log
+          git diff --check
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl qemu-system-x86
+
+      - name: Run Clang sanitizer regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/sanitized
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-conversion \
+            -fno-sanitize-recover=all -fno-omit-frame-pointer \
+            tests/security_policy_format_test.cpp -o build/sanitized/security-policy-format-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            build/sanitized/security-policy-format-test | tee build/security-policy-format-test.log
+          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=11 version-wrap=blocked' build/security-policy-format-test.log
+
+      - name: Run complete native and runtime gates
+        run: |
+          set -euo pipefail
+          make clean check
+          make zvrt-qemu
+          make deterministic
+
+      - name: Package exact production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=(
+            .github/workflows/zvrt.yml
+            Makefile
+            docs/VERIFIED_READS_0.1.1.md
+            kernel/kernel.cpp
+            kernel/parts/security_policy_format.inc
+            kernel/parts/zgdb_policy.inc
+            kernel/parts/zcap_policy.inc
+            kernel/parts/zmid_policy.inc
+            kernel/parts/zrwp_policy.inc
+            kernel/parts/zvrt_policy.inc
+            tests/security_policy_format_test.cpp
+            tools/zrwp_verify.cpp
+            tools/zvrt_verify.cpp
+          )
+          git add "${paths[@]}"
+          printf 'parent=%s\nbase_tree=%s\nlocal_tree=%s\n' \
+            "$(git rev-parse HEAD)" "$(git rev-parse HEAD^{tree})" "$(git write-tree)" \
+            | tee /tmp/policy-state-tree-map.txt
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -cf /tmp/policy-state-production.tar "${paths[@]}"
+          sha256sum /tmp/policy-state-production.tar | tee /tmp/policy-state-production.sha256
+
+      - name: Upload exact evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: policy-state-main-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            /tmp/policy-state-apply.log
+            /tmp/policy-state-tree-map.txt
+            /tmp/policy-state-production.tar
+            /tmp/policy-state-production.sha256
+            build/security-policy-format-test.log
+            build/KERNEL.BIN
+            build/kernel.map
+            build/qemu/zvrt/
