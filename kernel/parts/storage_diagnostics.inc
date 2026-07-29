@@ -31,6 +31,7 @@ void storage_print_fs_result(const char* label, const FsResult& result) {
     console::write("  "); console::write(label); console::write("  ");
     console::write(fs_operation_name(result.operation)); console::put('/');
     console::write(fs_status_name(result.status));
+    console::write(" class="); console::write(fs_surface_class_name(fs_surface_class(result.status)));
     console::write(" bytes="); console::unsigned_dec(result.bytes);
     if (result.has_block_error()) {
         console::write(" block=");
@@ -49,6 +50,7 @@ void command_disk_status() {
     console::line("  Driver              ATA PIO / LBA28 / PIT deadlines");
     console::line("  Block ABI           typed BlockResult boundary");
     console::line("  Filesystem ABI      typed FsResult boundary");
+    console::line("  Result surface      distinct shell/syscall/security status");
     console::write("  Capacity            "); console::unsigned_dec(ata0.sectors); console::line(" sectors");
 
     storage_print_counter("ATA requests", ata_diagnostics.requests);
@@ -95,10 +97,15 @@ void command_disk_status() {
     serial::line("BLOCK_RESULT_API_OK version=2");
     serial::line("BLOCK_DEVICE_TYPED_ABI_OK version=1");
     serial::line("ZENOVFS_RESULT_API_OK version=1");
+    serial::line("ZENOVFS_SURFACE_API_OK version=1");
 }
 
-bool dispatch_storage_command(const char* line) {
-    if (!storage_command_equal(line, "disk status")) return false;
-    command_disk_status();
-    return true;
+bool dispatch_storage_result_command(char* line);
+
+bool dispatch_storage_command(char* line) {
+    if (storage_command_equal(line, "disk status")) {
+        command_disk_status();
+        return true;
+    }
+    return dispatch_storage_result_command(line);
 }
