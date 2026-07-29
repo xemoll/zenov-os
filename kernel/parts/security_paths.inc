@@ -15,6 +15,8 @@ static constexpr const char* protected_paths[] = {
     "/security/zenovguard-intelligence.version",
     "/security/ransomware-policy.zrwp",
     "/security/ransomware-policy.version",
+    "/security/verified-reads.zvrt",
+    "/security/verified-reads.version",
     "/security/zenovguard.audit",
 };
 

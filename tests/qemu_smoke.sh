@@ -224,6 +224,14 @@ controller_first() {
   wait_for_count "$serial" "$PROMPT" $((prompt_count + 1)) || { echo quit; return 1; }
   send_command "guard update /security/updates/zenovguard-v3.zgdb"
   wait_for_serial "$serial" "ZGDB_ROLLBACK_REJECTED" || { echo quit; return 1; }
+
+  local pua_read_audit_count
+  pua_read_audit_count="$(grep -c "ZENOV_GUARD_READ_AUDIT path=/samples/pua-test.bin" "$serial" || true)"
+  prompt_count="$(grep -c "$PROMPT" "$serial" || true)"
+  send_command "cat /data/samples/pua-test.bin"
+  wait_for_count "$serial" "ZENOV_GUARD_READ_AUDIT path=/samples/pua-test.bin verdict=SUSPICIOUS signature=PUA.Zenov.Test" $((pua_read_audit_count + 1)) || { echo quit; return 1; }
+  wait_for_count "$serial" "$PROMPT" $((prompt_count + 1)) || { echo quit; return 1; }
+
   local sync_count
   sync_count="$(grep -c "SYNC_OK" "$serial" || true)"
   send_command "sync"; wait_for_count "$serial" "SYNC_OK" $((sync_count + 1)) || { echo quit; return 1; }
