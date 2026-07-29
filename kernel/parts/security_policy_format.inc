@@ -24,31 +24,38 @@ bool next_version(unsigned int current, unsigned int& output) {
     return true;
 }
 
+bool canonical_absolute_path_with_length(const char* value, unsigned int capacity,
+                                         unsigned int declared_length, bool allow_empty = false) {
+    if (!value || !capacity || declared_length >= capacity) return false;
+    if (value[declared_length] != 0) return false;
+    for (unsigned int i = 0U; i < declared_length; ++i) if (value[i] == 0) return false;
+    for (unsigned int i = declared_length + 1U; i < capacity; ++i) if (value[i] != 0) return false;
+    if (!declared_length) return allow_empty;
+    if (value[0] != '/' || declared_length < 2U || value[declared_length - 1U] == '/') return false;
+
+    unsigned int component_start = 1U;
+    for (unsigned int i = 1U; i <= declared_length; ++i) {
+        if (i < declared_length) {
+            const unsigned char byte = static_cast<unsigned char>(value[i]);
+            if (byte < 0x20U || byte > 0x7EU || value[i] == '\\') return false;
+            if (value[i] == '/' && value[i - 1U] == '/') return false;
+        }
+        if (i == declared_length || value[i] == '/') {
+            const unsigned int component_length = i - component_start;
+            if (!component_length ||
+                (component_length == 1U && value[component_start] == '.') ||
+                (component_length == 2U && value[component_start] == '.' && value[component_start + 1U] == '.')) return false;
+            component_start = i + 1U;
+        }
+    }
+    return true;
+}
+
 bool canonical_absolute_path(const char* value, unsigned int capacity, bool allow_empty = false) {
     if (!value || !capacity) return false;
     unsigned int length = 0U;
     while (length < capacity && value[length]) ++length;
     if (length == capacity) return false;
-    for (unsigned int i = length + 1U; i < capacity; ++i) if (value[i] != 0) return false;
-    if (!length) return allow_empty;
-    if (value[0] != '/' || length < 2U || value[length - 1U] == '/') return false;
-    unsigned int component_start = 1U;
-    for (unsigned int i = 0U; i <= length; ++i) {
-        if (i < length) {
-            const unsigned char byte = static_cast<unsigned char>(value[i]);
-            if (byte < 0x20U || byte > 0x7EU || value[i] == '\\') return false;
-            if (i && value[i] == '/' && value[i - 1U] == '/') return false;
-        }
-        if (i == length || value[i] == '/') {
-            if (i > 0U) {
-                const unsigned int component_length = i - component_start;
-                if (!component_length ||
-                    (component_length == 1U && value[component_start] == '.') ||
-                    (component_length == 2U && value[component_start] == '.' && value[component_start + 1U] == '.')) return false;
-            }
-            component_start = i + 1U;
-        }
-    }
-    return true;
+    return canonical_absolute_path_with_length(value, capacity, length, allow_empty);
 }
 } // namespace security_policy_format
