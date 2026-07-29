@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "zenov_audit_format.hpp"
+#include "../kernel/parts/security_policy_format.inc"
 #include "../security/zvrt_crypto_material.hpp"
 
 namespace {
@@ -45,18 +46,9 @@ std::vector<std::uint8_t> read_all(const std::string& path) {
 }
 
 bool canonical_path(const char* value, std::size_t capacity) {
-    if (!value || !capacity || value[0] != '/') return false;
-    std::size_t length = 0U;
-    while (length < capacity && value[length]) ++length;
-    if (length < 2U || length == capacity) return false;
-    if (value[length - 1U] == '/') return false;
-    for (std::size_t i = 0U; i < length; ++i) {
-        const unsigned char byte = static_cast<unsigned char>(value[i]);
-        if (byte < 0x20U || byte > 0x7eU || value[i] == '\\') return false;
-        if (i && value[i] == '/' && value[i - 1U] == '/') return false;
-    }
-    for (std::size_t i = length + 1U; i < capacity; ++i) if (value[i] != 0) return false;
-    return std::strstr(value, "/../") == nullptr && std::strstr(value, "/./") == nullptr;
+    if (capacity > 0xFFFFFFFFU) return false;
+    return security_policy_format::canonical_absolute_path(
+        value, static_cast<unsigned int>(capacity), false);
 }
 
 bool digest_nonzero(const std::uint8_t digest[32]) {
