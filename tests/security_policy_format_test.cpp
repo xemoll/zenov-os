@@ -65,7 +65,21 @@ int main() {
         require(!security_policy_format::canonical_absolute_path(root, sizeof(root)), "reject root-only path");
         require(!security_policy_format::canonical_absolute_path(high_ascii, sizeof(high_ascii)), "reject non-ASCII path");
         require(!security_policy_format::canonical_absolute_path(unterminated, sizeof(unterminated)), "reject unterminated path");
-        std::cout << "SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 version-wrap=blocked\n";
+
+        char declared_valid[16] = "/apps/file";
+        require(security_policy_format::canonical_absolute_path_with_length(declared_valid, sizeof(declared_valid), 10U),
+                "accept exact declared length");
+        require(!security_policy_format::canonical_absolute_path_with_length(declared_valid, sizeof(declared_valid), 9U),
+                "reject short declared length");
+        require(!security_policy_format::canonical_absolute_path_with_length(declared_valid, sizeof(declared_valid), 11U),
+                "reject long declared length");
+        require(!security_policy_format::canonical_absolute_path_with_length(declared_valid, sizeof(declared_valid), sizeof(declared_valid)),
+                "reject out-of-range declared length");
+        char declared_padded[16] = "/apps/file"; declared_padded[12] = 'X';
+        require(!security_policy_format::canonical_absolute_path_with_length(declared_padded, sizeof(declared_padded), 10U),
+                "reject nonzero bytes after declared terminator");
+
+        std::cout << "SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 declared-length=5 version-wrap=blocked\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "security-policy-format-test: " << error.what() << '\n';
