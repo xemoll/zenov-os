@@ -94,7 +94,9 @@ jobs:
           ! grep -Fq 'constexpr CapabilityProfile capability_profiles' kernel/parts/process_capabilities.inc
           grep -Fq 'constexpr uint32_t syscall_error_denied = 0xFFFFFFF9U;' kernel/parts/process_capabilities.inc
           grep -Fq 'constexpr uint32_t compiled_policy_floor = 1U;' kernel/parts/zcap_policy.inc
-          grep -Fq 'version != active_policy_version + 1U' kernel/parts/zcap_policy.inc
+          grep -Fq 'security_policy_format::next_version(active_policy_version, next_version)' kernel/parts/zcap_policy.inc
+          grep -Fq 'ZCAP_SEQUENCE_REJECTED reason=version-exhausted' kernel/parts/zcap_policy.inc
+          ! grep -Fq 'active_policy_version + 1U' kernel/parts/zcap_policy.inc
           grep -Fq 'rsa_pss_verify_with_modulus' kernel/parts/zcap_policy.inc
           grep -Fq '"/security/syscall-capabilities.zcap"' kernel/parts/security_paths.inc
           grep -Fq '"/security/syscall-capabilities.version"' kernel/parts/security_paths.inc

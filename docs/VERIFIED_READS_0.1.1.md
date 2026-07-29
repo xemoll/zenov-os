@@ -70,3 +70,9 @@ The QEMU gate covers:
 ZVRT1 follows the same broad integrity-first principles as Linux fs-verity, dm-verity and IPE: trusted metadata commits to file or block content, and access decisions are made from authenticated provenance rather than malware recognition alone.
 
 It is not format-compatible with those Linux facilities. ZenovFS1 currently performs bounded complete-file reads, so ZVRT1 verifies the complete object after the filesystem read and before release. It does not yet provide per-page demand verification, generic Merkle paging, transparent mmap verification, a block-device verity target, hardware-backed roots, or TPM/NVRAM rollback resistance.
+
+## Policy-state parser hardening
+
+All version-state files now use one strict freestanding decimal parser. The format is a non-zero canonical decimal followed by exactly one newline. Overflow, leading zeroes, missing newlines, trailing bytes and `UINT32_MAX -> 0` update wrap are rejected fail-closed. Signed ZRWP and ZVRT paths also use one canonical absolute-path validator that rejects control bytes, backslashes, duplicate separators and `.` or `..` components, including terminal components.
+
+This strengthens live-storage corruption handling. It does not create TPM/NVRAM anti-rollback: a full offline replacement of the complete data image remains outside the 0.1.1 trust boundary.
