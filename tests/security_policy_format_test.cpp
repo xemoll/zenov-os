@@ -44,6 +44,11 @@ int main() {
         char backslash[48] = "/apps\\file";
         char control[48] = "/apps/file"; control[5] = '\x1f';
         char padded[48] = "/apps/file"; padded[20] = 'X';
+        char relative[48] = "apps/file";
+        char trailing[48] = "/apps/file/";
+        char root[48] = "/";
+        char high_ascii[48] = "/apps/file"; high_ascii[5] = static_cast<char>(0x80);
+        char unterminated[4] = {'/', 'a', 'b', 'c'};
         require(security_policy_format::canonical_absolute_path(valid, sizeof(valid)), "valid path");
         require(security_policy_format::canonical_absolute_path(empty, sizeof(empty), true), "allowed empty scope");
         require(!security_policy_format::canonical_absolute_path(empty, sizeof(empty)), "reject empty path");
@@ -55,7 +60,12 @@ int main() {
         require(!security_policy_format::canonical_absolute_path(backslash, sizeof(backslash)), "reject backslash");
         require(!security_policy_format::canonical_absolute_path(control, sizeof(control)), "reject control");
         require(!security_policy_format::canonical_absolute_path(padded, sizeof(padded)), "reject nonzero padding");
-        std::cout << "SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=11 version-wrap=blocked\n";
+        require(!security_policy_format::canonical_absolute_path(relative, sizeof(relative)), "reject relative path");
+        require(!security_policy_format::canonical_absolute_path(trailing, sizeof(trailing)), "reject trailing slash");
+        require(!security_policy_format::canonical_absolute_path(root, sizeof(root)), "reject root-only path");
+        require(!security_policy_format::canonical_absolute_path(high_ascii, sizeof(high_ascii)), "reject non-ASCII path");
+        require(!security_policy_format::canonical_absolute_path(unterminated, sizeof(unterminated)), "reject unterminated path");
+        std::cout << "SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 version-wrap=blocked\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "security-policy-format-test: " << error.what() << '\n';
