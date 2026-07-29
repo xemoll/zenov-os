@@ -184,4 +184,5 @@ test ! -s "$OUT/qemu-valid.stderr"
 test ! -s "$OUT/qemu-manifest-corrupt.stderr"
 test ! -s "$OUT/qemu-data-corrupt.stderr"
 
-printf 'ZENOV_ZVRT_QEMU_OK valid=yes manifest_fail_closed=yes data_blocked=yes payload_disclosure=no multichunk=2 audit=durable\n'
+printf 'ZENOV_ZVRT_QEMU_OK valid=yes manifest_fail_closed=yes data_blocked=yes payload_disclosure=no multichunk=2 audit=durable\n' \
+  | tee "$OUT/summary.log"
