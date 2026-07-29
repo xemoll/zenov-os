@@ -47,8 +47,8 @@ jobs:
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
           UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
             ci-logs/security-policy-format-test | tee ci-logs/security-policy-format-test.log
-          grep -Fq 'SECURITY_POLICY_PATH_FUZZ_OK calls=400000 modes=raw,terminated,printable,segmented' ci-logs/security-policy-format-test.log
-          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 declared-length=5 bounded-array=yes version-wrap=blocked' ci-logs/security-policy-format-test.log
+          grep -Fq 'SECURITY_POLICY_PATH_FUZZ_OK calls=400000 oracle=exact' ci-logs/security-policy-format-test.log
+          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 declared-length=5 bounded-array=yes oracle=exact version-wrap=blocked' ci-logs/security-policy-format-test.log
           test -s ci-logs/security-policy-format-test
           test -s ci-logs/security-policy-format-test.log
 
@@ -72,6 +72,8 @@ jobs:
           grep -Fq 'canonical_absolute_path_with_length(' tools/zrwp_verify.cpp
           ! grep -Fq 'std::strlen(record.path)' tools/zrwp_verify.cpp
           grep -Fq 'string_length(record.path)' kernel/parts/zrwp_policy.inc
+          grep -Fq 'reference_declared_path' tests/security_policy_format_test.cpp
+          grep -Fq 'actual != expected' tests/security_policy_format_test.cpp
           grep -Fq 'reason=version-state' kernel/parts/zvrt_policy.inc
           grep -Fq 'namespace zvrt {' kernel/parts/zvrt_policy.inc
           grep -Fq 'FsStatus::checksum_mismatch' kernel/parts/security_io.inc
@@ -80,11 +82,11 @@ jobs:
           grep -Fq 'ASSERT(__kernel_end <= 0x000A0000' kernel/linker.ld
           grep -Fq '"zvrt_root_key_id": "d28215ec62269ffc"' build/build-manifest.json
           grep -Fq 'ZENOV_ZVRT_QEMU_OK valid=yes manifest_fail_closed=yes data_blocked=yes payload_disclosure=no multichunk=2 audit=durable' build/qemu/zvrt/summary.log
-          grep -Fq 'SECURITY_POLICY_PATH_FUZZ_OK calls=400000 modes=raw,terminated,printable,segmented' ci-logs/security-policy-format-test.log
-          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 declared-length=5 bounded-array=yes version-wrap=blocked' ci-logs/security-policy-format-test.log
+          grep -Fq 'SECURITY_POLICY_PATH_FUZZ_OK calls=400000 oracle=exact' ci-logs/security-policy-format-test.log
+          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 declared-length=5 bounded-array=yes oracle=exact version-wrap=blocked' ci-logs/security-policy-format-test.log
           test -s ci-logs/security-policy-format-test
           test -s ci-logs/security-policy-format-test.log
-          echo 'ZVRT_SOURCE_CONTRACT_OK schema=1 pss=sha256-salt32 chunk=4096 records=4 leaves=5 typed-failure=yes sanitizer-evidence=retained bounded-policy-fields=yes fuzz-calls=400000'
+          echo 'ZVRT_SOURCE_CONTRACT_OK schema=1 pss=sha256-salt32 chunk=4096 records=4 leaves=5 typed-failure=yes sanitizer-evidence=retained bounded-policy-fields=yes fuzz-calls=400000 fuzz-oracle=exact'
 
       - name: Upload ZVRT1 evidence
         if: always()
