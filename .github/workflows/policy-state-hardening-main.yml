@@ -16,12 +16,11 @@ jobs:
     timeout-minutes: 240
     env:
       TARGET_BASE: 870cee8ee5b453d73d613e1f193dd3176c323cd9
-      TARGET_BRANCH: security/policy-state-hardening
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Reconstruct exact production tree
         shell: bash
@@ -49,6 +48,9 @@ jobs:
           new = old + '\nchanged.update(line.strip() for line in subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], text=True).splitlines() if line.strip())'
           if text.count(old) != 1:
               raise SystemExit('scope matcher replacement count != 1')
+          text = text.replace(
+              'address,undefined,unsigned-integer-overflow,implicit-integer-conversion',
+              'address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change')
           path.write_text(text.replace(old, new, 1))
           PY
           python3 -m py_compile /tmp/apply_policy_state_hardening.py
@@ -58,7 +60,7 @@ jobs:
           git diff --check
 
       - name: Install strict toolchain and QEMU
-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl qemu-system-x86
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang jq openssl qemu-system-x86
 
       - name: Run Clang sanitizer regression
         shell: bash
@@ -66,7 +68,7 @@ jobs:
           set -euo pipefail
           mkdir -p build/sanitized
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
-            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-integer-conversion \
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change \
             -fno-sanitize-recover=all -fno-omit-frame-pointer \
             tests/security_policy_format_test.cpp -o build/sanitized/security-policy-format-test
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
@@ -81,7 +83,9 @@ jobs:
           make zvrt-qemu
           make deterministic
 
-      - name: Package exact production source
+      - name: Derive content-addressed production tree
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -101,44 +105,38 @@ jobs:
             tools/zvrt_verify.cpp
           )
           git add "${paths[@]}"
+          local_tree="$(git write-tree)"
+          base_tree="$(git rev-parse HEAD^{tree})"
           printf 'parent=%s\nbase_tree=%s\nlocal_tree=%s\n' \
-            "$(git rev-parse HEAD)" "$(git rev-parse HEAD^{tree})" "$(git write-tree)" \
-            | tee /tmp/policy-state-tree-map.txt
+            "$(git rev-parse HEAD)" "$base_tree" "$local_tree" > /tmp/policy-state-tree-map.txt
+          printf '{"base_tree":"%s","tree":[' "$base_tree" > /tmp/tree-request.json
+          first=1
+          for path in "${paths[@]}"; do
+            expected="$(git hash-object "$path")"
+            mode="$(git ls-files -s -- "$path" | awk '{print $1}')"
+            encoded="$(base64 -w0 "$path")"
+            response="$(jq -cn --arg content "$encoded" '{content:$content,encoding:"base64"}' | curl --fail-with-body -sS -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/blobs" --data-binary @-)"
+            actual="$(jq -r '.sha' <<<"$response")"
+            test "$actual" = "$expected"
+            if [[ $first -eq 0 ]]; then printf ',' >> /tmp/tree-request.json; fi
+            first=0
+            jq -cn --arg path "$path" --arg mode "$mode" --arg sha "$actual" \
+              '{path:$path,mode:$mode,type:"blob",sha:$sha}' >> /tmp/tree-request.json
+            printf '%s\t%s\t%s\n' "$path" "$mode" "$actual" >> /tmp/policy-state-tree-map.txt
+          done
+          printf ']}' >> /tmp/tree-request.json
+          tree_response="$(curl --fail-with-body -sS -X POST -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/trees" --data-binary @/tmp/tree-request.json)"
+          remote_tree="$(jq -r '.sha' <<<"$tree_response")"
+          test "$remote_tree" = "$local_tree"
+          printf 'remote_tree=%s\n' "$remote_tree" >> /tmp/policy-state-tree-map.txt
           tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
             -cf /tmp/policy-state-production.tar "${paths[@]}"
           sha256sum /tmp/policy-state-production.tar | tee /tmp/policy-state-production.sha256
-
-      - name: Publish verified non-workflow production files
-        if: success() && github.repository == 'xemoll/zenov-os' && github.event.pull_request.head.ref == 'agent/policy-state-hardening-verify'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "${{ github.event.pull_request.base.ref }}" = 'agent/zvrt-final'
-          test "$(git rev-parse HEAD)" = "$TARGET_BASE"
-          git restore --staged .github/workflows/zvrt.yml
-          cat > /tmp/expected-non-workflow-paths <<'EOF'
-          Makefile
-          docs/VERIFIED_READS_0.1.1.md
-          kernel/kernel.cpp
-          kernel/parts/security_policy_format.inc
-          kernel/parts/zgdb_policy.inc
-          kernel/parts/zcap_policy.inc
-          kernel/parts/zmid_policy.inc
-          kernel/parts/zrwp_policy.inc
-          kernel/parts/zvrt_policy.inc
-          tests/security_policy_format_test.cpp
-          tools/zrwp_verify.cpp
-          tools/zvrt_verify.cpp
-          EOF
-          sort -o /tmp/expected-non-workflow-paths /tmp/expected-non-workflow-paths
-          git diff --cached --name-only | sort > /tmp/actual-non-workflow-paths
-          diff -u /tmp/expected-non-workflow-paths /tmp/actual-non-workflow-paths
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'security: harden signed policy state parsing'
-          test "$(git rev-parse HEAD^)" = "$TARGET_BASE"
-          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${TARGET_BASE}" origin "HEAD:refs/heads/${TARGET_BRANCH}"
-          git rev-parse HEAD | tee /tmp/policy-state-published-commit.txt
+          cat /tmp/policy-state-tree-map.txt
 
       - name: Upload exact evidence
         if: always()
@@ -151,7 +149,6 @@ jobs:
             /tmp/policy-state-tree-map.txt
             /tmp/policy-state-production.tar
             /tmp/policy-state-production.sha256
-            /tmp/policy-state-published-commit.txt
             build/security-policy-format-test.log
             build/KERNEL.BIN
             build/kernel.map
