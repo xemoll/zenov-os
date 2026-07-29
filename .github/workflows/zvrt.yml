@@ -47,7 +47,7 @@ jobs:
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
           UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
             build/sanitized/security-policy-format-test | tee build/security-policy-format-test.log
-          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 version-wrap=blocked' build/security-policy-format-test.log
+          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 declared-length=5 version-wrap=blocked' build/security-policy-format-test.log
 
       - name: Run strict host and freestanding checks
         run: make clean check
@@ -64,6 +64,7 @@ jobs:
           set -euo pipefail
           grep -Fq 'namespace security_policy_format {' kernel/parts/security_policy_format.inc
           grep -Fq 'parse_nonzero_decimal_u32' kernel/parts/security_policy_format.inc
+          grep -Fq 'canonical_absolute_path_with_length' kernel/parts/security_policy_format.inc
           grep -Fq 'reason=version-state' kernel/parts/zvrt_policy.inc
           grep -Fq 'namespace zvrt {' kernel/parts/zvrt_policy.inc
           grep -Fq 'FsStatus::checksum_mismatch' kernel/parts/security_io.inc
