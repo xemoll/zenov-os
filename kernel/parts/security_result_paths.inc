@@ -112,18 +112,6 @@ FsResult package_cache_rename_result(const char* source, const char* destination
     return rename_entry_result(source, destination);
 }
 
-bool guarded_write_file_recorded(const char* path, const uint8_t* data, uint32_t size, bool append) {
-    return fs_record_result(guarded_write_file_result(path, data, size, append)).ok();
-}
-bool guarded_remove_recorded(const char* path) {
-    return fs_record_result(guarded_remove_result(path)).ok();
-}
-bool guarded_rename_entry_recorded(const char* source, const char* destination) {
-    return fs_record_result(guarded_rename_entry_result(source, destination)).ok();
-}
-bool guarded_copy_file_recorded(const char* source, const char* destination) {
-    return fs_record_result(guarded_copy_file_result(source, destination)).ok();
-}
 bool package_write_file_recorded(const char* path, const uint8_t* data, uint32_t size, bool append) {
     return fs_record_result(package_write_file_result(path, data, size, append)).ok();
 }
@@ -145,6 +133,15 @@ bool package_cache_rename_recorded(const char* source, const char* destination) 
 }
 bool sync_metadata_recorded() {
     return fs_record_result(sync_metadata_result()).ok();
+}
+
+[[maybe_unused]] void fs_surface_reference_legacy_package_adapters() {
+    (void)&package_write_file;
+    (void)&package_cache_write_partial;
+    (void)&package_remove;
+    (void)&package_transport_remove;
+    (void)&package_cache_remove;
+    (void)&package_cache_rename;
 }
 
 } // namespace storage
