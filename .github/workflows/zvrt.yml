@@ -33,7 +33,21 @@ jobs:
           test -z "$(git status --porcelain=v1)"
 
       - name: Install strict toolchain and QEMU
-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl qemu-system-x86
+
+      - name: Validate policy-state parser with Clang sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/sanitized
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-integer-conversion \
+            -fno-sanitize-recover=all -fno-omit-frame-pointer \
+            tests/security_policy_format_test.cpp -o build/sanitized/security-policy-format-test
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            build/sanitized/security-policy-format-test | tee build/security-policy-format-test.log
+          grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=11 version-wrap=blocked' build/security-policy-format-test.log
 
       - name: Run strict host and freestanding checks
         run: make clean check
@@ -48,6 +62,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          grep -Fq 'namespace security_policy_format {' kernel/parts/security_policy_format.inc
+          grep -Fq 'parse_nonzero_decimal_u32' kernel/parts/security_policy_format.inc
+          grep -Fq 'reason=version-state' kernel/parts/zvrt_policy.inc
           grep -Fq 'namespace zvrt {' kernel/parts/zvrt_policy.inc
           grep -Fq 'FsStatus::checksum_mismatch' kernel/parts/security_io.inc
           grep -Fq 'ZVRT_WORKSPACE_OK address=0x00310000 bytes=4096 supervisor-only=yes' kernel/parts/zvrt_policy.inc
@@ -71,6 +88,10 @@ jobs:
             build/build-manifest.json
             build/verified-reads-*.zvrt
             build/qemu/zvrt/
+            build/security-policy-format-test.log
+            build/sanitized/security-policy-format-test
+            kernel/parts/security_policy_format.inc
+            tests/security_policy_format_test.cpp
             security/zvrt-root-public.pem
             kernel/parts/zvrt_policy.inc
             kernel/parts/supervisor_layout.inc

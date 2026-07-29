@@ -75,6 +75,7 @@ namespace process { constexpr uint32_t application_buffer_bytes = 64U * 1024U; }
 namespace security_audit { bool append(uint32_t, uint8_t, uint8_t, const char*, const uint8_t[32]); }
 #include "parts/security_guard.inc"
 #include "parts/security_audit.inc"
+#include "parts/security_policy_format.inc"
 #include "parts/zgdb_policy.inc"
 #include "parts/zcap_policy.inc"
 #include "parts/zmid_policy.inc"
