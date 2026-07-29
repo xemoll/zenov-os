@@ -201,7 +201,9 @@ jobs:
           grep -q 'SYNC_OK' build/qemu/serial-phase1.log
           grep -q 'SYNC_OK' build/qemu/serial-phase2.log
           test -x build/zenovfs-antimalware-verify
-          build/zenovfs-antimalware-verify build/qemu/zenov-data-runtime.img
+          build/zenovfs-antimalware-verify \
+            build/qemu/zenov-data-runtime.img \
+            build/qemu/serial-phase1.log
           grep -Fqx 'status=PASS' build/qemu/antimalware-evidence.txt
           grep -q GRAPHICS_PCI_OK build/qemu/serial.log
           grep -q FRAMEBUFFER_MAPPED_OK build/qemu/serial.log
