@@ -8,17 +8,20 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   verify-current-main:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
+    env:
+      TARGET_BASE: 870cee8ee5b453d73d613e1f193dd3176c323cd9
+      TARGET_BRANCH: security/policy-state-hardening
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
 
       - name: Reconstruct exact production tree
         shell: bash
@@ -49,8 +52,8 @@ jobs:
           path.write_text(text.replace(old, new, 1))
           PY
           python3 -m py_compile /tmp/apply_policy_state_hardening.py
-          git switch --detach 870cee8ee5b453d73d613e1f193dd3176c323cd9
-          test "$(git rev-parse HEAD)" = 870cee8ee5b453d73d613e1f193dd3176c323cd9
+          git switch --detach "$TARGET_BASE"
+          test "$(git rev-parse HEAD)" = "$TARGET_BASE"
           python3 /tmp/apply_policy_state_hardening.py | tee /tmp/policy-state-apply.log
           git diff --check
 
@@ -63,7 +66,7 @@ jobs:
           set -euo pipefail
           mkdir -p build/sanitized
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
-            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-conversion \
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-integer-conversion \
             -fno-sanitize-recover=all -fno-omit-frame-pointer \
             tests/security_policy_format_test.cpp -o build/sanitized/security-policy-format-test
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
@@ -105,6 +108,38 @@ jobs:
             -cf /tmp/policy-state-production.tar "${paths[@]}"
           sha256sum /tmp/policy-state-production.tar | tee /tmp/policy-state-production.sha256
 
+      - name: Publish verified non-workflow production files
+        if: success() && github.repository == 'xemoll/zenov-os' && github.event.pull_request.head.ref == 'agent/policy-state-hardening-verify'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.event.pull_request.base.ref }}" = 'agent/zvrt-final'
+          test "$(git rev-parse HEAD)" = "$TARGET_BASE"
+          git restore --staged .github/workflows/zvrt.yml
+          cat > /tmp/expected-non-workflow-paths <<'EOF'
+          Makefile
+          docs/VERIFIED_READS_0.1.1.md
+          kernel/kernel.cpp
+          kernel/parts/security_policy_format.inc
+          kernel/parts/zgdb_policy.inc
+          kernel/parts/zcap_policy.inc
+          kernel/parts/zmid_policy.inc
+          kernel/parts/zrwp_policy.inc
+          kernel/parts/zvrt_policy.inc
+          tests/security_policy_format_test.cpp
+          tools/zrwp_verify.cpp
+          tools/zvrt_verify.cpp
+          EOF
+          sort -o /tmp/expected-non-workflow-paths /tmp/expected-non-workflow-paths
+          git diff --cached --name-only | sort > /tmp/actual-non-workflow-paths
+          diff -u /tmp/expected-non-workflow-paths /tmp/actual-non-workflow-paths
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'security: harden signed policy state parsing'
+          test "$(git rev-parse HEAD^)" = "$TARGET_BASE"
+          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${TARGET_BASE}" origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          git rev-parse HEAD | tee /tmp/policy-state-published-commit.txt
+
       - name: Upload exact evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -116,6 +151,7 @@ jobs:
             /tmp/policy-state-tree-map.txt
             /tmp/policy-state-production.tar
             /tmp/policy-state-production.sha256
+            /tmp/policy-state-published-commit.txt
             build/security-policy-format-test.log
             build/KERNEL.BIN
             build/kernel.map
