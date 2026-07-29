@@ -17,31 +17,45 @@ on:
       - '.github/workflows/ata-read-faults.yml'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
+env:
+  SOURCE_DATE_EPOCH: '0'
+
 jobs:
   ata-read-faults:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 2
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Verify exact tested source revision
+        shell: bash
         run: |
+          set -euo pipefail
           [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
-          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
           echo "tested-source-revision=$ZENOV_SOURCE_REVISION"
 
       - name: Install native toolchain and QEMU
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
 
       - name: Verify harness and source contract
+        shell: bash
         run: |
+          set -euo pipefail
           bash -n tests/qemu_ata_read_faults.sh
           grep -Fq 'event = "read_aio"' tests/blkdebug/ata-read-eio-once.conf
           grep -Fq 'iotype = "read"' tests/blkdebug/ata-read-eio-once.conf
@@ -55,9 +69,10 @@ jobs:
           grep -Fq 'if (!block_retryable(failure.status))' kernel/parts/storage_ata_deadline_io.inc
 
       - name: Build strict native system and host contracts
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p ci-logs/ata-read-faults
-          set -o pipefail
           make clean check 2>&1 | tee ci-logs/ata-read-faults/native-check.log
           grep -Fq 'ATA_POLICY_TEST_OK cases=22' ci-logs/ata-read-faults/native-check.log
           grep -Fq 'BLOCK_RESULT_TEST_OK cases=17' ci-logs/ata-read-faults/native-check.log
@@ -65,12 +80,15 @@ jobs:
           grep -Fq 'ZENOVFS_RESULT_TEST_OK' ci-logs/ata-read-faults/native-check.log
 
       - name: Inject recoverable and persistent read EIO
+        shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           make ata-read-fault-qemu 2>&1 | tee ci-logs/ata-read-faults/qemu.log
 
       - name: Verify exact runtime evidence
+        shell: bash
         run: |
+          set -euo pipefail
           out=build/qemu/ata-read-faults
           grep -Fq 'ATA_READ_FAULT_MATRIX_OK sector=8 recovered_attempts=2 exhausted_attempts=2 resets_each=1 ui_after_recovery=1 ui_after_exhaustion=0' "$out/summary.log"
           grep -Fq 'ATA_RECOVERY_RETRY_OK op=read attempts=2' "$out/recovered/serial.log"
@@ -86,11 +104,11 @@ jobs:
 
       - name: Upload ATA read fault evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ata-read-faults-${{ github.run_id }}
+          name: ata-read-faults-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ci-logs/ata-read-faults/**
             build/qemu/ata-read-faults/**
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
