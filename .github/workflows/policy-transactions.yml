@@ -104,7 +104,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fq '#include "parts/security_policy_transaction.inc"' kernel/kernel.cpp
+          grep -Fq '#include "security_policy_transaction.inc"' kernel/parts/security_policy_format.inc
           grep -Fq 'constexpr uintptr_t policy_transaction = 0x00312000U;' kernel/parts/supervisor_layout.inc
           grep -Fq 'constexpr uint32_t policy_transaction_bytes = 0x00004000U;' kernel/parts/supervisor_layout.inc
           grep -Fq 'volatile uint8_t* output = rollback_data;' kernel/parts/security_policy_transaction.inc
@@ -113,16 +113,20 @@ jobs:
 
           grep -Fq '#define init init_unhardened [[maybe_unused]]' kernel/parts/zgdb_policy_transactional.inc
           grep -Fq '#define update update_unhardened [[maybe_unused]]' kernel/parts/zgdb_policy_transactional.inc
+          grep -Fq '#define init init_unhardened [[maybe_unused]]' kernel/parts/zmid_policy_transactional.inc
           grep -Fq '#define update update_unhardened [[maybe_unused]]' kernel/parts/zmid_policy_transactional.inc
           test -z "$(grep -R --include='*.inc' -F 'init_unhardened(' kernel/parts || true)"
           test -z "$(grep -R --include='*.inc' -F 'update_unhardened(' kernel/parts || true)"
 
-          grep -Fq 'security_policy_transaction::acquire("/security/zenovguard.zgdb"' kernel/parts/zgdb_policy_transactional.inc
+          grep -Fq 'security_policy_transaction::acquire(' kernel/parts/zgdb_policy_transactional.inc
+          grep -Fq '"/security/zenovguard.zgdb"' kernel/parts/zgdb_policy_transactional.inc
           grep -Fq 'security_policy_transaction::acquire("/security/syscall-capabilities.zcap"' kernel/parts/zcap_policy.inc
-          grep -Fq 'security_policy_transaction::acquire("/security/zenovguard-intelligence.zmid"' kernel/parts/zmid_policy_transactional.inc
+          grep -Fq 'security_policy_transaction::acquire(' kernel/parts/zmid_policy_transactional.inc
+          grep -Fq '"/security/zenovguard-intelligence.zmid"' kernel/parts/zmid_policy_transactional.inc
           grep -Fq 'ZGDB_UPDATE_VERSION_READBACK_FAILED' kernel/parts/zgdb_policy_transactional.inc
           grep -Fq 'ZCAP_UPDATE_VERSION_READBACK_FAILED' kernel/parts/zcap_policy.inc
           grep -Fq 'ZMID_UPDATE_VERSION_READBACK_FAILED' kernel/parts/zmid_policy_transactional.inc
+          grep -Fq 'ZMID_INIT_FAILED reason=version-commit' kernel/parts/zmid_policy_transactional.inc
           grep -Fq 'format_nonzero_decimal_u32' kernel/parts/security_policy_format.inc
 
           grep -Fq 'SECURITY_POLICY_TRANSACTION_TEST_OK' ci-logs/security-policy-transaction-clang.log
@@ -133,7 +137,7 @@ jobs:
           test -s ci-logs/policy-transaction-freestanding.log
           test -s ci-logs/policy-transaction-qemu.log
           test -s ci-logs/policy-transaction-deterministic.log
-          echo 'SIGNED_POLICY_TRANSACTION_SOURCE_CONTRACT_OK domains=3 rollback=verified version-readback=yes sync=yes supervisor-only=yes legacy-entrypoints=unreachable'
+          echo 'SIGNED_POLICY_TRANSACTION_SOURCE_CONTRACT_OK domains=3 rollback=verified version-readback=yes boot-reconcile=yes sync=yes supervisor-only=yes legacy-entrypoints=unreachable'
 
       - name: Upload signed policy transaction evidence
         if: always()
