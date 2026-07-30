@@ -70,6 +70,12 @@ void require(bool value, const std::string& message) {
     if (!value) throw std::runtime_error(message);
 }
 
+std::size_t bounded_length(const char* value, std::size_t capacity) {
+    std::size_t length = 0U;
+    while (length < capacity && value[length]) ++length;
+    return length;
+}
+
 void copy_path(char output[48], std::string_view path) {
     require(!path.empty() && path.size() < 48U && path.front() == '/', "invalid journal path");
     std::memset(output, 0, 48U);
@@ -108,7 +114,7 @@ struct Image {
         for (std::uint32_t i = 0U; i < super->entry_count; ++i) {
             const Entry& entry = entries[i];
             if (!entry.used || entry.type != kTypeFile) continue;
-            const std::size_t length = std::strnlen(entry.path, sizeof(entry.path));
+            const std::size_t length = bounded_length(entry.path, sizeof(entry.path));
             if (length == path.size() && std::memcmp(entry.path, path.data(), length) == 0) return i;
         }
         throw std::runtime_error("missing ZenovFS file: " + std::string(path));
@@ -207,7 +213,7 @@ void make_hot_zmid(const std::filesystem::path& input, const std::filesystem::pa
     const auto journal = build_hot_zmid_journal(old_policy, old_version, old_audit);
     image.write("/security/policy-transaction.journal", journal);
     image.write("/security/zenovguard-intelligence.zmid", new_policy);
-    image.write("/security/zenovguard-intelligence.version", {'2','\n'});
+    image.write("/security/zenovguard-intelligence.version", std::vector<std::uint8_t>{'2','\n'});
 
     auto damaged_audit = old_audit;
     require(damaged_audit.size() >= 4U, "audit fixture is too small");
