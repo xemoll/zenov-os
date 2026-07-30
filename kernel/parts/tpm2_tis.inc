@@ -269,6 +269,14 @@ bool refresh_counter(bool publish_marker) {
     if (!execute_command(tpm2_protocol::build_nv_read_counter, response_size)) return false;
     if (!tpm2_protocol::parse_counter_value(response_buffer, response_size,
                                              counter_generation, response_code)) {
+        if (counter_public_valid && response_code == 0x0000014AU) {
+            if (publish_marker) {
+                serial::write("TPM2_NV_COUNTER_DEFINED_UNINITIALIZED index=");
+                serial_hex32(tpm2_protocol::nv_index);
+                serial::write("\r\n");
+            }
+            return true;
+        }
         return false;
     }
     counter_provisioned = true;
@@ -282,27 +290,34 @@ bool refresh_counter(bool publish_marker) {
     return true;
 }
 
-bool increment_internal() {
-    if (!counter_provisioned || !counter_public_valid || counter_generation == ~static_cast<uint64_t>(0U)) return false;
-    const uint64_t before = counter_generation;
+bool execute_increment() {
+    if (!counter_public_valid) return false;
     uint32_t response_size = 0U;
     if (!execute_command(tpm2_protocol::build_nv_increment, response_size)) return false;
     uint32_t response_code = 0U;
-    if (!tpm2_protocol::response_success(response_buffer, response_size, response_code)) return false;
-    if (!refresh_counter(false) || counter_generation != before + 1U) return false;
+    return tpm2_protocol::response_success(response_buffer, response_size, response_code);
+}
+
+bool increment_internal() {
+    if (!counter_provisioned || !counter_public_valid || counter_generation == ~static_cast<uint64_t>(0U)) return false;
+    const uint64_t before = counter_generation;
+    if (!execute_increment() || !refresh_counter(false) || counter_generation != before + 1U) return false;
     return true;
 }
 
 bool provision_counter() {
-    if (!transport_ready || counter_public_valid || counter_provisioned) return false;
-    if (!refresh_counter(false)) return false;
-    if (counter_provisioned || counter_public_valid) return false;
+    if (!transport_ready || !refresh_counter(false) || counter_provisioned) return false;
     uint32_t response_size = 0U;
-    if (!execute_command(tpm2_protocol::build_nv_define_counter, response_size)) return false;
     uint32_t response_code = 0U;
-    if (!tpm2_protocol::response_success(response_buffer, response_size, response_code) ||
-        !refresh_counter(false) || !counter_provisioned || counter_generation != 0U ||
-        !increment_internal() || counter_generation != 1U) {
+    if (!counter_public_valid) {
+        if (!execute_command(tpm2_protocol::build_nv_define_counter, response_size) ||
+            !tpm2_protocol::response_success(response_buffer, response_size, response_code) ||
+            !refresh_counter(false) || !counter_public_valid || counter_provisioned) {
+            return false;
+        }
+    }
+    if (!execute_increment() || !refresh_counter(false) || !counter_provisioned ||
+        counter_generation != 1U) {
         return false;
     }
     serial::write("TPM2_NV_COUNTER_PROVISIONED generation=");
