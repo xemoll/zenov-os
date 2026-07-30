@@ -19,22 +19,41 @@ void usage(){std::cout<<"zenuniverse - deterministic universal package catalog a
 "  zenuniverse validate FILE.zsource [...]\n"
 "  zenuniverse compile --input DIR --output CATALOG.zuc\n"
 "  zenuniverse resolve --input DIR --package ID --host-arch ARCH [--capability CAP ...]\n"
+"  zenuniverse host-profile --name PROFILE\n"
+"  zenuniverse runtime-plan --input DIR --package ID --host-profile PROFILE\n"
+"  zenuniverse runtime-status --input DIR --runtime RUNTIME --host-profile PROFILE\n"
 "  zenuniverse fetch-plan --input DIR --package ID\n"
 "  zenuniverse self-test\n";}
+
+void print_plan(const std::string& id, const Plan& plan) {
+    for(auto*d:plan.order)std::cout<<"install "<<d->id<<'@'<<d->version<<" availability="<<d->availability<<" delivery="<<d->delivery<<" runtime="<<d->runtime<<'\n';
+    for(const auto& asset:plan.required_assets)std::cout<<"required-asset="<<asset<<" source=user-supplied\n";
+    for(auto&r:plan.blocked)std::cout<<"blocked: "<<r<<'\n';
+    if(plan.user_asset)std::cout<<"asset: user-supplied; ZenovOS must not download or redistribute proprietary content\n";
+    if(plan.blocked.empty())std::cout<<"ZENUNIVERSE_RUNTIME_READY package="<<id<<"\n";
+    else std::cout<<"ZENUNIVERSE_RUNTIME_BLOCKED package="<<id<<" reasons="<<plan.blocked.size()<<"\n";
+}
+
+const Descriptor* runtime_provider(const std::vector<Descriptor>& records, const std::string& runtime) {
+    return latest(records, "org.zenov.runtime." + runtime);
+}
 
 int command(const std::string& cmd,const Args&a){
     if (cmd == "self-test") {
         unknown(a, {});
         if (!a.pos.empty()) throw Error("self-test takes no arguments");
-        if (sha256("abc") != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") {
-            throw Error("SHA-256 known-answer test failed");
-        }
-        std::cout << "ZENUNIVERSE_SELF_TEST_OK\n";
+        if (sha256("abc") != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") throw Error("SHA-256 known-answer test failed");
+        const auto profile=require_host_profile("zenov-0.1.1-i686");
+        if(profile.architecture!="x86"||!profile.capabilities.count("loader.elf32-static")||profile.capabilities.count("kernel.threads")) throw Error("host-profile invariant failed");
+        std::cout << "ZENUNIVERSE_SELF_TEST_OK host-profile=yes\n";
         return 0;
     }
     if(cmd=="validate"){unknown(a,{});if(a.pos.empty())throw Error("validate requires descriptors");for(const auto&p:a.pos){auto d=parse_descriptor(p);validate_descriptor(d);std::cout<<"VALID "<<d.id<<'@'<<d.version<<'\n';}std::cout<<"ZENUNIVERSE_VALIDATE_OK count="<<a.pos.size()<<'\n';return 0;}
     if(cmd=="compile"){unknown(a,{"input","output"});if(!a.pos.empty())throw Error("compile takes no positional arguments");auto records=load_directory(one(a,"input"));auto catalog=compile_catalog(records);write_atomic(one(a,"output"),catalog);std::cout<<"ZENUNIVERSE_COMPILE_OK packages="<<records.size()<<" sha256="<<sha256(catalog)<<'\n';return 0;}
-    if(cmd=="resolve"){unknown(a,{"input","package","host-arch","capability"});if(!a.pos.empty())throw Error("resolve takes no positional arguments");auto records=load_directory(one(a,"input"));auto id=one(a,"package"),arch=one(a,"host-arch");if(!architectures.count(arch))throw Error("unsupported host architecture");std::set<std::string> caps;for(auto&v:many(a,"capability")){if(!safe_id(v))throw Error("unsafe capability");caps.insert(v);}auto app=latest(records,id);if(!app)throw Error("package not found: "+id);auto plan=make_plan(*app,records,arch,caps);for(auto*d:plan.order)std::cout<<"install "<<d->id<<'@'<<d->version<<" availability="<<d->availability<<" delivery="<<d->delivery<<" runtime="<<d->runtime<<'\n';for(auto&r:plan.blocked)std::cout<<"blocked: "<<r<<'\n';if(plan.user_asset)std::cout<<"asset: user-supplied; ZenovOS must not download or redistribute proprietary content\n";if(plan.blocked.empty()){std::cout<<"ZENUNIVERSE_RESOLVE_OK package="<<id<<'\n';return 0;}std::cout<<"ZENUNIVERSE_RESOLVE_BLOCKED package="<<id<<" reasons="<<plan.blocked.size()<<'\n';return 3;}
+    if(cmd=="host-profile"){unknown(a,{"name"});if(!a.pos.empty())throw Error("host-profile takes no positional arguments");const auto profile=require_host_profile(one(a,"name"));std::cout<<"ZEN_HOST_PROFILE1\nprofile="<<profile.id<<"\narchitecture="<<profile.architecture<<"\ndescription="<<profile.description<<'\n';for(const auto& cap:profile.capabilities)std::cout<<"capability="<<cap<<'\n';std::cout<<"ZENUNIVERSE_HOST_PROFILE_OK capabilities="<<profile.capabilities.size()<<'\n';return 0;}
+    if(cmd=="resolve"){unknown(a,{"input","package","host-arch","capability"});if(!a.pos.empty())throw Error("resolve takes no positional arguments");auto records=load_directory(one(a,"input"));auto id=one(a,"package"),arch=one(a,"host-arch");if(!architectures.count(arch))throw Error("unsupported host architecture");std::set<std::string> caps;for(auto&v:many(a,"capability")){if(!safe_id(v))throw Error("unsafe capability");caps.insert(v);}auto app=latest(records,id);if(!app)throw Error("package not found: "+id);auto plan=make_plan(*app,records,arch,caps);std::cout<<"capability-source=manual-unverified\n";print_plan(id,plan);if(plan.blocked.empty()){std::cout<<"ZENUNIVERSE_RESOLVE_OK package="<<id<<'\n';return 0;}std::cout<<"ZENUNIVERSE_RESOLVE_BLOCKED package="<<id<<" reasons="<<plan.blocked.size()<<'\n';return 3;}
+    if(cmd=="runtime-plan"){unknown(a,{"input","package","host-profile"});if(!a.pos.empty())throw Error("runtime-plan takes no positional arguments");auto records=load_directory(one(a,"input"));auto id=one(a,"package");const auto profile=require_host_profile(one(a,"host-profile"));auto app=latest(records,id);if(!app)throw Error("package not found: "+id);auto plan=make_plan(*app,records,profile.architecture,profile.capabilities);std::cout<<"ZEN_RUNTIME_PLAN1\nhost-profile="<<profile.id<<"\nhost-architecture="<<profile.architecture<<"\npackage="<<id<<'\n';print_plan(id,plan);return plan.blocked.empty()?0:3;}
+    if(cmd=="runtime-status"){unknown(a,{"input","runtime","host-profile"});if(!a.pos.empty())throw Error("runtime-status takes no positional arguments");auto records=load_directory(one(a,"input"));auto name=one(a,"runtime");const auto profile=require_host_profile(one(a,"host-profile"));auto provider=runtime_provider(records,name);if(!provider)throw Error("runtime provider not found: "+name);auto plan=make_runtime_plan(name,records,profile.architecture,profile.capabilities);std::cout<<"ZEN_RUNTIME_STATUS1\nruntime="<<name<<"\nprovider="<<provider->id<<'@'<<provider->version<<"\nprovider-availability="<<provider->availability<<"\nhost-profile="<<profile.id<<'\n';for(const auto& artifact:provider->accepts)std::cout<<"accepts="<<artifact<<'\n';print_plan(provider->id,plan);return plan.blocked.empty()?0:3;}
     if(cmd=="fetch-plan"){unknown(a,{"input","package"});if(!a.pos.empty())throw Error("fetch-plan takes no positional arguments");auto records=load_directory(one(a,"input"));auto id=one(a,"package");auto d=latest(records,id);if(!d)throw Error("package not found: "+id);std::cout<<"package="<<d->id<<'@'<<d->version<<'\n'<<"delivery="<<d->delivery<<'\n'<<"bytes="<<d->bytes<<'\n'<<"sha256="<<d->sha<<'\n';for(const auto&m:d->mirrors)std::cout<<"mirror="<<m<<'\n';std::cout<<"runtime="<<d->runtime<<'\n'<<"artifact="<<d->artifact<<'\n';if(d->delivery=="https")std::cout<<"ZENUNIVERSE_FETCH_READY verified-https=yes atomic-temp=yes resume-policy=range-if-server-supports\n";else if(d->delivery=="user-supplied")std::cout<<"ZENUNIVERSE_FETCH_USER_SUPPLIED\n";else std::cout<<"ZENUNIVERSE_FETCH_NO_NETWORK\n";return 0;}
     throw Error("unknown command: "+cmd);
 }
