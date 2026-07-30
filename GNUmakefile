@@ -29,10 +29,15 @@ POLICY_JOURNAL_QEMU_OUT := $(BUILD)/qemu/policy-journal
 POLICY_JOURNAL_QEMU_STAMP := $(POLICY_JOURNAL_QEMU_OUT)/.stamp
 POLICY_JOURNAL_SRC := kernel/parts/security_policy_format.inc kernel/parts/security_policy_transaction.inc
 
+TPM2_PROTOCOL_TEST := $(BUILD)/tpm2-protocol-test
+TPM2_QEMU_OUT := $(BUILD)/qemu/tpm2-nv
+TPM2_QEMU_STAMP := $(TPM2_QEMU_OUT)/.stamp
+TPM2_SRC := kernel/parts/tpm2_protocol.inc kernel/parts/tpm2_tis.inc kernel/parts/tpm2_commands.inc
+
 $(ZENPKG_CHECK_STAMP): $(BUILD)/zenpkg-manifest.json $(ZENPKG_FOREIGN_CHECK_STAMP)
 $(BUILD)/zenpkg: $(ZENPKG_FOREIGN_FORMAT_SRC) $(ZENPKG_FOREIGN_HOST_SRC) $(ZENPKG_SHA256_SRC)
-$(BUILD)/kernel.o: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc $(POLICY_JOURNAL_SRC)
-$(BUILD)/build-manifest.json: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc $(POLICY_JOURNAL_SRC)
+$(BUILD)/kernel.o: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc $(POLICY_JOURNAL_SRC) $(TPM2_SRC)
+$(BUILD)/build-manifest.json: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc $(POLICY_JOURNAL_SRC) $(TPM2_SRC)
 
 ATA_POLICY_TEST := $(BUILD)/storage-ata-policy-test
 ATA_RECOVERY_POLICY_TEST := $(BUILD)/storage-ata-recovery-policy-test
@@ -46,7 +51,7 @@ ATA_READ_FAULT_STAMP := $(ATA_READ_FAULT_OUT)/.stamp
 BLOCK_STATUS_QEMU_OUT := $(BUILD)/qemu/block-status
 BLOCK_STATUS_QEMU_STAMP := $(BLOCK_STATUS_QEMU_OUT)/.stamp
 
-.PHONY: ata-eio-qemu ata-read-fault-qemu block-status-qemu zenpkg-foreign-check zenpkg-foreign-qemu policy-journal-qemu
+.PHONY: ata-eio-qemu ata-read-fault-qemu block-status-qemu zenpkg-foreign-check zenpkg-foreign-qemu policy-journal-qemu tpm2-qemu
 
 $(ZENPKG_FOREIGN_FORMAT_TEST): tests/package_foreign_format_test.cpp $(ZENPKG_FOREIGN_FORMAT_SRC) | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
@@ -114,6 +119,22 @@ $(POLICY_JOURNAL_QEMU_STAMP): all $(POLICY_JOURNAL_HOT_IMAGE) $(POLICY_JOURNAL_C
 policy-journal-qemu: $(POLICY_JOURNAL_QEMU_STAMP)
 qemu: policy-journal-qemu
 
+$(TPM2_PROTOCOL_TEST): tests/tpm2_protocol_test.cpp kernel/parts/tpm2_protocol.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+	$@
+
+$(TPM2_QEMU_STAMP): all tests/qemu_tpm2_nv.sh
+	@rm -rf $(TPM2_QEMU_OUT)
+	@mkdir -p $(TPM2_QEMU_OUT)
+	bash tests/qemu_tpm2_nv.sh \
+	  $(BUILD)/zenov-os.img \
+	  $(BUILD)/zenov-data.img \
+	  $(TPM2_QEMU_OUT)
+	@grep -Fq 'TPM2_NV_QEMU_OK tis=mmio locality=0 provision=explicit counter=1-2-3 reboot=persistent absent=compatible' $(TPM2_QEMU_OUT)/summary.log
+	@touch $@
+
+ tpm2-qemu: $(TPM2_QEMU_STAMP)
+
 $(ATA_POLICY_TEST): tests/storage_ata_policy_test.cpp kernel/parts/storage_ata_policy.inc | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 	$@
@@ -134,7 +155,7 @@ $(ZENOVFS_RESULT_TEST): tests/storage_fs_result_test.cpp kernel/parts/storage_bl
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 	$@
 
-check: $(ATA_POLICY_TEST) $(ATA_RECOVERY_POLICY_TEST) $(BLOCK_RESULT_TEST) $(BLOCK_DEVICE_ABI_TEST) $(ZENOVFS_RESULT_TEST) $(POLICY_JOURNAL_TEST)
+check: $(ATA_POLICY_TEST) $(ATA_RECOVERY_POLICY_TEST) $(BLOCK_RESULT_TEST) $(BLOCK_DEVICE_ABI_TEST) $(ZENOVFS_RESULT_TEST) $(POLICY_JOURNAL_TEST) $(TPM2_PROTOCOL_TEST)
 
 $(ATA_EIO_QEMU_STAMP): all tests/qemu_ata_eio_retry.sh tests/blkdebug/ata-write-eio-once.conf $(BUILD)/zenovfs-verify
 	@rm -rf $(ATA_EIO_QEMU_OUT)
