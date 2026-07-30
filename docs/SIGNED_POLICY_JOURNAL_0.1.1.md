@@ -24,6 +24,8 @@ The fixed protected file `/security/policy-transaction.journal` is seeded as an 
 
 A journal is accepted only when every size, path, domain, version and reserved byte is canonical and the digest verifies. An invalid non-empty journal stops boot before audit or signed-policy initialization.
 
+The SHA-256 field is an unkeyed corruption and consistency check, not an authenticity primitive. Runtime modification is prevented by the protected-path boundary. After replay, the normal ZGDB, ZCAP and ZMID signature checks and the ZGAL1 chain validator still run before their domains become ready.
+
 ## Runtime protocol
 
 For each ZGDB, ZCAP or ZMID update:
@@ -70,12 +72,14 @@ A non-empty malformed, noncanonical or digest-invalid journal fails closed with 
 
 ## Verification
 
-The dedicated policy-journal gate includes:
+The dedicated policy-journal gates include:
 
-- strict GCC host build;
+- strict GCC host builds;
 - Clang ASan, UBSan, unsigned-overflow and implicit-conversion sanitizers;
 - real SHA-256 journal validation;
 - six simulated crash points;
+- independent ZGDB, ZCAP and ZMID prepare/replay coverage;
+- canonical empty auxiliary-path coverage for ZGDB and ZCAP;
 - nested transaction rejection;
 - exact policy/version/audit replay;
 - corrupt-journal and corrupt-readback fail-closed tests;
