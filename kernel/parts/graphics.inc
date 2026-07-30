@@ -28,6 +28,11 @@ const char* configured_terminal_cursor = terminal_cursor;
 #include "ui_files.inc"
 #undef render_scene
 void refresh_desktop();
+extern View launcher_return_view;
+namespace productivity {
+using FsResult = storage::FsResult;
+using FsStatus = storage::FsStatus;
+}
 #include "ui_productivity_model.inc"
 #include "ui_productivity.inc"
 void render_scene() { productivity::render_scene(); }
