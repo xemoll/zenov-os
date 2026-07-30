@@ -1,4 +1,4 @@
-#define update update_unhardened
+#define update update_unhardened [[maybe_unused]]
 #include "zmid_policy.inc"
 #undef update
 
