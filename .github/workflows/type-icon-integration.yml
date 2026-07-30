@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/zenov-os-0.1.1-type-icon-integration
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
