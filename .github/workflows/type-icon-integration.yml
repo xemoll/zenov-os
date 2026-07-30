@@ -32,7 +32,7 @@ jobs:
           test "$(sha256sum .github/scripts/type_icon_pass.py | cut -d' ' -f1)" = \
             fc4e6cf085e2d78eecef23b563e7afda17d4e4a219f8a3c0bc0d33418996d87e
           test "$(sha256sum .github/scripts/type_icon_post.py | cut -d' ' -f1)" = \
-            d701e6487135d067121194aba85993ae8470a0ea779f77947eaf3168b11807e8
+            164b68fd7ff3e776cafd333d281f2dc05e7789966d016b930c4ee66f590915b6
           test "$(sha256sum third_party/inter/OFL.txt | cut -d' ' -f1)" = \
             262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a
           git diff --name-only "$BASE" HEAD | sort > /tmp/bootstrap-files.txt
