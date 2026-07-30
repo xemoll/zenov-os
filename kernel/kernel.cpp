@@ -151,7 +151,7 @@ extern "C" void kernel_main() {
     serial::init();
     serial::line("ZENOVOS_BOOT_OK");
     for (uint32_t i = 0; i < zenov_generated::kBootMessageCount; ++i) serial::line(zenov_generated::kBootMessages[i]);
-    serial::line("Initializing IDT, memory, storage, audit journal, signed policy, syscall capabilities, signed repository, packages, security, graphics, input and ring-3 services...");
+    serial::line("Initializing IDT, memory, storage, policy recovery, audit journal, signed policy, syscall capabilities, signed repository, packages, security, graphics, input and ring-3 services...");
 
     console::set_color(zenov_generated::kForeground, zenov_generated::kBackground);
     idt_init();
@@ -170,6 +170,16 @@ extern "C" void kernel_main() {
     if (!storage::fs_surface_contract_valid()) panic("Filesystem result surface contract failed.");
     serial::line("ZENOVFS_SURFACE_CONTRACT_OK version=1");
     process::init();
+    if (!security_policy_transaction::recover_pending()) {
+        panic("Persistent signed policy transaction recovery failed.");
+    }
+    if (security_policy_transaction::recovered_domain != security_policy_transaction::Domain::none) {
+        serial::write("POLICY_TRANSACTION_RECOVERY_OK domain=");
+        serial::line(security_policy_transaction::domain_name(
+            security_policy_transaction::recovered_domain));
+    } else {
+        serial::line("POLICY_TRANSACTION_JOURNAL_CLEAN");
+    }
     if (!security_audit::init()) panic("Persistent ZenovGuard audit journal validation failed.");
     if (!zgdb::init()) panic("Signed ZenovGuard database validation failed.");
     if (!zcap::init()) panic("Signed syscall capability policy validation failed.");
@@ -193,6 +203,7 @@ extern "C" void kernel_main() {
     if (storage::guarded_write_file("/security/verified-reads.version", &mutation_probe, 1U, false)) panic("Verified-read version mutation guard failed.");
     if (storage::guarded_write_file("/quarantine/security-probe.qtn", &mutation_probe, 1U, false)) panic("Quarantine mutation guard failed.");
     if (storage::guarded_write_file("/security/zenovguard.audit", &mutation_probe, 1U, false)) panic("Persistent security audit mutation guard failed.");
+    if (storage::guarded_write_file("/security/policy-transaction.journal", &mutation_probe, 1U, false)) panic("Policy transaction journal mutation guard failed.");
     if (storage::guarded_write_file("/repo/timestamp.zrm", &mutation_probe, 1U, false)) panic("Signed repository metadata mutation guard failed.");
     if (storage::guarded_write_file("/apps/pkg-security-probe.zex", &mutation_probe, 1U, false)) panic("Managed package payload mutation guard failed.");
     if (storage::guarded_write_file("/var/lib/zenpkg/state.v1", &mutation_probe, 1U, false)) panic("Package database mutation guard failed.");
@@ -201,6 +212,7 @@ extern "C" void kernel_main() {
     if (!security_audit::verify_active()) panic("Persistent security audit final-read verification failed.");
     serial::line("ZENOV_GUARD_PROTECTED_PATH_TEST_OK");
     serial::line("ZENOV_GUARD_INTELLIGENCE_PROTECTED_PATH_TEST_OK");
+    serial::line("POLICY_TRANSACTION_JOURNAL_PROTECTED_PATH_TEST_OK");
     serial::line("ZRWP_PROTECTED_PATH_TEST_OK");
     serial::line("ZENOV_GUARD_QUARANTINE_PROTECTED_PATH_TEST_OK");
     serial::line("ZENREPO_PROTECTED_PATH_TEST_OK");
@@ -220,7 +232,7 @@ extern "C" void kernel_main() {
     if (graphical && mouse_ready && !mouse_decoder_regression()) panic("PS/2 mouse decoder regression failed.");
     if (graphical && mouse_ready) serial::line("PS2_MOUSE_DECODER_OK");
 
-    serial::line("Kernel online. Desktop, signed policies, persistent audit, syscall capabilities, signed malware intelligence, authenticated reads, controlled-folder defense, packages, security, storage and ring-3 services ready.");
+    serial::line("Kernel online. Desktop, crash-recoverable signed policies, persistent audit, syscall capabilities, signed malware intelligence, authenticated reads, controlled-folder defense, packages, security, storage and ring-3 services ready.");
     console::show_home();
     if (graphical) graphics::sync_terminal_from_console();
     serial::line("ZENOVOS_UI_READY");
