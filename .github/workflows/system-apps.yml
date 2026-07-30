@@ -70,15 +70,17 @@ jobs:
           grep -Fq 'UI_PRODUCTIVITY_SAVE_OK path=' kernel/parts/ui_productivity_state.inc
           grep -Fq '#include "ui_productivity_state.inc"' kernel/parts/ui_productivity.inc
           grep -Fq '#include "ui_productivity_views.inc"' kernel/parts/ui_productivity.inc
+          grep -Fq 'using FsResult = storage::FsResult;' kernel/parts/graphics.inc
+          grep -Fq 'void render_scene() { productivity::render_scene(); }' kernel/parts/graphics.inc
           grep -Fq 'UI_SYSTEM_APPS_READY clock=yes calendar=yes notes=zenovfs notepad=zenovfs' kernel/parts/ui_productivity_runtime.inc
-          grep -Fq 'SYSTEM_APPS_QEMU_OK apps=clock,calendar,notes,notepad persistence=reboot' ci-logs/qemu-system-apps.log
+          grep -Fq 'SYSTEM_APPS_QEMU_OK apps=clock,calendar,notes,notepad persistence=reboot frames=synchronized' ci-logs/qemu-system-apps.log
           test -s build/qemu-system-apps/clock.ppm
           test -s build/qemu-system-apps/calendar.ppm
           test -s build/qemu-system-apps/notes.ppm
           test -s build/qemu-system-apps/notepad.ppm
           test -s ci-logs/productivity-apps-test
           test -s ci-logs/productivity-apps-test.log
-          echo 'SYSTEM_APPS_SOURCE_CONTRACT_OK rtc=bounded calendar=gregorian notes=guarded notepad=persistent'
+          echo 'SYSTEM_APPS_SOURCE_CONTRACT_OK rtc=bounded calendar=gregorian notes=guarded notepad=persistent frames=synchronized'
 
       - name: Upload system-app evidence
         if: always()
@@ -93,6 +95,7 @@ jobs:
             build/zenov-os.img
             build/zenov-data.img
             build/qemu-system-apps/
+            docs/SYSTEM_APPS_0.1.1.md
             kernel/parts/ui_productivity_model.inc
             kernel/parts/ui_productivity.inc
             kernel/parts/ui_productivity_state.inc
