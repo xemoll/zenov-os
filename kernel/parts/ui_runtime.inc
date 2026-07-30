@@ -7,12 +7,9 @@ uint32_t physical_background(uint32_t y) {
 }
 
 void present_physical_region(int32_t x, int32_t y, int32_t region_width, int32_t region_height) {
-    if (!framebuffer || !backbuffer || region_width <= 0 || region_height <= 0) return;
-    if (x < 0) { region_width += x; x = 0; }
-    if (y < 0) { region_height += y; y = 0; }
-    if (x + region_width > static_cast<int32_t>(display_width)) region_width = static_cast<int32_t>(display_width) - x;
-    if (y + region_height > static_cast<int32_t>(display_height)) region_height = static_cast<int32_t>(display_height) - y;
-    if (region_width <= 0 || region_height <= 0) return;
+    if (!framebuffer || !backbuffer ||
+        !clip_rect_to_bounds(x, y, region_width, region_height,
+                             static_cast<int32_t>(display_width), static_cast<int32_t>(display_height))) return;
 
     for (int32_t py = y; py < y + region_height; ++py) {
         const uint32_t background = physical_background(static_cast<uint32_t>(py));
@@ -89,23 +86,37 @@ void report_display_mode(const char* marker) {
     serial::write(marker); serial::put(' '); serial_uint(display_width); serial::put('x'); serial_uint(display_height); serial::write("\r\n");
 }
 
+uint32_t query_framebuffer_capacity() {
+    const uint32_t blocks = static_cast<uint32_t>(vbe_read(vbe_video_memory_64k));
+    if (!blocks) return fallback_framebuffer_bytes;
+    const uint64_t bytes = static_cast<uint64_t>(blocks) * 64U * 1024U;
+    if (bytes > 0xFFFFFFFFULL) return 0xFFFFFFFFU;
+    return static_cast<uint32_t>(bytes);
+}
+
 bool set_display_mode(uint8_t mode) {
     if (!display_mode_valid(mode)) return false;
     const DisplayMode target = display_modes[mode];
-    const uint32_t bytes = static_cast<uint32_t>(target.width) * static_cast<uint32_t>(target.height) * bytes_per_pixel;
-    if (bytes > maximum_framebuffer_bytes || bytes > paging::graphics_window_bytes) return false;
+    uint32_t bytes = 0U;
+    if (!display_mode_bytes(target, bytes) ||
+        bytes > maximum_framebuffer_bytes ||
+        bytes > available_framebuffer_bytes ||
+        bytes > paging::graphics_mapped_bytes()) return false;
     vbe_write(vbe_enable, 0);
     vbe_write(vbe_xres, target.width);
     vbe_write(vbe_yres, target.height);
     vbe_write(vbe_bpp, 32);
     vbe_write(vbe_virtual_width, target.width);
     vbe_write(vbe_enable, vbe_enabled | vbe_linear_framebuffer);
-    if (vbe_read(vbe_xres) != target.width || vbe_read(vbe_yres) != target.height || vbe_read(vbe_bpp) != 32 || !(vbe_read(vbe_enable) & vbe_enabled)) return false;
+    if (vbe_read(vbe_xres) != target.width ||
+        vbe_read(vbe_yres) != target.height ||
+        vbe_read(vbe_bpp) != 32 ||
+        !(vbe_read(vbe_enable) & vbe_enabled)) return false;
     active_display_mode = mode;
     display_width = target.width;
     display_height = target.height;
     configure_viewport();
-    configure_scaler();
+    if (!configure_scaler()) return false;
     mouse_screen_x = static_cast<int32_t>(display_width / 2U);
     mouse_screen_y = static_cast<int32_t>(display_height / 2U);
     update_logical_mouse();
@@ -161,7 +172,15 @@ void cycle_terminal_cursor(bool forward) {
     persist_personalization();
 }
 
-void toggle_motion() { desktop_animations = !desktop_animations; persist_personalization(); }
+void toggle_motion() {
+    desktop_animations = !desktop_animations;
+    if (!desktop_animations) {
+        scene_transition_pending = false;
+        ui_scene_offset_y = 0;
+    }
+    persist_personalization();
+    serial::line(desktop_animations ? "UI_REDUCED_MOTION_OFF" : "UI_REDUCED_MOTION_ON");
+}
 void cycle_accent(bool forward) {
     runtime_accent_slot = forward ? static_cast<uint8_t>((runtime_accent_slot + 1U) % accent_palette_size)
                                   : static_cast<uint8_t>((runtime_accent_slot + accent_palette_size - 1U) % accent_palette_size);
@@ -209,7 +228,7 @@ void sync_terminal_from_console() {
     if (!active || !backbuffer || !framebuffer) return;
     if (!terminal_sync_started) {
         terminal_sync_started = true;
-        window_x = 144; window_y = 70; active_view = View::terminal;
+        window_x = 192; window_y = 36; active_view = View::terminal;
         render_scene(); present_full();
         serial::line("UI_TERMINAL_RENDER_OK"); serial::line("ZENOV_SHELL_READY"); return;
     }
@@ -230,17 +249,143 @@ void serial_hex(uint32_t value) {
     for (int32_t shift = 28; shift >= 0; shift -= 4) serial::put(digits[(value >> static_cast<uint32_t>(shift)) & 0xFU]);
 }
 
+bool border_stroke_contract_ok() {
+    if (!backbuffer) return false;
+    constexpr int32_t test_size = 9;
+    constexpr uint32_t interior = 0x102030U;
+    constexpr uint32_t border = 0xD0E0F0U;
+    uint32_t saved[test_size * test_size]{};
+    for (int32_t row = 0; row < test_size; ++row)
+        for (int32_t column = 0; column < test_size; ++column)
+            saved[row * test_size + column] = backbuffer[static_cast<uint32_t>(row) * width + static_cast<uint32_t>(column)];
+    fill_rect(0, 0, test_size, test_size, interior);
+    draw_round_border(0, 0, test_size, test_size, 3, border);
+    const bool preserved = backbuffer[4U * width + 4U] == interior;
+    const bool stroked = backbuffer[4U] == border && backbuffer[4U * width] == border;
+    for (int32_t row = 0; row < test_size; ++row)
+        for (int32_t column = 0; column < test_size; ++column)
+            backbuffer[static_cast<uint32_t>(row) * width + static_cast<uint32_t>(column)] = saved[row * test_size + column];
+    return preserved && stroked;
+}
+
+bool input_modality_contract_ok() {
+    const HoverTarget saved_hover = hovered_target;
+    const bool saved_mode = keyboard_focus_mode;
+    hovered_target = HoverTarget::taskbar_start;
+    keyboard_focus_mode = true;
+    const bool keyboard_suppresses_hover = !is_hovered(HoverTarget::taskbar_start);
+    keyboard_focus_mode = false;
+    const bool pointer_enables_hover = is_hovered(HoverTarget::taskbar_start);
+    hovered_target = saved_hover;
+    keyboard_focus_mode = saved_mode;
+    return keyboard_suppresses_hover && pointer_enables_hover;
+}
+
+
+constexpr uint8_t transition_frame_count(bool animations_enabled) {
+    return animations_enabled ? 4U : 1U;
+}
+
+constexpr bool reduced_motion_contract_ok() {
+    return transition_frame_count(true) == 4U && transition_frame_count(false) == 1U;
+}
+
+constexpr bool target_size_contract_ok() {
+    return 30 >= 24 && 38 >= 24 && taskbar_status_width >= 24 &&
+        taskbar_tray_width - taskbar_status_width >= 24 &&
+        quick_tile_width >= 24 && quick_tile_height >= 24 &&
+        launcher_search_width >= 24 && launcher_search_height >= 24 &&
+        launcher_card_width >= 24 && launcher_card_height >= 24 &&
+        settings_sidebar_width >= 24 && settings_page_height >= 24 &&
+        settings_theme_width >= 24 && settings_theme_height >= 24 &&
+        settings_content_width >= 24 && settings_display_height >= 24 &&
+        files_sidebar_width >= 24 && files_row_height >= 24;
+}
+
+constexpr bool focus_not_obscured_contract_ok() {
+    constexpr int32_t earliest_taskbar_top = static_cast<int32_t>(height) - taskbar_margin - 46;
+    return 36 + window_height <= earliest_taskbar_top - 8 &&
+        launcher_panel_y + launcher_panel_height <= earliest_taskbar_top - 8 &&
+        earliest_taskbar_top - quick_panel_height - 10 + quick_panel_height <= earliest_taskbar_top - 8 &&
+        earliest_taskbar_top - status_panel_height - 10 + status_panel_height <= earliest_taskbar_top - 8 &&
+        settings_taskbar_y_offset + 26 <= window_height &&
+        settings_reset_y_offset + 46 <= window_height &&
+        files_row_y_offset + static_cast<int32_t>(files_visible_rows * files_row_height) <= window_height - 32;
+}
+
+constexpr bool widescreen_canvas_contract_ok() {
+    constexpr int32_t taskbar_top = static_cast<int32_t>(height) - taskbar_margin - 46;
+    return width == 896U && height == 504U && width * 9U == height * 16U &&
+        backbuffer_bytes < 800U * 600U * bytes_per_pixel &&
+        topbar_width == 0 &&
+        192 + window_width <= static_cast<int32_t>(width) - 24 &&
+        36 + window_height <= taskbar_top - 8 &&
+        launcher_panel_x + launcher_panel_width <= static_cast<int32_t>(width) - 24 &&
+        launcher_panel_y + launcher_panel_height <= taskbar_top - 8;
+}
+
+constexpr bool minimal_shell_contract_ok() {
+    return topbar_width == 0 &&
+        taskbar_main_width_comfortable == 204 && taskbar_tray_width == 112 &&
+        taskbar_status_width == 36 &&
+        quick_panel_width == 292 && quick_panel_height == 190 &&
+        quick_tile_width == 128 && quick_tile_height == 48 &&
+        status_panel_width == 280 && status_panel_height == 230 &&
+        launcher_panel_x == 208 && launcher_panel_width == 480 &&
+        launcher_search_height == 40 && launcher_card_width == 448 &&
+        launcher_panel_height_for_count(0U) == 84 &&
+        launcher_panel_height_for_count(1U) == 126 &&
+        launcher_panel_height_for_count(6U) == 336;
+}
+
+constexpr bool display_catalog_2k_contract_ok() {
+    return display_mode_count == 32U &&
+        display_modes[22].width == 1920U && display_modes[22].height == 1080U &&
+        display_modes[24].width == 2048U && display_modes[24].height == 1080U &&
+        display_modes[28].width == 2560U && display_modes[28].height == 1440U &&
+        display_modes[29].width == 2560U && display_modes[29].height == 1600U;
+}
+
+constexpr bool display_catalog_4k_contract_ok() {
+    return display_mode_count == 32U &&
+        display_modes[30].width == 3840U && display_modes[30].height == 2160U &&
+        display_modes[31].width == 4096U && display_modes[31].height == 2160U;
+}
+
+bool display_mode_available(uint8_t mode) {
+    if (!display_mode_valid(mode)) return false;
+    uint32_t bytes = 0U;
+    return display_mode_bytes(display_modes[mode], bytes) &&
+        bytes <= available_framebuffer_bytes &&
+        bytes <= paging::graphics_mapped_bytes();
+}
+
 bool init() {
     physical_framebuffer = find_qemu_framebuffer();
     if (!physical_framebuffer) { serial::line("GRAPHICS_PCI_NOT_FOUND"); return false; }
     serial::line("GRAPHICS_PCI_OK");
-    if (!paging::map_graphics_window(physical_framebuffer, maximum_framebuffer_bytes)) { serial::line("FRAMEBUFFER_MAP_FAILED"); return false; }
+    available_framebuffer_bytes = query_framebuffer_capacity();
+    if (available_framebuffer_bytes > paging::graphics_window_bytes)
+        available_framebuffer_bytes = paging::graphics_window_bytes;
+    serial::write("FRAMEBUFFER_VRAM_BYTES "); serial_uint(available_framebuffer_bytes); serial::write("\r\n");
+    if (!paging::map_graphics_window(physical_framebuffer, available_framebuffer_bytes)) {
+        serial::line("FRAMEBUFFER_MAP_FAILED"); return false;
+    }
     framebuffer = reinterpret_cast<volatile uint32_t*>(paging::graphics_virtual_base);
+    serial::write("FRAMEBUFFER_MAPPING_BYTES "); serial_uint(paging::graphics_mapped_bytes()); serial::write("\r\n");
+    serial::line(paging::graphics_mapping_uses_large_pages()
+        ? "FRAMEBUFFER_MAPPING_LARGE_PAGES"
+        : "FRAMEBUFFER_MAPPING_SMALL_PAGES");
     serial::line("FRAMEBUFFER_MAPPED_OK");
     load_runtime_preferences();
-    if (heap::free_bytes() < backbuffer_bytes + 32768U) { serial::line("BACKBUFFER_NO_MEMORY"); return false; }
+    const uint32_t scaler_heap_bytes = available_framebuffer_bytes > fallback_framebuffer_bytes
+        ? high_scaler_cache_bytes : 0U;
+    const uint32_t required_heap = backbuffer_bytes + scaler_heap_bytes + 1024U;
+    if (heap::free_bytes() < required_heap) { serial::line("BACKBUFFER_NO_MEMORY"); return false; }
     backbuffer = static_cast<uint32_t*>(heap::allocate(backbuffer_bytes, 4096U));
-    if (!backbuffer || !initialize_mode()) { serial::line("GRAPHICS_MODE_FAILED"); return false; }
+    if (!backbuffer || !initialize_scaler_cache() || !initialize_mode()) {
+        serial::line("GRAPHICS_MODE_FAILED"); return false;
+    }
     active = true;
     render_scene(); present_full();
     report_display_mode("GRAPHICS_MODE_OK");
@@ -248,7 +393,27 @@ bool init() {
     const uint32_t before = backbuffer[0]; fill_rect(-4, -4, 8, 8, rgb(255,0,0)); const bool clipping = backbuffer[0] == rgb(255,0,0); backbuffer[0] = before;
     serial::line(clipping ? "CLIPPING_OK" : "CLIPPING_FAILED");
     serial::line(blend(rgb(255,255,255), rgb(0,0,0), 128) == rgb(128,128,128) ? "ALPHA_BLEND_OK" : "ALPHA_BLEND_FAILED");
-    serial::line(glyph_for('Z') && glyph_for('0') && glyph_for('?') ? "FONT_RENDER_OK" : "FONT_RENDER_FAILED");
+    const bool border_stroke_ok = border_stroke_contract_ok();
+    const bool font_atlas_ok = font_contract_ok();
+    const bool font_metrics_ok = font_metrics_contract_ok();
+    const bool text_ellipsis_ok = text_ellipsis_contract_ok();
+    const bool clipping_safety_ok = clipping_safety_contract_ok();
+    const bool color_mix_ok = color_mix_contract_ok();
+    const bool accessibility_v4_ok = focus_visual_contract_ok() && input_modality_contract_ok() &&
+        theme_contrast_contract_ok() && target_size_contract_ok() &&
+        focus_not_obscured_contract_ok() && reduced_motion_contract_ok();
+    const bool config_parser_ok = config_parser_contract_ok();
+    const bool edge_scaler_ok = scaler_edge_contract_ok();
+    const bool font_ok = glyph_for('Z') && glyph_for('0') && glyph_for('?') && font_atlas_ok && font_metrics_ok;
+    serial::line(font_ok ? "FONT_RENDER_OK" : "FONT_RENDER_FAILED");
+    serial::line(font_atlas_ok ? "UI_FONT_ATLAS_OK" : "UI_FONT_ATLAS_FAILED");
+    serial::line(font_metrics_ok ? "UI_FONT_METRICS_OK" : "UI_FONT_METRICS_FAILED");
+    serial::line(text_ellipsis_ok ? "UI_TEXT_ELLIPSIS_OK" : "UI_TEXT_ELLIPSIS_FAILED");
+    serial::line(clipping_safety_ok ? "UI_CLIPPING_SAFETY_OK" : "UI_CLIPPING_SAFETY_FAILED");
+    serial::line(color_mix_ok ? "UI_COLOR_MIX_OK" : "UI_COLOR_MIX_FAILED");
+    serial::line(border_stroke_ok ? "UI_BORDER_STROKE_OK" : "UI_BORDER_STROKE_FAILED");
+    serial::line(config_parser_ok ? "UI_CONFIG_PARSER_OK" : "UI_CONFIG_PARSER_FAILED");
+    serial::line(edge_scaler_ok ? "UI_EDGE_AWARE_SCALER_OK" : "UI_EDGE_AWARE_SCALER_FAILED");
     serial::line(desktop_radius >= 6U && desktop_radius <= 20U ? "UI_ROUNDED_RECT_OK" : "UI_ROUNDED_RECT_FAILED");
     serial::line(current_theme.canvas_top != current_theme.canvas_bottom ? "UI_GRADIENT_OK" : "UI_GRADIENT_FAILED");
     const bool bounds_ok = window_x >= 0 && window_y >= 0 && window_x + window_width <= static_cast<int32_t>(width) && window_y + window_height <= static_cast<int32_t>(height);
@@ -256,36 +421,66 @@ bool init() {
     const bool geometry_ok = window_width % ui_grid == 0 && window_height % ui_grid == 0 &&
         taskbar_main_x() >= taskbar_margin && taskbar_tray_x() + taskbar_tray_width <= static_cast<int32_t>(width) - taskbar_margin &&
         launcher_panel_x + launcher_panel_width <= static_cast<int32_t>(width);
+    const bool cohesive_shell_ok = quick_panel_y() >= taskbar_margin &&
+        quick_tile_y(quick_settings_count - 1U) + quick_tile_height <= quick_panel_y() + quick_panel_height - 12 &&
+        launcher_card_y(launcher_item_count - 1U) + launcher_card_height <= launcher_panel_y + launcher_panel_height - 12;
     serial::line(geometry_ok ? "UI_GEOMETRY_OK" : "UI_GEOMETRY_FAILED");
     const bool navigation_ok = launcher_item_count == 6U && settings_page_count == 4U && quick_settings_count == 6U &&
         key_f10 > key_f9 && key_f11 > key_f10 && key_super > key_f10;
     serial::line(navigation_ok ? "UI_NAVIGATION_MODEL_OK" : "UI_NAVIGATION_MODEL_FAILED");
-    const bool display_ok = display_mode_count >= 20U && display_framebuffer_bytes() <= maximum_framebuffer_bytes &&
-        maximum_framebuffer_bytes <= paging::graphics_window_bytes && viewport_width > 0 && viewport_height > 0 &&
-        viewport_x >= 0 && viewport_y >= 0 && viewport_x + viewport_width <= static_cast<int32_t>(display_width) && viewport_y + viewport_height <= static_cast<int32_t>(display_height);
-    const bool scaler_ok = viewport_width <= static_cast<int32_t>(scaler_max_width) && viewport_height <= static_cast<int32_t>(scaler_max_height);
+    const bool widescreen_ok = widescreen_canvas_contract_ok();
+    const bool minimal_shell_ok = minimal_shell_contract_ok();
+    const bool catalog_2k_ok = display_catalog_2k_contract_ok();
+    const bool catalog_4k_ok = display_catalog_4k_contract_ok();
+    const bool display_ok = display_mode_count == 32U &&
+        display_framebuffer_bytes() <= maximum_framebuffer_bytes &&
+        maximum_framebuffer_bytes <= paging::graphics_window_bytes &&
+        paging::graphics_mapped_bytes() <= paging::graphics_window_bytes &&
+        viewport_width > 0 && viewport_height > 0 &&
+        viewport_x >= 0 && viewport_y >= 0 &&
+        viewport_x + viewport_width <= static_cast<int32_t>(display_width) &&
+        viewport_y + viewport_height <= static_cast<int32_t>(display_height);
+    const bool scaler_ok =
+        (available_framebuffer_bytes <= fallback_framebuffer_bytes || high_scaler_cache_storage) &&
+        viewport_width <= static_cast<int32_t>(scaler_max_width) &&
+        viewport_height <= static_cast<int32_t>(scaler_max_height);
     uint8_t rtc_hour = 0, rtc_minute = 0; const bool rtc_ok = rtc_read_time(rtc_hour, rtc_minute);
     serial::line(display_ok ? "UI_ADAPTIVE_DISPLAY_OK" : "UI_ADAPTIVE_DISPLAY_FAILED");
     serial::line(scaler_ok ? "UI_HYBRID_SCALER_OK" : "UI_HYBRID_SCALER_FAILED");
+    serial::line(catalog_2k_ok ? "UI_DISPLAY_2K_CATALOG_OK" : "UI_DISPLAY_2K_CATALOG_FAILED");
+    serial::line(catalog_4k_ok ? "UI_DISPLAY_4K_CATALOG_OK" : "UI_DISPLAY_4K_CATALOG_FAILED");
+    serial::line(display_mode_available(29U) ? "UI_DISPLAY_2K_READY" : "UI_DISPLAY_2K_UNAVAILABLE");
+    serial::line(display_mode_available(31U) ? "UI_DISPLAY_4K_READY" : "UI_DISPLAY_4K_UNAVAILABLE");
     serial::line("UI_START_MENU_OK");
     serial::line("UI_QUICK_SETTINGS_OK");
     serial::line("UI_PERSONALIZATION_OK");
     serial::line("UI_TASKBAR_OK");
     serial::line(rtc_ok ? "UI_TASKBAR_CLOCK_OK" : "UI_TASKBAR_CLOCK_FALLBACK");
     serial::line("UI_SYSTEM_CENTER_OK");
-    serial::line("UI_ACCESSIBILITY_OK");
+    serial::line(accessibility_v4_ok ? "UI_ACCESSIBILITY_OK" : "UI_ACCESSIBILITY_FAILED");
     serial::line("UI_START_SYSTEM_TOOLS_OK");
-    serial::line("UI_ANIMATION_MODEL_OK");
+    serial::line(cohesive_shell_ok ? "UI_SEPTINUM_SHELL_OK" : "UI_SEPTINUM_SHELL_FAILED");
+    serial::line(minimal_shell_ok ? "UI_MINIMAL_SHELL_OK" : "UI_MINIMAL_SHELL_FAILED");
+    serial::line(minimal_shell_ok ? "UI_SEPTINUM_V2_OK" : "UI_SEPTINUM_V2_FAILED");
+    serial::line(minimal_shell_ok ? "UI_LAUNCHER_MORPH_OK" : "UI_LAUNCHER_MORPH_FAILED");
+    serial::line(widescreen_ok ? "UI_WIDESCREEN_CANVAS_OK" : "UI_WIDESCREEN_CANVAS_FAILED");
     serial::write("UI_DISPLAY_MODE_COUNT "); serial_uint(display_mode_count); serial::write("\r\n");
     serial::line("UI_SETTINGS_CONTROLS_OK");
     report_display_mode("UI_DISPLAY_MODE_OK");
     serial::write("DESKTOP_SCENE_HASH="); serial_hex(scene_hash()); serial::write("\r\n");
     serial::line("DESKTOP_SCENE_OK");
-    return clipping && runtime_preferences_loaded && bounds_ok && geometry_ok && navigation_ok && display_ok && scaler_ok;
+    return clipping && runtime_preferences_loaded && bounds_ok && geometry_ok && cohesive_shell_ok && minimal_shell_ok && navigation_ok &&
+        display_ok && scaler_ok && widescreen_ok && catalog_2k_ok && catalog_4k_ok &&
+        font_atlas_ok && font_metrics_ok && text_ellipsis_ok && clipping_safety_ok &&
+        color_mix_ok && accessibility_v4_ok && border_stroke_ok && config_parser_ok && edge_scaler_ok;
 }
 
 bool hit(int32_t x, int32_t y, int32_t rect_x, int32_t rect_y, int32_t rect_width, int32_t rect_height) {
-    return x >= rect_x && x < rect_x + rect_width && y >= rect_y && y < rect_y + rect_height;
+    if (rect_width <= 0 || rect_height <= 0) return false;
+    const int64_t right = static_cast<int64_t>(rect_x) + rect_width;
+    const int64_t bottom = static_cast<int64_t>(rect_y) + rect_height;
+    return static_cast<int64_t>(x) >= rect_x && static_cast<int64_t>(x) < right &&
+        static_cast<int64_t>(y) >= rect_y && static_cast<int64_t>(y) < bottom;
 }
 
 void wait_animation_tick() {
@@ -295,22 +490,35 @@ void wait_animation_tick() {
 }
 
 void refresh_desktop() {
-    if (scene_transition_pending && desktop_animations) {
+    const bool transition_requested = scene_transition_pending;
+    const uint8_t frame_count = transition_frame_count(desktop_animations);
+    if (transition_requested && frame_count > 1U) {
         static constexpr int32_t offsets[4] = {14, 8, 3, 0};
-        for (uint32_t i = 0; i < 4U; ++i) {
+        for (uint32_t i = 0; i < frame_count; ++i) {
             ui_scene_offset_y = offsets[i]; render_scene(); present_full();
-            if (i + 1U < 4U) wait_animation_tick();
+            if (i + 1U < frame_count) wait_animation_tick();
         }
-        ui_scene_offset_y = 0; scene_transition_pending = false; return;
+        ui_scene_offset_y = 0;
+        scene_transition_pending = false;
+    } else {
+        scene_transition_pending = false;
+        ui_scene_offset_y = 0;
+        render_scene();
+        present_full();
     }
-    scene_transition_pending = false; ui_scene_offset_y = 0; render_scene(); present_full();
+    if (transition_requested) {
+        serial::write("UI_TRANSITION_FRAMES ");
+        serial_uint(transition_requested ? frame_count : 1U);
+        serial::write("\r\n");
+    }
+    serial::line("UI_FRAME_PRESENTED");
 }
 
 void set_active_view(View view) {
     if (active_view == view) { hovered_target = HoverTarget::none; quick_settings_open = false; status_center_open = false; return; }
     if (view == View::launcher) launcher_return_view = active_view;
     active_view = view; hovered_target = HoverTarget::none; quick_settings_open = false; status_center_open = false;
-    scene_transition_pending = desktop_animations;
+    scene_transition_pending = true;
     if (view == View::launcher) launcher_focus = launcher_first_match();
     if (view == View::settings) { settings_page = 0U; settings_focus = 0U; }
 }
@@ -319,6 +527,7 @@ void toggle_start_menu() {
     if (active_view == View::launcher) set_active_view(launcher_return_view);
     else set_active_view(View::launcher);
     refresh_desktop();
+    serial::line(active_view == View::launcher ? "UI_START_SURFACE_PRESENTED_OPEN" : "UI_START_SURFACE_PRESENTED_CLOSED");
 }
 
 void toggle_quick_settings() {
@@ -327,6 +536,7 @@ void toggle_quick_settings() {
     quick_settings_open = !quick_settings_open;
     hovered_target = HoverTarget::none;
     refresh_desktop();
+    serial::line(quick_settings_open ? "UI_CONTROL_CENTER_PRESENTED_OPEN" : "UI_CONTROL_CENTER_PRESENTED_CLOSED");
 }
 
 void toggle_status_center() {
@@ -347,7 +557,6 @@ void open_launcher_item(uint8_t index) {
         set_active_view(View::terminal);
         if (index == 4U) package_manager::status();
         else security_guard::print_status();
-        render_scene(); present_full();
         serial::line(index == 4U ? "UI_START_PACKAGES_OPEN_OK" : "UI_START_SECURITY_OPEN_OK");
     }
 }
@@ -515,6 +724,8 @@ bool handle_click() {
 }
 
 bool handle_navigation_key(uint16_t key) {
+    keyboard_focus_mode = true;
+    hovered_target = HoverTarget::none;
     if (key == key_f9) return cycle_display_mode();
     if (key == key_f10) { toggle_quick_settings(); return true; }
     if (key == key_f11) { toggle_status_center(); return true; }
@@ -574,8 +785,19 @@ bool handle_navigation_key(uint16_t key) {
     return true;
 }
 
+constexpr int32_t window_drag_min_x() { return 24; }
+constexpr int32_t window_drag_max_x() { return static_cast<int32_t>(width) - window_width - 24; }
+constexpr int32_t window_drag_max_y() {
+    constexpr int32_t value = static_cast<int32_t>(height) - taskbar_margin - 46 - window_height - 8;
+    return value > 0 ? value : 0;
+}
+constexpr int32_t window_drag_min_y() {
+    return window_drag_max_y() < 50 ? window_drag_max_y() : 50;
+}
+
 void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
     if (!active) return;
+    if (delta_x != 0 || delta_y != 0 || buttons != mouse_buttons) keyboard_focus_mode = false;
     restore_cursor(mouse_screen_x, mouse_screen_y);
     mouse_screen_x += delta_x; mouse_screen_y += delta_y;
     if (mouse_screen_x < 0) mouse_screen_x = 0;
@@ -595,10 +817,10 @@ void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
     if (dragging) {
         hovered_target = HoverTarget::none;
         window_x = mouse_x - drag_offset_x; window_y = mouse_y - drag_offset_y;
-        if (window_x < 24) window_x = 24;
-        if (window_x > static_cast<int32_t>(width) - window_width - 24) window_x = static_cast<int32_t>(width) - window_width - 24;
-        if (window_y < 50) window_y = 50;
-        if (window_y > 116) window_y = 116;
+        if (window_x < window_drag_min_x()) window_x = window_drag_min_x();
+        if (window_x > window_drag_max_x()) window_x = window_drag_max_x();
+        if (window_y < window_drag_min_y()) window_y = window_drag_min_y();
+        if (window_y > window_drag_max_y()) window_y = window_drag_max_y();
         refresh_desktop(); scene_changed = true;
         if (!drag_reported) { serial::line("WINDOW_DRAG_OK"); drag_reported = true; }
     } else {

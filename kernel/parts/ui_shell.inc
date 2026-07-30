@@ -1,14 +1,14 @@
 constexpr int32_t taskbar_margin = 14;
 constexpr int32_t taskbar_main_width_comfortable = 204;
-constexpr int32_t taskbar_main_width_compact = 172;
-constexpr int32_t taskbar_tray_width = 150;
-constexpr int32_t taskbar_status_width = 72;
-constexpr int32_t quick_panel_width = 270;
-constexpr int32_t quick_panel_height = 252;
-constexpr int32_t quick_tile_width = 112;
-constexpr int32_t quick_tile_height = 56;
-constexpr int32_t status_panel_width = 300;
-constexpr int32_t status_panel_height = 322;
+constexpr int32_t taskbar_main_width_compact = 176;
+constexpr int32_t taskbar_tray_width = 112;
+constexpr int32_t taskbar_status_width = 36;
+constexpr int32_t quick_panel_width = 292;
+constexpr int32_t quick_panel_height = 190;
+constexpr int32_t quick_tile_width = 128;
+constexpr int32_t quick_tile_height = 48;
+constexpr int32_t status_panel_width = 280;
+constexpr int32_t status_panel_height = 230;
 
 int32_t taskbar_height() { return runtime_compact_density ? 38 : 46; }
 int32_t taskbar_y() { return static_cast<int32_t>(height) - taskbar_margin - taskbar_height(); }
@@ -106,52 +106,58 @@ void draw_taskbar_button(uint8_t index, ShellIcon icon, bool selected, HoverTarg
     const int32_t size = taskbar_button_size();
     const int32_t x = taskbar_button_x(index);
     const int32_t y = taskbar_y() + (taskbar_height() - size) / 2;
-    uint32_t fill = current_theme.surface_high;
-    if (selected) fill = current_theme.accent_soft;
-    else if (is_hovered(target)) fill = mix(current_theme.surface_high, current_theme.accent, 1U, 7U);
-    fill_round_rect(x, y, size, size, runtime_compact_density ? 8 : 10, fill);
-    const int32_t icon_x = x + (size - 23) / 2;
-    const int32_t icon_y = y + (size - 23) / 2;
-    draw_shell_icon(icon, icon_x, icon_y, selected ? current_theme.accent : current_theme.text_muted);
-    if (selected) fill_round_rect(x + size / 2 - 7, taskbar_y() + taskbar_height() - 4, 14, 2, 1, current_theme.accent);
+    if (selected) fill_round_rect(x, y, size, size, runtime_compact_density ? 8 : 10, current_theme.accent_soft);
+    else if (is_hovered(target)) fill_round_rect(x, y, size, size, runtime_compact_density ? 8 : 10, current_theme.surface_high);
+    draw_shell_icon(icon, x + (size - 23) / 2, y + (size - 23) / 2,
+                    selected ? current_theme.accent : current_theme.text_muted);
+    if (selected) {
+        fill_round_rect(x + size / 2 - 8, taskbar_y() + taskbar_height() - 4, 16, 2, 1, current_theme.accent);
+        fill_circle_alpha(x + size / 2, y + 4, 8, current_theme.accent, 14);
+    }
 }
 
 void draw_taskbar() {
     const int32_t radius = runtime_compact_density ? 10 : 13;
+    const uint32_t shell_border = mix(current_theme.border, current_theme.surface, 1U, 3U);
+    draw_shadow(taskbar_main_x(), taskbar_y(), taskbar_main_width(), taskbar_height(), radius);
     fill_round_rect_alpha(taskbar_main_x(), taskbar_y(), taskbar_main_width(), taskbar_height(), radius,
                           current_theme.surface_low, desktop_opacity);
+    draw_round_border(taskbar_main_x(), taskbar_y(), taskbar_main_width(), taskbar_height(), radius, shell_border);
     draw_taskbar_button(0, ShellIcon::start, active_view == View::launcher, HoverTarget::taskbar_start);
     draw_taskbar_button(1, ShellIcon::terminal, active_view == View::terminal, HoverTarget::taskbar_terminal);
     draw_taskbar_button(2, ShellIcon::files, active_view == View::files, HoverTarget::taskbar_files);
     draw_taskbar_button(3, ShellIcon::settings, active_view == View::settings, HoverTarget::taskbar_settings);
 
+    draw_shadow(taskbar_tray_x(), taskbar_y(), taskbar_tray_width, taskbar_height(), radius);
     fill_round_rect_alpha(taskbar_tray_x(), taskbar_y(), taskbar_tray_width, taskbar_height(), radius,
                           current_theme.surface_low, desktop_opacity);
-    if (quick_settings_open || is_hovered(HoverTarget::taskbar_status)) {
+    draw_round_border(taskbar_tray_x(), taskbar_y(), taskbar_tray_width, taskbar_height(), radius, shell_border);
+    if (quick_settings_open || is_hovered(HoverTarget::taskbar_status))
         fill_round_rect(taskbar_tray_x() + 3, taskbar_y() + 3, taskbar_status_width - 4, taskbar_height() - 6,
-                        radius > 3 ? radius - 3 : radius, quick_settings_open ? current_theme.accent_soft : current_theme.surface_high);
-    }
-    if (status_center_open || is_hovered(HoverTarget::taskbar_clock)) {
+                        radius > 3 ? radius - 3 : radius,
+                        quick_settings_open ? current_theme.accent_soft : current_theme.surface_high);
+    if (status_center_open || is_hovered(HoverTarget::taskbar_clock))
         fill_round_rect(taskbar_clock_x(), taskbar_y() + 3, taskbar_clock_width() - 3, taskbar_height() - 6,
-                        radius > 3 ? radius - 3 : radius, status_center_open ? current_theme.accent_soft : current_theme.surface_high);
-    }
-    fill_circle_alpha(taskbar_tray_x() + 15, taskbar_y() + taskbar_height() / 2, 3, current_theme.success, 255);
-    draw_text(taskbar_tray_x() + 26, taskbar_y() + (runtime_compact_density ? 15 : 19), "LOCAL", current_theme.text_muted, 1);
-    fill_rect(taskbar_clock_x() - 1, taskbar_y() + 9, 1, taskbar_height() - 18, current_theme.border);
+                        radius > 3 ? radius - 3 : radius,
+                        status_center_open ? current_theme.accent_soft : current_theme.surface_high);
+    draw_shell_icon(ShellIcon::settings, taskbar_tray_x() + 7,
+                    taskbar_y() + (taskbar_height() - 23) / 2,
+                    quick_settings_open ? current_theme.accent : current_theme.text_muted);
+    fill_rect(taskbar_clock_x() - 1, taskbar_y() + 9, 1, taskbar_height() - 18, shell_border);
     uint8_t hour = 0, minute = 0;
     if (rtc_read_time(hour, minute)) {
-        const int32_t clock_x = taskbar_clock_x() + 15;
+        const int32_t clock_x = taskbar_clock_x() + 11;
         const int32_t clock_y = taskbar_y() + (runtime_compact_density ? 15 : 19);
         draw_two_digits(clock_x, clock_y, hour, current_theme.text);
         draw_char(clock_x + 13, clock_y, ':', current_theme.text_muted, 1);
         draw_two_digits(clock_x + 19, clock_y, minute, current_theme.text);
-    } else draw_text(taskbar_clock_x() + 22, taskbar_y() + 19, "RTC", current_theme.warning, 1);
+    } else draw_text(taskbar_clock_x() + 20, taskbar_y() + 19, "--:--", current_theme.text_muted, 1);
 }
 
 int32_t quick_panel_x() { return static_cast<int32_t>(width) - taskbar_margin - quick_panel_width; }
 int32_t quick_panel_y() { return taskbar_y() - quick_panel_height - 10; }
-int32_t quick_tile_x(uint8_t index) { return quick_panel_x() + 16 + static_cast<int32_t>(index % 2U) * 126; }
-int32_t quick_tile_y(uint8_t index) { return quick_panel_y() + 54 + static_cast<int32_t>(index / 2U) * 64; }
+int32_t quick_tile_x(uint8_t index) { return quick_panel_x() + 12 + static_cast<int32_t>(index % 2U) * 140; }
+int32_t quick_tile_y(uint8_t index) { return quick_panel_y() + 12 + static_cast<int32_t>(index / 2U) * 54; }
 
 HoverTarget quick_target(uint8_t index) {
     static constexpr HoverTarget targets[quick_settings_count] = {
@@ -162,85 +168,91 @@ HoverTarget quick_target(uint8_t index) {
 }
 
 const char* quick_label(uint8_t index) {
-    static constexpr const char* labels[quick_settings_count] = {"THEME", "DISPLAY", "MOTION", "CONTRAST", "DENSITY", "TASKBAR"};
+    static constexpr const char* labels[quick_settings_count] = {"Theme", "Display", "Motion", "Contrast", "Density", "Taskbar"};
     return index < quick_settings_count ? labels[index] : "";
 }
 
-const char* wallpaper_name() { return runtime_wallpaper_style == 1U ? "CALM" : (runtime_wallpaper_style == 2U ? "PLAIN" : "FLOW"); }
-const char* theme_name() { return runtime_theme == 1U ? "GRAPHITE" : (runtime_theme == 2U ? "AMBER" : "MIDNIGHT"); }
+const char* wallpaper_name() { return runtime_wallpaper_style == 1U ? "Calm" : (runtime_wallpaper_style == 2U ? "Plain" : "Flow"); }
+const char* theme_name() { return runtime_theme == 1U ? "Graphite" : (runtime_theme == 2U ? "Amber" : "Midnight"); }
+
+ShellIcon quick_icon(uint8_t index) {
+    if (index == 1U) return ShellIcon::display;
+    if (index == 4U) return ShellIcon::apps;
+    if (index == 5U) return ShellIcon::start;
+    return ShellIcon::settings;
+}
 
 void draw_quick_tile(uint8_t index) {
     const int32_t x = quick_tile_x(index), y = quick_tile_y(index);
     const bool focused = quick_settings_focus == index;
     const bool hovered = is_hovered(quick_target(index));
-    uint32_t fill = current_theme.surface_high;
+    uint32_t fill = current_theme.surface_low;
     if (focused) fill = current_theme.accent_soft;
-    else if (hovered) fill = mix(current_theme.surface_high, current_theme.accent, 1U, 8U);
+    else if (hovered) fill = current_theme.surface_high;
     fill_round_rect(x, y, quick_tile_width, quick_tile_height, 10, fill);
-    fill_circle_alpha(x + 18, y + 18, 5, focused ? current_theme.accent : current_theme.text_muted, 255);
-    draw_text(x + 32, y + 14, quick_label(index), current_theme.text, 1);
-    if (index == 0U) draw_text(x + 12, y + 38, theme_name(), current_theme.text_muted, 1);
-    else if (index == 1U) { char mode[16]; format_display_mode(mode); draw_text(x + 12, y + 38, mode, current_theme.text_muted, 1); }
-    else if (index == 2U) draw_text(x + 12, y + 38, desktop_animations ? "SMOOTH" : "REDUCED", current_theme.text_muted, 1);
-    else if (index == 3U) draw_text(x + 12, y + 38, runtime_high_contrast ? "HIGH" : "NORMAL", current_theme.text_muted, 1);
-    else if (index == 4U) draw_text(x + 12, y + 38, runtime_compact_density ? "COMPACT" : "COMFORT", current_theme.text_muted, 1);
-    else draw_text(x + 12, y + 38, runtime_taskbar_left ? "LEFT" : "CENTER", current_theme.text_muted, 1);
+    draw_shell_icon(quick_icon(index), x + 12, y + 13,
+                    focused ? current_theme.accent : current_theme.text_muted);
+    draw_text(x + 44, y + 12, quick_label(index), current_theme.text, 1);
+    const uint32_t secondary = focus_text_color(focused);
+    if (index == 0U) draw_text(x + 44, y + 30, theme_name(), secondary, 1);
+    else if (index == 1U) { char mode[16]; format_display_mode(mode); draw_text(x + 44, y + 30, mode, secondary, 1); }
+    else if (index == 2U) draw_text(x + 44, y + 30, desktop_animations ? "Smooth" : "Reduced", secondary, 1);
+    else if (index == 3U) draw_text(x + 44, y + 30, runtime_high_contrast ? "High" : "Normal", secondary, 1);
+    else if (index == 4U) draw_text(x + 44, y + 30, runtime_compact_density ? "Compact" : "Comfort", secondary, 1);
+    else draw_text(x + 44, y + 30, runtime_taskbar_left ? "Left" : "Center", secondary, 1);
+    if (focused) draw_focus_outline(x, y, quick_tile_width, quick_tile_height, current_theme.accent);
 }
 
 void draw_quick_settings() {
     if (!quick_settings_open) return;
-    draw_shadow(quick_panel_x(), quick_panel_y(), quick_panel_width, quick_panel_height, 15);
-    fill_round_rect_alpha(quick_panel_x(), quick_panel_y(), quick_panel_width, quick_panel_height, 15,
-                          current_theme.surface, desktop_opacity);
-    fill_round_rect(quick_panel_x() + 1, quick_panel_y() + 1, quick_panel_width - 2, 42, 14, current_theme.surface_high);
-    draw_text(quick_panel_x() + 18, quick_panel_y() + 18, "QUICK SETTINGS", current_theme.text, 1);
-    draw_text_right(quick_panel_x() + quick_panel_width - 18, quick_panel_y() + 18, "F10", current_theme.text_muted, 1);
+    const int32_t x = quick_panel_x(), y = quick_panel_y();
+    const uint32_t shell_border = mix(current_theme.border, current_theme.surface, 1U, 3U);
+    draw_shadow(x, y, quick_panel_width, quick_panel_height, 15);
+    fill_round_rect_alpha(x, y, quick_panel_width, quick_panel_height, 15, current_theme.surface, desktop_opacity);
+    draw_round_border(x, y, quick_panel_width, quick_panel_height, 15, shell_border);
     for (uint8_t i = 0; i < quick_settings_count; ++i) draw_quick_tile(i);
-    draw_text(quick_panel_x() + 18, quick_panel_y() + quick_panel_height - 20, "ENTER CHANGE   ESC CLOSE", current_theme.text_muted, 1);
 }
 
 int32_t status_panel_x() { return static_cast<int32_t>(width) - taskbar_margin - status_panel_width; }
 int32_t status_panel_y() { return taskbar_y() - status_panel_height - 10; }
 
 void draw_status_value_row(int32_t y, const char* label, const char* value, uint32_t value_color = 0U) {
-    const int32_t x = status_panel_x() + 16;
-    fill_round_rect(x, y, status_panel_width - 32, 32, 8, current_theme.surface_high);
-    draw_text(x + 12, y + 12, label, current_theme.text_muted, 1);
-    draw_text_right(x + status_panel_width - 56, y + 12, value, value_color ? value_color : current_theme.text, 1);
+    const int32_t x = status_panel_x() + 18;
+    draw_text(x, y + 12, label, current_theme.text_muted, 1);
+    draw_text_right(status_panel_x() + status_panel_width - 18, y + 12, value,
+                    value_color ? value_color : current_theme.text, 1);
+    fill_rect(x, y + 31, status_panel_width - 36, 1,
+              mix(current_theme.border, current_theme.surface, 1U, 2U));
 }
 
 void draw_status_center() {
     if (!status_center_open) return;
     const int32_t x = status_panel_x(), y = status_panel_y();
+    const uint32_t shell_border = mix(current_theme.border, current_theme.surface, 1U, 3U);
     draw_shadow(x, y, status_panel_width, status_panel_height, 15);
     fill_round_rect_alpha(x, y, status_panel_width, status_panel_height, 15, current_theme.surface, desktop_opacity);
-    fill_round_rect(x + 1, y + 1, status_panel_width - 2, 44, 14, current_theme.surface_high);
-    draw_text(x + 18, y + 18, "SYSTEM CENTER", current_theme.text, 1);
-    draw_text_right(x + status_panel_width - 18, y + 18, "F11", current_theme.text_muted, 1);
+    draw_round_border(x, y, status_panel_width, status_panel_height, 15, shell_border);
 
-    fill_round_rect(x + 16, y + 56, status_panel_width - 32, 62, 10, current_theme.surface_low);
     uint8_t hour = 0, minute = 0, weekday = 0, day = 0, month = 0, year = 0;
     const bool time_ok = rtc_read_time(hour, minute);
     const bool date_ok = rtc_read_date(weekday, day, month, year);
-    static constexpr const char* weekdays[7] = {"SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"};
-    draw_text(x + 30, y + 72, date_ok ? weekdays[weekday - 1U] : "LOCAL DATE", current_theme.text_muted, 1);
+    static constexpr const char* weekdays[7] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+    draw_text(x + 18, y + 20, date_ok ? weekdays[weekday - 1U] : "Date", current_theme.text_muted, 1);
     if (date_ok) {
-        draw_two_digits(x + 30, y + 94, day, current_theme.text);
-        draw_char(x + 43, y + 94, '.', current_theme.text_muted, 1);
-        draw_two_digits(x + 49, y + 94, month, current_theme.text);
-        draw_text(x + 63, y + 94, ".20", current_theme.text_muted, 1);
-        draw_two_digits(x + 81, y + 94, year, current_theme.text);
+        draw_two_digits(x + 18, y + 39, day, current_theme.text);
+        draw_char(x + 31, y + 39, '.', current_theme.text_muted, 1);
+        draw_two_digits(x + 37, y + 39, month, current_theme.text);
     }
     if (time_ok) {
-        draw_two_digits(x + status_panel_width - 82, y + 84, hour, current_theme.accent);
-        draw_char(x + status_panel_width - 69, y + 84, ':', current_theme.text_muted, 1);
-        draw_two_digits(x + status_panel_width - 63, y + 84, minute, current_theme.accent);
+        draw_two_digits(x + status_panel_width - 70, y + 30, hour, current_theme.text);
+        draw_char(x + status_panel_width - 57, y + 30, ':', current_theme.text_muted, 1);
+        draw_two_digits(x + status_panel_width - 51, y + 30, minute, current_theme.text);
     }
+    fill_rect(x + 18, y + 62, status_panel_width - 36, 1, shell_border);
 
-    char uptime[20], memory[20], storage_generation[20], packages[24];
+    char uptime[20], memory[20], packages[24];
     shell_format_uint(timer_ticks / 100U, uptime, sizeof(uptime), "S");
-    shell_format_uint(heap::free_bytes() / 1024U, memory, sizeof(memory), "K FREE");
-    shell_format_uint(storage::browser_generation(), storage_generation, sizeof(storage_generation));
+    shell_format_uint(heap::free_bytes() / 1024U, memory, sizeof(memory), "K free");
     uint32_t length = 0;
     char installed[12], targets[12];
     shell_format_uint(package_manager::database.count, installed, sizeof(installed));
@@ -251,11 +263,7 @@ void draw_status_center() {
     while (targets[target_at] && length + 1U < sizeof(packages)) packages[length++] = targets[target_at++];
     packages[length] = 0;
 
-    draw_status_value_row(y + 128, "UPTIME", uptime);
-    draw_status_value_row(y + 166, "MEMORY", memory);
-    draw_status_value_row(y + 204, "STORAGE GEN", storage_generation);
-    draw_status_value_row(y + 242, "PACKAGES", packages);
-    const bool trust_ready = security_guard::enforcement_ready && zgdb::ready && security_audit::ready;
-    fill_circle_alpha(x + 26, y + 296, 4, trust_ready ? current_theme.success : current_theme.danger, 255);
-    draw_text(x + 38, y + 293, trust_ready ? "TRUST CHAIN READY" : "SECURITY LOCKED", trust_ready ? current_theme.text : current_theme.danger, 1);
+    draw_status_value_row(y + 70, "Uptime", uptime);
+    draw_status_value_row(y + 108, "Memory", memory);
+    draw_status_value_row(y + 146, "Packages", packages);
 }
