@@ -32,9 +32,12 @@ jobs:
           set -euo pipefail
           test -s .github/scripts/experience_pass.py
           test -s .github/scripts/experience_prepare.py
+          test -s .github/scripts/experience_audio_post.py
           test -s kernel/parts/system_sound.inc
           python3 .github/scripts/experience_prepare.py
-          python3 -m py_compile .github/scripts/experience_pass.py
+          python3 -m py_compile \
+            .github/scripts/experience_pass.py \
+            .github/scripts/experience_audio_post.py
           git merge-base --is-ancestor 385bd98b9a5f10722c84ad602ba32fb1563b73b5 HEAD
 
       - name: Install native toolchain, QEMU and TPM dependencies
@@ -59,9 +62,11 @@ jobs:
           mkdir -p /tmp/experience-evidence
           cp /tmp/experience-main-head.txt /tmp/experience-evidence/main-head.txt
           python3 .github/scripts/experience_pass.py | tee /tmp/experience-evidence/transform.log
+          python3 .github/scripts/experience_audio_post.py | tee /tmp/experience-evidence/audio-post.log
           rm -f \
             .github/scripts/experience_pass.py \
             .github/scripts/experience_prepare.py \
+            .github/scripts/experience_audio_post.py \
             .github/workflows/experience-integration.yml \
             .github/workflows/experience-integration-v2.yml
           git add -N docs/UX_EXPERIENCE_0.1.1.md
@@ -109,7 +114,7 @@ jobs:
           set -o pipefail
           make qemu 2>&1 | tee /tmp/experience-evidence/qemu.log
 
-      - name: Render and verify all display modes
+      - name: Render, record audio and verify all display modes
         run: |
           set -o pipefail
           bash tests/qemu_display_ui.sh build/zenov-os.img build/zenov-data.img build/qemu-experience 2>&1 | tee /tmp/experience-evidence/qemu-display.log
@@ -131,11 +136,16 @@ jobs:
           test ! -s build/qemu-experience/qemu.stderr
           test -s build/qemu-experience/settings-experience-1024x768.ppm
           test -s build/qemu-experience/settings-experience-preview-1024x768.ppm
+          test -s build/qemu-experience/system-sounds.wav
+          test -s build/qemu-experience/system-sound-evidence.txt
+          grep -q '^peak_abs_s16=' build/qemu-experience/system-sound-evidence.txt
+          grep -q '^active_ms=' build/qemu-experience/system-sound-evidence.txt
           grep -q '^ratio=0.00000$' build/qemu-experience/chrome-density-evidence.txt
           grep -q '^matrix-minimum text=' build/qemu-experience/theme-contrast-matrix.txt
           cp build/qemu-experience/*.txt /tmp/experience-evidence/ 2>/dev/null || true
           cp build/qemu-experience/*.log /tmp/experience-evidence/ 2>/dev/null || true
           cp build/qemu-experience/*.stderr /tmp/experience-evidence/ 2>/dev/null || true
+          cp build/qemu-experience/*.wav /tmp/experience-evidence/ 2>/dev/null || true
           cp build/qemu-experience/settings-experience-1024x768.ppm /tmp/experience-evidence/
           cp build/qemu-experience/settings-experience-preview-1024x768.ppm /tmp/experience-evidence/
           cp build/qemu-experience/start-1920x1080.ppm /tmp/experience-evidence/
