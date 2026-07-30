@@ -27,8 +27,10 @@ const char* configured_terminal_cursor = terminal_cursor;
 #define render_scene render_scene_base
 #include "ui_files.inc"
 #undef render_scene
+void refresh_desktop();
 #include "ui_productivity_model.inc"
 #include "ui_productivity.inc"
+void render_scene() { productivity::render_scene(); }
 #include "ui_scaler.inc"
 
 #define init init_base
