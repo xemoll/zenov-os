@@ -28,8 +28,8 @@ constexpr uint8_t maximum_note_count = 3U;
 constexpr uint8_t maximum_note_ticks = 3U;
 constexpr uint8_t maximum_event_ticks = 12U;
 
-volatile uint8_t configured_theme = theme_soft;
-volatile uint8_t configured_feedback = feedback_normal;
+volatile uint8_t configured_theme = static_cast<uint8_t>(theme_soft);
+volatile uint8_t configured_feedback = static_cast<uint8_t>(feedback_normal);
 volatile bool initialized = false;
 volatile bool queued = false;
 volatile bool playing = false;
@@ -73,13 +73,14 @@ uint16_t note_frequency(Event event, uint8_t note) {
 uint16_t themed_frequency(Event event, uint8_t note, uint8_t theme) {
     const uint16_t base = note_frequency(event, note);
     if (!base) return 0U;
-    if (theme == theme_soft) return static_cast<uint16_t>((static_cast<uint32_t>(base) * 3U) / 4U);
+    if (theme == static_cast<uint8_t>(theme_soft))
+        return static_cast<uint16_t>((static_cast<uint32_t>(base) * 3U) / 4U);
     return base;
 }
 
 uint8_t note_duration(uint8_t feedback) {
-    if (feedback == feedback_quiet) return 1U;
-    if (feedback == feedback_pronounced) return 3U;
+    if (feedback == static_cast<uint8_t>(feedback_quiet)) return 1U;
+    if (feedback == static_cast<uint8_t>(feedback_pronounced)) return 3U;
     return 2U;
 }
 
@@ -112,20 +113,23 @@ void stop() {
 }
 
 void configure(uint8_t theme, uint8_t feedback) {
-    configured_theme = theme < theme_count ? theme : theme_soft;
-    configured_feedback = feedback < feedback_count ? feedback : feedback_normal;
-    if (configured_theme == theme_off) stop();
+    configured_theme = theme < static_cast<uint8_t>(theme_count)
+        ? theme : static_cast<uint8_t>(theme_soft);
+    configured_feedback = feedback < static_cast<uint8_t>(feedback_count)
+        ? feedback : static_cast<uint8_t>(feedback_normal);
+    if (configured_theme == static_cast<uint8_t>(theme_off)) stop();
 }
 
 void play(Event event) {
-    if (!initialized || configured_theme == theme_off || event >= Event::count) return;
+    if (!initialized || configured_theme == static_cast<uint8_t>(theme_off) || event >= Event::count) return;
     queued_event = event;
     queued = true;
 }
 
 void preview() {
     play(Event::launch);
-    serial::line(configured_theme == theme_off ? "UI_SOUND_PREVIEW_MUTED" : "UI_SOUND_PREVIEW_OK");
+    serial::line(configured_theme == static_cast<uint8_t>(theme_off)
+        ? "UI_SOUND_PREVIEW_MUTED" : "UI_SOUND_PREVIEW_OK");
 }
 
 void start_next_note() {
@@ -147,7 +151,7 @@ void start_next_note() {
 }
 
 void tick() {
-    if (!initialized || configured_theme == theme_off) {
+    if (!initialized || configured_theme == static_cast<uint8_t>(theme_off)) {
         if (tone_enabled) speaker_off();
         return;
     }
@@ -171,22 +175,25 @@ void tick() {
 }
 
 bool contract_ok() {
-    if (static_cast<uint8_t>(Event::count) != 6U || theme_count != 3U || feedback_count != 3U) return false;
+    if (static_cast<uint8_t>(Event::count) != 6U ||
+        static_cast<uint8_t>(theme_count) != 3U ||
+        static_cast<uint8_t>(feedback_count) != 3U) return false;
     for (uint8_t event_index = 0U; event_index < static_cast<uint8_t>(Event::count); ++event_index) {
         const Event event = static_cast<Event>(event_index);
         const uint8_t count = note_count(event);
         if (!count || count > maximum_note_count) return false;
         for (uint8_t note = 0U; note < count; ++note) {
-            const uint16_t soft = themed_frequency(event, note, theme_soft);
-            const uint16_t clear = themed_frequency(event, note, theme_clear);
+            const uint16_t soft = themed_frequency(event, note, static_cast<uint8_t>(theme_soft));
+            const uint16_t clear = themed_frequency(event, note, static_cast<uint8_t>(theme_clear));
             if (soft < 120U || clear > 4000U || soft >= clear) return false;
         }
-        const uint8_t bounded_ticks = static_cast<uint8_t>(count * maximum_note_ticks + (count - 1U) * inter_note_gap_ticks);
+        const uint8_t bounded_ticks = static_cast<uint8_t>(
+            count * maximum_note_ticks + (count - 1U) * inter_note_gap_ticks);
         if (bounded_ticks > maximum_event_ticks) return false;
     }
-    return note_duration(feedback_quiet) == 1U &&
-        note_duration(feedback_normal) == 2U &&
-        note_duration(feedback_pronounced) == 3U;
+    return note_duration(static_cast<uint8_t>(feedback_quiet)) == 1U &&
+        note_duration(static_cast<uint8_t>(feedback_normal)) == 2U &&
+        note_duration(static_cast<uint8_t>(feedback_pronounced)) == 3U;
 }
 
 void init() {
