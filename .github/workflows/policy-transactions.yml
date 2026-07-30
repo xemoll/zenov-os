@@ -126,7 +126,8 @@ jobs:
           grep -Fq 'format_nonzero_decimal_u32' kernel/parts/security_policy_format.inc
 
           grep -Fq 'SECURITY_POLICY_TRANSACTION_TEST_OK' ci-logs/security-policy-transaction-clang.log
-          grep -Fq 'ZENOVOS_QEMU_OK' ci-logs/policy-transaction-qemu.log
+          grep -Fq 'persistent audit and antimalware verification: OK' ci-logs/policy-transaction-qemu.log
+          grep -Fq 'deterministic rebuild: OK' ci-logs/policy-transaction-deterministic.log
           test -s ci-logs/security-policy-transaction-test-gcc
           test -s ci-logs/security-policy-transaction-test-clang
           test -s ci-logs/policy-transaction-freestanding.log
