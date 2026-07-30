@@ -36,17 +36,20 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/zenov-septinum-evidence
           cp .github/scripts/septinum_v2_visual_pass.py /tmp/septinum_v2_visual_pass.py
+          cp .github/scripts/septinum_morph_gate_fix.py /tmp/septinum_morph_gate_fix.py
           git fetch origin main agent/zenov-os-0.1.1-cohesive-ui-polish
           git rev-parse HEAD | tee /tmp/zenov-septinum-evidence/original-head.txt
           git rev-parse origin/main | tee /tmp/zenov-septinum-evidence/main-head.txt
           python3 /tmp/septinum_v2_visual_pass.py | tee /tmp/zenov-septinum-evidence/transform.log
-          rm -f .github/scripts/septinum_v2_visual_pass.py
+          python3 /tmp/septinum_morph_gate_fix.py | tee -a /tmp/zenov-septinum-evidence/transform.log
+          rm -f .github/scripts/septinum_v2_visual_pass.py .github/scripts/septinum_morph_gate_fix.py
           git diff --check
           git diff --stat | tee /tmp/zenov-septinum-evidence/source-stat.txt
           git diff --binary > /tmp/zenov-septinum-evidence/worktree.diff
           grep -q 'topbar_x = 18, topbar_y = 8' kernel/parts/ui_graphics_base.inc
           grep -q 'UI_SEPTINUM_V2_OK' kernel/parts/ui_runtime.inc
           grep -q 'launcher_panel_height_for_count' kernel/parts/ui_apps.inc
+          grep -q 'dock-independent side-band evidence' /tmp/zenov-septinum-evidence/transform.log
           grep -q 'ui-launcher-morph-evidence: OK' tests/qemu_display_ui.sh
 
       - name: Build strict native image
@@ -82,9 +85,10 @@ jobs:
             grep -q "$marker" "$SERIAL"
           done
           test ! -s "$OUT/qemu.stderr"
-          grep -q '^full_bottom=' "$OUT/launcher-morph-evidence.txt"
-          grep -q '^filtered_bottom=' "$OUT/launcher-morph-evidence.txt"
-          grep -q '^delta=' "$OUT/launcher-morph-evidence.txt"
+          grep -q '^shared_ratio=' "$OUT/launcher-morph-evidence.txt"
+          grep -q '^morph_ratio=' "$OUT/launcher-morph-evidence.txt"
+          grep -q '^logical_height_delta=210$' "$OUT/launcher-morph-evidence.txt"
+          grep -q '^physical_height_delta=240$' "$OUT/launcher-morph-evidence.txt"
           grep -q '^start bands=' "$OUT/popup-vertical-coverage.txt"
           grep -q '^control-center bands=' "$OUT/popup-vertical-coverage.txt"
           for spec in \
