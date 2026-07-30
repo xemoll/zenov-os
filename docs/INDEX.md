@@ -13,6 +13,7 @@
 - [`RANSOMWARE_DEFENSE_0.1.1.md`](RANSOMWARE_DEFENSE_0.1.1.md) — signed ZRWP1 controlled-folder policy, exact writer identities, mutation budgets, audit/block transition and durability evidence.
 - [`ZGDB_0.1.1.md`](ZGDB_0.1.1.md) — signed database format, RSA-PSS policy update, revocation and anti-rollback boundary.
 - [`AUDIT_JOURNAL_0.1.1.md`](AUDIT_JOURNAL_0.1.1.md) — ZGAL1 format, hash chain, COW fault matrix, recovery images and offline-attacker boundary.
+- [`TPM2_TIS_NV_COUNTER_0.1.1.md`](TPM2_TIS_NV_COUNTER_0.1.1.md) — supervisor-only TPM 2.0 TIS transport, explicit persistent NV counter lifecycle and the remaining ZPTJ1 hardware-anchor boundary.
 - [`ZENPKG_FORMAT_1.md`](ZENPKG_FORMAT_1.md) — deterministic package container and canonical manifest contract.
 - [`ZENREPO_OFFLINE_0.1.1.md`](ZENREPO_OFFLINE_0.1.1.md) — signed offline repository roles, root rotation, delegation, expiry and anti-rollback state.
 - [`ZENPKG_CACHE_0.1.1.md`](ZENPKG_CACHE_0.1.1.md) — protected staging, full target verification, atomic cache commit and five-boot QEMU evidence.
