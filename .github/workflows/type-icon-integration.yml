@@ -24,32 +24,62 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify integration source
+      - name: Verify integration bootstrap
         run: |
           set -euo pipefail
-          BASE=382e1c169b337bea587c0aba4ef4bd6c521f2ca6
-          test "$(git merge-base HEAD "$BASE")" = "$BASE"
           test "$(sha256sum .github/scripts/type_icon_pass.py | cut -d' ' -f1)" = \
             fc4e6cf085e2d78eecef23b563e7afda17d4e4a219f8a3c0bc0d33418996d87e
           test "$(sha256sum .github/scripts/type_icon_post.py | cut -d' ' -f1)" = \
             164b68fd7ff3e776cafd333d281f2dc05e7789966d016b930c4ee66f590915b6
           test "$(sha256sum third_party/inter/OFL.txt | cut -d' ' -f1)" = \
             262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a
-          git diff --name-only "$BASE" HEAD | sort > /tmp/bootstrap-files.txt
-          printf '%s\n' \
-            .github/scripts/type_icon_pass.py \
-            .github/scripts/type_icon_post.py \
-            .github/workflows/type-icon-integration.yml \
-            third_party/inter/OFL.txt | sort > /tmp/expected-bootstrap-files.txt
-          diff -u /tmp/expected-bootstrap-files.txt /tmp/bootstrap-files.txt
 
       - name: Install native toolchain and QEMU
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils openssl qemu-system-x86
 
+      - name: Rebase verified minimal shell onto current main
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/type-icon-evidence/tree /tmp/type-icon-bootstrap
+          cp .github/scripts/type_icon_pass.py .github/scripts/type_icon_post.py /tmp/type-icon-bootstrap/
+          cp third_party/inter/OFL.txt /tmp/type-icon-bootstrap/OFL.txt
+          git fetch origin main
+          MAIN_HEAD="$(git rev-parse origin/main)"
+          printf '%s\n' "$MAIN_HEAD" | tee /tmp/type-icon-evidence/main-head.txt
+          base_paths=(
+            .github/workflows/adaptive-display.yml
+            kernel/parts/graphics_mapping.inc
+            kernel/parts/mouse_regression.inc
+            kernel/parts/ui_apps.inc
+            kernel/parts/ui_files.inc
+            kernel/parts/ui_files_runtime.inc
+            kernel/parts/ui_font.inc
+            kernel/parts/ui_graphics_base.inc
+            kernel/parts/ui_runtime.inc
+            kernel/parts/ui_scaler.inc
+            kernel/parts/ui_shell.inc
+            kernel/parts/ui_theme.inc
+            tests/qemu_display_ui.sh
+            tests/qemu_zenpkg.sh
+          )
+          git diff --binary \
+            77f00d46fc9f6a84c7f2885db7603f746687c034 \
+            382e1c169b337bea587c0aba4ef4bd6c521f2ca6 \
+            -- "${base_paths[@]}" > /tmp/minimal-shell.patch
+          test -s /tmp/minimal-shell.patch
+          git reset --hard "$MAIN_HEAD"
+          git clean -fdx
+          git apply --3way /tmp/minimal-shell.patch
+          mkdir -p .github/scripts third_party/inter
+          cp /tmp/type-icon-bootstrap/type_icon_pass.py .github/scripts/
+          cp /tmp/type-icon-bootstrap/type_icon_post.py .github/scripts/
+          cp /tmp/type-icon-bootstrap/OFL.txt third_party/inter/OFL.txt
+          git diff --check
+
       - name: Apply deterministic type and icon pass
         run: |
           set -euo pipefail
-          mkdir -p /tmp/type-icon-evidence/tree
+          MAIN_HEAD="$(cat /tmp/type-icon-evidence/main-head.txt)"
           python3 .github/scripts/type_icon_post.py pre | tee /tmp/type-icon-evidence/pre-transform.log
           python3 .github/scripts/type_icon_pass.py | tee /tmp/type-icon-evidence/transform.log
           python3 .github/scripts/type_icon_post.py post | tee /tmp/type-icon-evidence/post-transform.log
@@ -58,17 +88,26 @@ jobs:
           ! grep -q 'type-icon-transform-compat' tests/qemu_display_ui.sh
           paths=(
             .github/workflows/adaptive-display.yml
+            kernel/parts/graphics_mapping.inc
+            kernel/parts/mouse_regression.inc
             kernel/parts/ui_apps.inc
+            kernel/parts/ui_files.inc
+            kernel/parts/ui_files_runtime.inc
             kernel/parts/ui_font.inc
             kernel/parts/ui_graphics_base.inc
             kernel/parts/ui_runtime.inc
+            kernel/parts/ui_scaler.inc
             kernel/parts/ui_shell.inc
             kernel/parts/ui_theme.inc
             tests/qemu_display_ui.sh
+            tests/qemu_zenpkg.sh
             third_party/inter/OFL.txt
           )
-          git diff --stat 382e1c169b337bea587c0aba4ef4bd6c521f2ca6 -- "${paths[@]}" | tee /tmp/type-icon-evidence/source-stat.txt
-          git diff --binary 382e1c169b337bea587c0aba4ef4bd6c521f2ca6 -- "${paths[@]}" > /tmp/type-icon-evidence/source.diff
+          mapfile -t actual < <(git diff "$MAIN_HEAD" --name-only | sort)
+          mapfile -t expected < <(printf '%s\n' "${paths[@]}" | sort)
+          diff -u <(printf '%s\n' "${expected[@]}") <(printf '%s\n' "${actual[@]}")
+          git diff --stat "$MAIN_HEAD" -- "${paths[@]}" | tee /tmp/type-icon-evidence/source-stat.txt
+          git diff --binary "$MAIN_HEAD" -- "${paths[@]}" > /tmp/type-icon-evidence/source.diff
           sha256sum /tmp/type-icon-evidence/source.diff | tee /tmp/type-icon-evidence/source-diff-sha256.txt
           for path in "${paths[@]}"; do
             mkdir -p "/tmp/type-icon-evidence/tree/$(dirname "$path")"
@@ -121,7 +160,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: zenov-os-type-icon-${{ github.run_id }}-${{ github.run_attempt }}
+          name: zenov-os-type-icon-current-main-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
           compression-level: 9
           path: |
