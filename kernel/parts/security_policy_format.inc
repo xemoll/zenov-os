@@ -25,6 +25,23 @@ bool parse_nonzero_decimal_u32(const unsigned char* data, unsigned int size, uns
     return true;
 }
 
+bool format_nonzero_decimal_u32(unsigned int value, char* output, unsigned int capacity, unsigned int& size) {
+    size = 0U;
+    if (!value || !output || capacity < 2U) return false;
+    char reverse[10]{};
+    unsigned int digits = 0U;
+    while (value) {
+        if (digits == sizeof(reverse)) return false;
+        reverse[digits++] = static_cast<char>('0' + value % 10U);
+        value /= 10U;
+    }
+    if (digits + 1U > capacity) return false;
+    for (unsigned int i = 0U; i < digits; ++i) output[i] = reverse[digits - 1U - i];
+    output[digits] = '\n';
+    size = digits + 1U;
+    return true;
+}
+
 bool next_version(unsigned int current, unsigned int& output) {
     if (current == u32_max) { output = 0U; return false; }
     output = current + 1U;
@@ -66,3 +83,7 @@ bool canonical_absolute_path(const char* value, unsigned int capacity, bool allo
     return canonical_absolute_path_with_length(value, capacity, length, allow_empty);
 }
 } // namespace security_policy_format
+
+#if defined(__STDC_HOSTED__) && __STDC_HOSTED__ == 0
+#include "security_policy_transaction.inc"
+#endif

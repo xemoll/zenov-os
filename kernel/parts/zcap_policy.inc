@@ -105,12 +105,8 @@ bool parse_version(const uint8_t* data, uint32_t size, uint32_t& output) {
 }
 
 bool write_version(uint32_t value) {
-    char text[16]; uint32_t count = 0, cursor = value;
-    do { text[count++] = static_cast<char>('0' + cursor % 10U); cursor /= 10U; } while (cursor && count < 14U);
-    for (uint32_t left = 0, right = count - 1U; left < right; ++left, --right) {
-        const char swap = text[left]; text[left] = text[right]; text[right] = swap;
-    }
-    text[count++] = '\n';
+    char text[12]{}; uint32_t count = 0U;
+    if (!security_policy_format::format_nonzero_decimal_u32(value, text, sizeof(text), count)) return false;
     return storage::write_file("/security/syscall-capabilities.version", reinterpret_cast<const uint8_t*>(text), count, false);
 }
 
@@ -142,29 +138,74 @@ const char* validation_name(Validation validation) {
     }
 }
 
+bool restore_update(uint32_t previous_version, uint32_t previous_size) {
+    const bool policy_restored = security_policy_transaction::restore_verified("/security/syscall-capabilities.zcap", previous_size, process::application_buffer, max_policy_bytes);
+    const bool version_restored = policy_restored && write_version(previous_version) &&
+        security_policy_transaction::version_matches("/security/syscall-capabilities.version", previous_version);
+    const bool metadata_synced = version_restored && storage::sync_metadata();
+    security_policy_transaction::release();
+    if (!policy_restored || !version_restored || !metadata_synced) {
+        ready = false;
+        serial::line("ZCAP_UPDATE_ROLLBACK_FAILED");
+        return false;
+    }
+    persistent_policy_version = previous_version;
+    ready = true;
+    serial::line("ZCAP_UPDATE_ROLLBACK_OK");
+    return true;
+}
+
 bool update(const char* candidate_path) {
+    if (!ready) { serial::line("ZCAP_UPDATE_REJECTED reason=policy-not-ready"); return false; }
     Validation validation{}; uint32_t next_version = 0U;
     if (!security_policy_format::next_version(active_policy_version, next_version)) {
         serial::line("ZCAP_SEQUENCE_REJECTED reason=version-exhausted"); return false;
-    } uint32_t version = 0;
+    }
+    uint32_t version = 0U;
     if (!candidate_path || !*candidate_path || !read_policy(candidate_path, next_version, validation, version)) {
         if (validation == Validation::rollback) serial::write("ZCAP_ROLLBACK_REJECTED reason=");
         else if (validation == Validation::key) serial::write("ZCAP_KEY_REJECTED reason=");
         else serial::write("ZCAP_TAMPER_REJECTED reason=");
-        serial::line(validation_name(validation));
-        return false;
+        serial::line(validation_name(validation)); return false;
     }
-    if (version != next_version) {
-        serial::line("ZCAP_SEQUENCE_REJECTED reason=non-sequential");
-        return false;
+    if (version != next_version) { serial::line("ZCAP_SEQUENCE_REJECTED reason=non-sequential"); return false; }
+
+    const uint32_t previous_version = persistent_policy_version;
+    uint32_t previous_size = 0U;
+    if (!security_policy_transaction::acquire("/security/syscall-capabilities.zcap", max_policy_bytes, previous_size)) {
+        serial::line("ZCAP_UPDATE_BACKUP_FAILED"); return false;
     }
-    uint32_t size = 0;
-    if (!storage::read_file(candidate_path, process::application_buffer, max_policy_bytes, size)) return false;
-    uint32_t final_version = 0;
+
+    uint32_t size = 0U;
+    if (!storage::read_file(candidate_path, process::application_buffer, max_policy_bytes, size)) {
+        security_policy_transaction::release(); serial::line("ZCAP_UPDATE_CANDIDATE_READ_FAILED"); return false;
+    }
+    uint32_t final_version = 0U;
     validation = validate(process::application_buffer, size, next_version, candidate_records, final_version);
-    if (validation != Validation::okay || final_version != version) return false;
-    if (!storage::write_file("/security/syscall-capabilities.zcap", process::application_buffer, size, false)) return false;
-    if (!write_version(version)) return false;
+    if (validation != Validation::okay || final_version != version) {
+        security_policy_transaction::release(); serial::line("ZCAP_UPDATE_CANDIDATE_CHANGED"); return false;
+    }
+    if (!storage::write_file("/security/syscall-capabilities.zcap", process::application_buffer, size, false)) {
+        (void)restore_update(previous_version, previous_size); serial::line("ZCAP_UPDATE_POLICY_COMMIT_FAILED"); return false;
+    }
+
+    uint32_t committed_size = 0U;
+    if (!storage::read_file("/security/syscall-capabilities.zcap", process::application_buffer, max_policy_bytes, committed_size) ||
+        committed_size != size || validate(process::application_buffer, committed_size, next_version,
+            candidate_records, final_version) != Validation::okay || final_version != version) {
+        (void)restore_update(previous_version, previous_size); serial::line("ZCAP_UPDATE_READBACK_FAILED"); return false;
+    }
+    if (!write_version(version)) {
+        (void)restore_update(previous_version, previous_size); serial::line("ZCAP_UPDATE_VERSION_COMMIT_FAILED"); return false;
+    }
+    if (!security_policy_transaction::version_matches("/security/syscall-capabilities.version", version)) {
+        (void)restore_update(previous_version, previous_size); serial::line("ZCAP_UPDATE_VERSION_READBACK_FAILED"); return false;
+    }
+    if (!storage::sync_metadata()) {
+        (void)restore_update(previous_version, previous_size); serial::line("ZCAP_UPDATE_SYNC_FAILED"); return false;
+    }
+
+    security_policy_transaction::release();
     activate(candidate_records, version);
     persistent_policy_version = version;
     ready = true;
@@ -193,7 +234,8 @@ bool init() {
         serial::write("ZCAP_INIT_FAILED reason="); serial::line(validation_name(validation)); ready = false; return false;
     }
     activate(candidate_records, version);
-    if (persistent_policy_version < version && !write_version(version)) { ready = false; return false; }
+    if (persistent_policy_version < version && (!write_version(version) ||
+        !security_policy_transaction::version_matches("/security/syscall-capabilities.version", version) || !storage::sync_metadata())) { ready = false; return false; }
     persistent_policy_version = version;
     ready = true;
     serial::line("ZCAP_ROOT_KEY_OK id=9202c73fad96ad66");
