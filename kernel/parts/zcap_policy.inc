@@ -176,7 +176,13 @@ bool update(const char* candidate_path) {
     const uint32_t previous_version = persistent_policy_version;
     uint32_t previous_size = 0U;
     if (!security_policy_transaction::acquire("/security/syscall-capabilities.zcap", max_policy_bytes, previous_size)) {
-        serial::line("ZCAP_UPDATE_BACKUP_FAILED"); return false;
+        if (security_policy_transaction::prepare_uncertain()) {
+            ready = false;
+            serial::line("ZCAP_UPDATE_JOURNAL_PREPARE_UNCERTAIN");
+        } else {
+            serial::line("ZCAP_UPDATE_BACKUP_FAILED");
+        }
+        return false;
     }
 
     uint32_t size = 0U;
