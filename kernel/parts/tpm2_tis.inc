@@ -240,6 +240,37 @@ bool execute_command(bool (*builder)(uint8_t*, uint32_t, uint32_t&),
     return transmit(command_buffer, command_size, response_buffer, sizeof(response_buffer), response_size);
 }
 
+constexpr uint32_t nv_written_attribute = 0x20000000U;
+
+tpm2_protocol::PublicValidation parse_counter_public_runtime(
+        uint32_t response_size, tpm2_protocol::CounterPublic& public_area,
+        uint32_t& response_code) {
+    tpm2_protocol::PublicValidation validation = tpm2_protocol::parse_counter_public(
+        response_buffer, response_size, public_area, response_code);
+    if (validation != tpm2_protocol::PublicValidation::wrong_attributes ||
+        response_size < 22U || public_area.attributes !=
+            (tpm2_protocol::nv_attributes | nv_written_attribute)) {
+        return validation;
+    }
+
+    const uint8_t saved[4] = {response_buffer[18U], response_buffer[19U],
+                              response_buffer[20U], response_buffer[21U]};
+    response_buffer[18U] = static_cast<uint8_t>(tpm2_protocol::nv_attributes >> 24U);
+    response_buffer[19U] = static_cast<uint8_t>(tpm2_protocol::nv_attributes >> 16U);
+    response_buffer[20U] = static_cast<uint8_t>(tpm2_protocol::nv_attributes >> 8U);
+    response_buffer[21U] = static_cast<uint8_t>(tpm2_protocol::nv_attributes);
+    validation = tpm2_protocol::parse_counter_public(
+        response_buffer, response_size, public_area, response_code);
+    response_buffer[18U] = saved[0];
+    response_buffer[19U] = saved[1];
+    response_buffer[20U] = saved[2];
+    response_buffer[21U] = saved[3];
+    if (validation == tpm2_protocol::PublicValidation::okay) {
+        public_area.attributes = tpm2_protocol::nv_attributes | nv_written_attribute;
+    }
+    return validation;
+}
+
 bool refresh_counter(bool publish_marker) {
     counter_provisioned = false;
     counter_public_valid = false;
@@ -249,7 +280,7 @@ bool refresh_counter(bool publish_marker) {
     tpm2_protocol::CounterPublic public_area{};
     uint32_t response_code = 0U;
     const tpm2_protocol::PublicValidation validation =
-        tpm2_protocol::parse_counter_public(response_buffer, response_size, public_area, response_code);
+        parse_counter_public_runtime(response_size, public_area, response_code);
     if (validation == tpm2_protocol::PublicValidation::response_error &&
         tpm2_protocol::missing_nv_index_code(response_code)) {
         if (publish_marker) {
