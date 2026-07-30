@@ -2,81 +2,156 @@
 
 ## Purpose
 
-This contract separates package-format recognition from executable runtime support. A foreign artifact is runnable only when a concrete runtime provider exists, its architecture matches the host, every required host capability is present, and all required proprietary assets were supplied by the user.
+Runtime Provider ABI v1 separates four states that must not be conflated:
 
-The contract deliberately does not treat a recognized ISO, EXE, PBP or CHD as executable support.
+1. an artifact family is recognized;
+2. a user-supplied artifact has a content-addressed manifest;
+3. a concrete runtime provider can accept that artifact family;
+4. the current host has enough verified substrate to build a launch plan.
 
-## Commands
+Recognition alone never authorizes execution. A plan is ready only when the provider exists, its architecture matches the verified host profile, every required capability or capability alternative is satisfied, all required user-owned assets are supplied and hashed, and the artifact fits the host storage contract.
+
+## Command surface
 
 ```text
 zenuniverse host-profile --name zenov-0.1.1-i686
-zenuniverse runtime-status --input packages/universe --runtime duckstation --host-profile zenov-0.1.1-i686
-zenuniverse runtime-plan --input packages/universe --package org.zenov.profile.playstation1-game --host-profile zenov-0.1.1-i686
+zenuniverse runtime-status --input packages/universe --runtime native --host-profile zenov-0.1.1-i686
+zenuniverse runtime-plan --input packages/universe --package org.zenov.profile.playstation1-game --artifact chd --host-profile zenov-0.1.1-i686
+zenuniverse artifact-manifest --input packages/universe --profile PROFILE --artifact FAMILY --file FILE --ownership user-owned --output FILE.zartifact
+zenuniverse verify-artifact --manifest FILE.zartifact --file FILE
+zenuniverse launch-plan --input packages/universe --manifest FILE.zartifact --file FILE --host-profile zenov-0.1.1-i686 [--asset ID=FILE ...] [--output FILE.zlaunch]
 ```
 
-`runtime-plan` accepts a built-in host profile rather than arbitrary capability claims. It exits with status `3` while any provider, architecture or capability blocker remains.
+Exit status `3` means the request is structurally valid but cannot run on the selected verified host. Invalid descriptors, manifests, files or command arguments return status `2`.
 
-The legacy `resolve --capability ...` command remains available for deterministic resolver unit tests, but prints `capability-source=manual-unverified`. It is not an execution authorization result.
+## Typed capability registry
 
-## Current verified host profile
+All `requires=`, `provides=` and manually supplied test capabilities must exist in one registry. Misspellings such as `kernel.threadz` are rejected while parsing; they cannot silently become permanent unsatisfied dependencies.
 
-`zenov-0.1.1-i686` records the substrate actually implemented by the current system:
-
-- i686/x86 execution;
-- ZEX1 and static ELF32 loading;
-- one foreground process;
-- framebuffer graphics;
-- keyboard and mouse input;
-- ZenovFS small-file storage.
-
-It does not claim x86-64, threads, general process management, `mmap`, JIT memory, dynamic linking, OpenGL, Vulkan, streaming audio, gamepad input or large-file storage.
-
-## Provider descriptor extensions
-
-Runtime descriptors may declare repeated fields:
+Alternatives use repeated `requires-any=` fields:
 
 ```text
-accepts=disc-image
-accepts=chd
-asset=firmware.playstation1-bios
-requires=kernel.threads
-provides=runtime.duckstation
+requires-any=graphics.opengl3.1|graphics.vulkan1.0
 ```
 
-`accepts` is valid only on `kind=runtime` records and must use a registered artifact family. `asset` is a canonical user-supplied asset identifier. Assets are emitted into the plan but are never downloaded by ZenovOS.
+The resolver evaluates each branch on isolated plan state and chooses a zero-blocker branch when one exists. If no branch is satisfiable, it emits one canonical blocker and diagnostics for each rejected choice. Synthetic capability names such as `graphics.opengl3.1-or-vulkan1.0` are not accepted.
 
-## First provider contracts
+## ZENHOST1 verified host profile
 
-### DuckStation / PlayStation 1
+The built-in `zenov-0.1.1-i686` profile records only substrate already implemented by the current system:
 
-The provider accepts PS-X executable, BIN/CUE, CHD, generic disc-image and unencrypted PBP families. It requires a user-dumped PlayStation BIOS plus a 64-bit runtime substrate, SSE4.1 for the normal x86 build, process/thread and memory services, JIT support, a modern graphics API, audio, gamepad input and large-file storage.
+```text
+architecture=x86
+artifact-bytes-limit=65536
+process-limit=1
+thread-limit=1
+```
 
-### PPSSPP / PlayStation Portable
+Capabilities include the current ZEX1/static ELF32 loader, one foreground process, framebuffer graphics, keyboard/mouse and bounded ZenovFS storage. The profile does not claim x86-64, general processes, threads, `mmap`, JIT, dynamic linking, OpenGL/Vulkan, streaming audio, gamepad input or large-file storage.
 
-The provider accepts ISO/disc-image, CSO and PBP families. It requires process/thread and memory services, OpenGL 3.0-or-Vulkan-class graphics, audio, gamepad input and large-file storage. No PSP BIOS asset is declared.
+The legacy `resolve --capability` surface remains for deterministic resolver tests and prints `capability-source=manual-unverified`. It is not an execution authorization interface.
 
-### PCSX2 / PlayStation 2
+## Provider descriptor contract
 
-The existing provider now declares accepted ISO/CSO/disc-image families and the required user-dumped PS2 BIOS. The host requirements include x86-64/SSE4.1-class execution, threads, memory/JIT services, OpenGL 3.3-or-Vulkan 1.1-class graphics, audio, gamepad input and large-file storage.
+Every `kind=runtime` descriptor must declare:
 
-## Fail-closed behavior
+```text
+provider-abi=zen-runtime-provider-1
+launch-mode=builtin|exec|external
+accepts=<registered artifact family>
+provides=runtime.<provider-name>
+```
 
-Provider architecture is checked independently from package architecture. This closes the previous gap where an x86 host could receive a plan containing an x86-64 provider.
+Rules:
 
-Repeated blockers are deduplicated. A planned or metadata-only runtime never becomes runnable solely because the caller supplied arbitrary capability strings.
+- `accepts=` is mandatory for providers and forbidden for ordinary applications/profiles;
+- the provided runtime capability must exactly match the provider ID suffix;
+- provider architecture is checked independently from application architecture;
+- a runtime marked `available` must be backed by `builtin`, `embedded` or verified HTTPS delivery;
+- `metadata-only` providers remain non-runnable even if a caller invents capabilities;
+- `entrypoint` and launch arguments are canonical and bounded;
+- `%artifact%` and `%asset:<id>%` are the only dynamic launch placeholders;
+- console firmware and commercial content remain user-supplied and are never mirrored by ZenUniverse.
 
-## Current outcome
+## ZENARTIFACT1
 
-On `zenov-0.1.1-i686`, PS1, PSP and PS2 runtime plans are expected to be blocked. That is a correct executable result, not a placeholder success. The blockers define the implementation order for the next kernel/userspace work:
+`artifact-manifest` opens the artifact as a regular file with `O_NOFOLLOW`, streams it in bounded chunks and records:
 
-1. large-file storage;
-2. x86-64 userspace and dynamic loading;
-3. multiple processes and threads;
-4. `mmap` and controlled JIT memory;
-5. gamepad and streaming audio APIs;
-6. OpenGL/Vulkan-class graphics substrate;
-7. provider packaging and runtime execution tests.
+```text
+ZENARTIFACT1
+profile=<catalog profile id>
+artifact=<family>
+ownership=redistributable|user-owned
+bytes=<canonical decimal>
+sha256=<lowercase SHA-256>
+```
 
-## Legal boundary
+The opened file descriptor is inspected before and after hashing. Identity, size, modification-time or status-change-time changes reject the snapshot. Symlinks, empty files, non-regular files, non-canonical manifests, unsupported provider families and console content not declared `user-owned` are rejected.
 
-Console firmware and commercial game content remain user-supplied. ZenUniverse stores identifiers and requirements only; it does not publish mirrors, hashes or bundled proprietary bytes for those assets.
+Manifest and descriptor text reads are bounded. The SHA-256 implementation uses explicit 32-bit modular reduction rather than relying on sanitizer-visible unsigned wraparound and is checked against a known-answer vector.
+
+`verify-artifact` reopens and hashes the file; a changed byte or size invalidates the manifest.
+
+## ZENLAUNCH1
+
+`launch-plan` verifies the artifact manifest and bytes before resolving anything. It then:
+
+1. resolves the application/profile and exact runtime provider;
+2. confirms that the provider accepts the manifest artifact family;
+3. applies the verified host architecture and capabilities;
+4. enforces the host artifact-size limit;
+5. requires every declared user-owned firmware asset;
+6. hashes each supplied asset and rejects undeclared extras;
+7. emits a deterministic provider entrypoint and argument vector;
+8. returns ready only when the blocker set is empty.
+
+The current native provider is a real successful ABI path:
+
+```text
+org.zenov.runtime.native
+provider-abi=zen-runtime-provider-1
+launch-mode=builtin
+entrypoint=@kernel-loader
+accepts=zex1
+accepts=elf32
+availability=available
+```
+
+A content-addressed native ZEX1 fixture produces `ZENUNIVERSE_LAUNCH_READY`. This verifies the ABI, manifest and launch-plan path; actual guest execution continues to use the existing ZenPkg/kernel loader lifecycle.
+
+## Foreign providers
+
+DuckStation, PPSSPP, PCSX2, Wine, Proton, Darling, RPCS3, xemu and Xenia now use the same provider ABI and typed capability registry. They remain `planned`/`metadata-only` because the required host substrate and provider binaries are not present.
+
+DuckStation's descriptor uses its current batch CLI shape (`-batch -- %artifact%`) and declares a user-supplied PS1 BIOS. Its upstream documentation requires a BIOS dumped from a console, a 64-bit host and OpenGL/Vulkan-class graphics. PCSX2 likewise requires a user-dumped PS2 BIOS, a 64-bit host, SSE4.1 and OpenGL 3.3 or Vulkan 1.1-class graphics. These requirements are represented as blockers, not as claimed ZenovOS features.
+
+Primary references:
+
+- https://github.com/stenzek/duckstation/blob/master/README.md
+- https://github.com/stenzek/duckstation/blob/master/src/duckstation-qt/qthost.cpp
+- https://github.com/PCSX2/pcsx2
+- https://pcsx2.net/docs/setup/requirements/
+
+## Verified boundaries
+
+Implemented in this pass:
+
+- deterministic provider catalog;
+- typed capabilities and real alternatives;
+- provider architecture/delivery/entrypoint validation;
+- current-host resource limits;
+- content-addressed artifact and asset hashing;
+- native ready plan;
+- foreign fail-closed plans;
+- tamper, symlink, ownership, artifact-family and typo rejection;
+- GCC strict build plus Clang ASan/UBSan, unsigned-overflow and integer-conversion gates.
+
+Not implemented:
+
+- x86-64 guest execution;
+- multiprocess/threaded guest runtime;
+- `mmap`, JIT or dynamic linker;
+- large-file storage inside ZenovFS;
+- OpenGL/Vulkan, streaming audio or gamepad APIs;
+- bundled emulator/provider binaries;
+- PS1/PSP/PS2 foreign execution.
