@@ -41,12 +41,20 @@ replace_once(
   echo "sendkey ret 10"
   wait_for_serial "UI_SOUND_PREVIEW_OK" || { echo quit; return 1; }
 ''',
-    '''  echo "sendkey up 10"
-  sleep 0.08
+    '''  echo "sendkey tab 10"
+  sleep 0.10
+  echo "sendkey tab 10"
+  sleep 0.10
+  echo "sendkey tab 10"
+  sleep 0.10
+  echo "sendkey tab 10"
+  sleep 0.10
+  echo "sendkey tab 10"
+  sleep 0.10
   echo "sendkey ret 10"
   wait_for_serial "UI_SOUND_PREVIEW_OK" || { echo quit; return 1; }
 ''',
-    "made preview focus navigation loss-resistant",
+    "paced every preview focus transition",
 )
 
 replace_once(
@@ -100,7 +108,7 @@ peak = max(absolute, default=0)
 active = sum(value >= 64 for value in absolute)
 active_frames = active // channels
 active_ms = active_frames * 1000.0 / rate
- duration_seconds = frames / rate
+duration_seconds = frames / rate
 
 if peak < 256 or active_frames < max(32, rate // 200):
     raise SystemExit(
@@ -123,7 +131,7 @@ print(
 PY
 
 check_ppm() {
-'''.replace("\n duration_seconds", "\nduration_seconds"),
+''',
     "validated non-silent WAV payload and emitted measurements",
 )
 
