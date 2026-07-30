@@ -68,10 +68,16 @@ jobs:
           test -s ci-logs/security-policy-transaction-test-clang
 
       - name: Run strict host and freestanding checks
-        run: make clean check
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean check 2>&1 | tee ci-logs/policy-transaction-freestanding.log
 
       - name: Exercise all signed policy updates in QEMU
-        run: make qemu
+        shell: bash
+        run: |
+          set -euo pipefail
+          make qemu 2>&1 | tee ci-logs/policy-transaction-qemu.log
 
       - name: Verify runtime commit and reboot persistence
         shell: bash
@@ -89,7 +95,10 @@ jobs:
           ! grep -Fq 'UPDATE_SYNC_FAILED' build/qemu/serial-phase1.log
 
       - name: Verify deterministic rebuild
-        run: make deterministic
+        shell: bash
+        run: |
+          set -euo pipefail
+          make deterministic 2>&1 | tee ci-logs/policy-transaction-deterministic.log
 
       - name: Verify transaction source contract and retained evidence
         shell: bash
@@ -101,17 +110,29 @@ jobs:
           grep -Fq 'volatile uint8_t* output = rollback_data;' kernel/parts/security_policy_transaction.inc
           grep -Fq 'bool restore_verified' kernel/parts/security_policy_transaction.inc
           grep -Fq 'bool version_matches' kernel/parts/security_policy_transaction.inc
-          grep -Fq 'security_policy_transaction::acquire("/security/zenovguard.zgdb"' kernel/parts/zgdb_policy.inc
+
+          grep -Fq '#define init init_unhardened [[maybe_unused]]' kernel/parts/zgdb_policy_transactional.inc
+          grep -Fq '#define update update_unhardened [[maybe_unused]]' kernel/parts/zgdb_policy_transactional.inc
+          grep -Fq '#define update update_unhardened [[maybe_unused]]' kernel/parts/zmid_policy_transactional.inc
+          test -z "$(grep -R --include='*.inc' -F 'init_unhardened(' kernel/parts || true)"
+          test -z "$(grep -R --include='*.inc' -F 'update_unhardened(' kernel/parts || true)"
+
+          grep -Fq 'security_policy_transaction::acquire("/security/zenovguard.zgdb"' kernel/parts/zgdb_policy_transactional.inc
           grep -Fq 'security_policy_transaction::acquire("/security/syscall-capabilities.zcap"' kernel/parts/zcap_policy.inc
-          grep -Fq 'security_policy_transaction::acquire("/security/zenovguard-intelligence.zmid"' kernel/parts/zmid_policy.inc
-          grep -Fq 'ZGDB_UPDATE_VERSION_READBACK_FAILED' kernel/parts/zgdb_policy.inc
+          grep -Fq 'security_policy_transaction::acquire("/security/zenovguard-intelligence.zmid"' kernel/parts/zmid_policy_transactional.inc
+          grep -Fq 'ZGDB_UPDATE_VERSION_READBACK_FAILED' kernel/parts/zgdb_policy_transactional.inc
           grep -Fq 'ZCAP_UPDATE_VERSION_READBACK_FAILED' kernel/parts/zcap_policy.inc
-          grep -Fq 'ZMID_UPDATE_VERSION_READBACK_FAILED' kernel/parts/zmid_policy.inc
+          grep -Fq 'ZMID_UPDATE_VERSION_READBACK_FAILED' kernel/parts/zmid_policy_transactional.inc
           grep -Fq 'format_nonzero_decimal_u32' kernel/parts/security_policy_format.inc
+
           grep -Fq 'SECURITY_POLICY_TRANSACTION_TEST_OK' ci-logs/security-policy-transaction-clang.log
+          grep -Fq 'ZENOVOS_QEMU_OK' ci-logs/policy-transaction-qemu.log
           test -s ci-logs/security-policy-transaction-test-gcc
           test -s ci-logs/security-policy-transaction-test-clang
-          echo 'SIGNED_POLICY_TRANSACTION_SOURCE_CONTRACT_OK domains=3 rollback=verified version-readback=yes sync=yes supervisor-only=yes'
+          test -s ci-logs/policy-transaction-freestanding.log
+          test -s ci-logs/policy-transaction-qemu.log
+          test -s ci-logs/policy-transaction-deterministic.log
+          echo 'SIGNED_POLICY_TRANSACTION_SOURCE_CONTRACT_OK domains=3 rollback=verified version-readback=yes sync=yes supervisor-only=yes legacy-entrypoints=unreachable'
 
       - name: Upload signed policy transaction evidence
         if: always()
@@ -124,6 +145,9 @@ jobs:
             ci-logs/security-policy-transaction-test-clang
             ci-logs/security-policy-transaction-gcc.log
             ci-logs/security-policy-transaction-clang.log
+            ci-logs/policy-transaction-freestanding.log
+            ci-logs/policy-transaction-qemu.log
+            ci-logs/policy-transaction-deterministic.log
             build/KERNEL.BIN
             build/kernel.map
             build/zenov-os.img
@@ -137,7 +161,9 @@ jobs:
             kernel/parts/security_policy_transaction.inc
             kernel/parts/supervisor_layout.inc
             kernel/parts/zgdb_policy.inc
+            kernel/parts/zgdb_policy_transactional.inc
             kernel/parts/zcap_policy.inc
             kernel/parts/zmid_policy.inc
+            kernel/parts/zmid_policy_transactional.inc
             tests/security_policy_transaction_test.cpp
             docs/SIGNED_POLICY_TRANSACTIONS_0.1.1.md
