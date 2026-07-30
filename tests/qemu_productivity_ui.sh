@@ -40,11 +40,22 @@ capture() {
   sleep 0.15
 }
 
+open_start_result() {
+  local query="$1"
+  echo "sendkey f8 10"
+  local index character
+  for ((index = 0; index < ${#query}; ++index)); do
+    character="${query:index:1}"
+    echo "sendkey $character 10"
+  done
+  echo "sendkey ret 10"
+}
+
 controller() {
   wait_for_serial "ZENOVOS_UI_READY" || { echo quit; return 1; }
   wait_for_serial "UI_PRODUCTIVITY_APPS_READY notes=yes calendar=yes clock=yes scratchpad=yes" || { echo quit; return 1; }
 
-  echo "sendkey f1 10"
+  open_start_result notes
   wait_for_serial "UI_NOTES_OPEN_APP_OK" || { echo quit; return 1; }
   capture notes-browser
 
@@ -82,7 +93,7 @@ controller() {
   echo "sendkey esc 10"
   wait_for_serial "UI_PRODUCTIVITY_CLOSE_OK" || { echo quit; return 1; }
 
-  echo "sendkey f2 10"
+  open_start_result calendar
   wait_for_serial "UI_CALENDAR_OPEN_APP_OK" || { echo quit; return 1; }
   echo "sendkey f4 10"
   echo "sendkey m 10"
@@ -94,7 +105,7 @@ controller() {
   capture calendar-event
   echo "sendkey esc 10"
 
-  echo "sendkey f3 10"
+  open_start_result clock
   wait_for_serial "UI_CLOCK_OPEN_APP_OK" || { echo quit; return 1; }
   echo "sendkey f1 10"
   wait_for_serial "UI_CLOCK_STOPWATCH_RUNNING" || { echo quit; return 1; }
@@ -148,5 +159,5 @@ for marker in \
   grep -Fq "$marker" "$SERIAL" || { echo "qemu-productivity-ui: missing marker: $marker" >&2; exit 1; }
 done
 
-printf 'qemu-productivity-ui: OK notes=local-markdown+scratch+daily calendar=persistent-events clock=rtc+stopwatch+countdown serial=%s screenshots=%s runtime=%s\n' \
+printf 'qemu-productivity-ui: OK notes=local-markdown+scratch+daily calendar=persistent-events clock=rtc+stopwatch+countdown start-search=yes serial=%s screenshots=%s runtime=%s\n' \
   "$SERIAL" "$OUT/*.ppm" "$RUNTIME_DATA"
