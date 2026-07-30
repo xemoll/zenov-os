@@ -16,6 +16,7 @@ static_assert(sizeof(uint8_t) == 1 && sizeof(uint16_t) == 2 && sizeof(uint32_t) 
 #include "parts/hardware_irq_staging.inc"
 #include "parts/supervisor_layout.inc"
 #include "parts/memory.inc"
+#include "parts/tpm2_tis.inc"
 #include "parts/graphics_mapping.inc"
 #include "parts/user_window.inc"
 #include "parts/storage.inc"
@@ -133,15 +134,18 @@ bool sha256_self_test() { return security_guard::sha256_self_test(); }
 #undef remove
 #undef write_file
 #include "parts/security_commands.inc"
+#include "parts/tpm2_commands.inc"
 
 void execute(char* line) {
     const bool help = package_manager::command_token_equal(line, "help");
     if (storage::dispatch_storage_command(line)) return;
     if (package_manager::dispatch_line(line)) return;
+    if (dispatch_tpm_command(line)) return;
     execute_without_packages(line);
     if (help) {
         console::line("  Packages     pkg status|list|search|plan|verify|fetch|install|upgrade|repair|policy|info|rollback|remove|run|cache|repo");
         console::line("  Storage I/O  disk status");
+        console::line("  TPM 2.0      tpm status|provision|increment|selftest");
     }
 }
 
@@ -151,7 +155,7 @@ extern "C" void kernel_main() {
     serial::init();
     serial::line("ZENOVOS_BOOT_OK");
     for (uint32_t i = 0; i < zenov_generated::kBootMessageCount; ++i) serial::line(zenov_generated::kBootMessages[i]);
-    serial::line("Initializing IDT, memory, storage, policy recovery, audit journal, signed policy, syscall capabilities, signed repository, packages, security, graphics, input and ring-3 services...");
+    serial::line("Initializing IDT, memory, TPM 2.0 transport, storage, policy recovery, audit journal, signed policy, syscall capabilities, signed repository, packages, security, graphics, input and ring-3 services...");
 
     console::set_color(zenov_generated::kForeground, zenov_generated::kBackground);
     idt_init();
@@ -162,6 +166,7 @@ extern "C" void kernel_main() {
     serial::line("MONOTONIC_TICK_READY hz=100 irq-mask=timer-only");
     pmm::init();
     paging::init();
+    tpm2::init();
     if (!paging::scrub_process_window(true)) panic("User process window scrub self-test failed.");
     serial::line("USER_WINDOW_SCRUB_OK");
     if (!process::elf_policy_self_test()) panic("ELF W^X policy self-test failed.");
