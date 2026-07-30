@@ -1,0 +1,93 @@
+name: ZenovOS 0.1.1 System Apps
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  system-apps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify tested source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl qemu-system-x86
+
+      - name: Build strict native image
+        run: make clean check
+
+      - name: Compile runtime-image verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tools/zenovfs_productivity_verify.cpp -o build/zenovfs-productivity-verify
+
+      - name: Exercise Notes, Calendar and Clock
+        run: bash tests/qemu_productivity_ui.sh build/zenov-os.img build/zenov-data.img build/qemu-productivity-ui
+
+      - name: Verify persistent application state
+        shell: bash
+        run: |
+          set -euo pipefail
+          build/zenovfs-verify build/qemu-productivity-ui/zenov-data-productivity.img | tee build/qemu-productivity-ui/zenovfs-verify.log
+          build/zenovfs-productivity-verify build/qemu-productivity-ui/zenov-data-productivity.img | tee build/qemu-productivity-ui/productivity-verify.log
+          grep -Fq 'ZENOV_PRODUCTIVITY_RUNTIME_IMAGE_OK notes=markdown+scratch+daily calendar=events checksum=valid' build/qemu-productivity-ui/productivity-verify.log
+          grep -Fq 'UI_PRODUCTIVITY_APPS_READY notes=yes calendar=yes clock=yes scratchpad=yes' build/qemu-productivity-ui/serial.log
+          grep -Fq 'UI_CLOCK_TIMER_RUNNING' build/qemu-productivity-ui/serial.log
+          test -s build/qemu-productivity-ui/notes-editor.ppm
+          test -s build/qemu-productivity-ui/calendar-event.ppm
+          test -s build/qemu-productivity-ui/clock-running.ppm
+
+      - name: Verify deterministic rebuild
+        run: make deterministic
+
+      - name: Upload system-app evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-0.1.1-system-apps-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            build/zenov-os.img
+            build/zenov-data.img
+            build/KERNEL.BIN
+            build/zenovfs-productivity-verify
+            build/qemu-productivity-ui/*.img
+            build/qemu-productivity-ui/*.log
+            build/qemu-productivity-ui/*.stderr
+            build/qemu-productivity-ui/*.ppm
+            kernel/parts/ui_productivity.inc
+            tests/qemu_productivity_ui.sh
+            tools/zenovfs_productivity_verify.cpp
