@@ -10,11 +10,23 @@ The implementation borrows workflows, not branding or screen composition:
 - bounded local workspaces and explicit persistent artifacts from project-oriented tools such as Antigravity;
 - keyboard-first editing and inspectable plain-text state appropriate for low-level development tools. No compatibility with Cremniy, IDA, Obsidian or Antigravity is claimed.
 
+## Opening applications
+
+System applications are opened through the existing Start search rather than by taking over shell function keys:
+
+```text
+Super / F8 → type NOTES or NOTEPAD → Enter
+Super / F8 → type CALENDAR → Enter
+Super / F8 → type CLOCK or TIME → Enter
+```
+
+This preserves the established terminal shortcuts `F1` through `F4`. Once a system application is active, its documented function keys are handled locally by that application.
+
 ## Applications
 
 ### Zen Notes
 
-`F1` opens Zen Notes from any normal desktop surface.
+Open Zen Notes from Start search with `NOTES` or `NOTEPAD`.
 
 Implemented behavior:
 
@@ -34,7 +46,7 @@ The editor is deliberately plain-text and append-oriented in this pass. It is no
 
 ### Zen Calendar
 
-`F2` opens Zen Calendar.
+Open Zen Calendar from Start search with `CALENDAR`.
 
 Implemented behavior:
 
@@ -50,7 +62,7 @@ The calendar is local-only. Recurrence, invitations, CalDAV, time zones, notific
 
 ### Zen Clock
 
-`F3` opens Zen Clock.
+Open Zen Clock from Start search with `CLOCK` or `TIME`.
 
 Implemented behavior:
 
@@ -79,11 +91,14 @@ The dedicated `ZenovOS 0.1.1 System Apps` workflow:
 
 1. verifies the exact source SHA and clean checkout;
 2. runs the full strict build;
-3. boots QEMU and exercises note creation, scratchpad persistence, daily-note creation, calendar event persistence, stopwatch and countdown controls;
-4. captures six real `1024x768` framebuffer screenshots;
-5. verifies the mutated runtime ZenovFS image structurally and checks live file contents and checksums with a dedicated host verifier;
-6. runs the deterministic rebuild gate;
-7. uploads images, logs, runtime data image, verifier and source evidence.
+3. opens each application through the real Start search path;
+4. boots QEMU and exercises note creation, scratchpad persistence, daily-note creation, calendar event persistence, stopwatch and countdown controls;
+5. captures six real `1024x768` framebuffer screenshots after the complete frame is presented;
+6. verifies the mutated runtime ZenovFS image structurally and checks live file contents and checksums with a dedicated host verifier;
+7. runs the deterministic rebuild gate;
+8. uploads images, logs, runtime data image, verifier and source evidence.
+
+The existing Security Defense workflow remains a required independent regression gate. It proves that system-app routing does not steal the established shell `F1`–`F4` shortcuts used by the security lifecycle harness.
 
 Expected final runtime marker:
 
