@@ -103,7 +103,12 @@ bool update(const char* candidate_path) {
     uint32_t previous_size = 0U;
     if (!security_policy_transaction::acquire(
             "/security/zenovguard.zgdb", max_database_bytes, previous_size)) {
-        serial::line("ZGDB_UPDATE_BACKUP_FAILED");
+        if (security_policy_transaction::prepare_uncertain()) {
+            ready = false;
+            serial::line("ZGDB_UPDATE_JOURNAL_PREPARE_UNCERTAIN");
+        } else {
+            serial::line("ZGDB_UPDATE_BACKUP_FAILED");
+        }
         return false;
     }
 
