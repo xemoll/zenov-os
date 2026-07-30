@@ -1,5 +1,5 @@
-#define init init_unhardened
-#define update update_unhardened
+#define init init_unhardened [[maybe_unused]]
+#define update update_unhardened [[maybe_unused]]
 #include "zgdb_policy.inc"
 #undef update
 #undef init
