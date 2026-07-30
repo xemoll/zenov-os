@@ -66,8 +66,7 @@ jobs:
           set -euo pipefail
           make clean
           make --no-print-directory all | tee ci-logs/tpm2-build.log
-          bash tests/qemu_tpm2_nv.sh build/zenov-os.img build/zenov-data.img build/qemu/tpm2-nv \
-            | tee ci-logs/tpm2-qemu.log
+          make --no-print-directory tpm2-qemu | tee ci-logs/tpm2-qemu.log
           grep -Fqx 'TPM2_NV_QEMU_OK tis=mmio locality=0 provision=explicit counter=1-2-3 reboot=persistent absent=compatible' build/qemu/tpm2-nv/summary.log
 
       - name: Verify deterministic rebuild
@@ -87,10 +86,12 @@ jobs:
           grep -Fq 'constexpr uint32_t tpm_tis_base = 0xFED40000U;' kernel/parts/tpm2_tis.inc
           grep -Fq 'write_through | cache_disable' kernel/parts/tpm2_tis.inc
           grep -Fq 'constexpr uint32_t nv_index = 0x015A4F53U;' kernel/parts/tpm2_protocol.inc
+          grep -Fq 'constexpr uint32_t nv_written_attribute = 0x20000000U;' kernel/parts/tpm2_tis.inc
           grep -Fq 'bool provision_counter()' kernel/parts/tpm2_tis.inc
+          grep -Fq 'tpm2-qemu: $(TPM2_QEMU_STAMP)' GNUmakefile
           grep -Fq 'if (dispatch_tpm_command(line)) return;' kernel/kernel.cpp
           grep -Fq 'The current layer does not yet bind ZPTJ1 commits' docs/TPM2_TIS_NV_COUNTER_0.1.1.md
-          echo 'TPM2_BOUNDARY_CONTRACT_OK access=supervisor-only provision=explicit policy-anchor=not-claimed'
+          echo 'TPM2_BOUNDARY_CONTRACT_OK access=supervisor-only provision=explicit written=dynamic-only policy-anchor=not-claimed'
 
       - name: Upload TPM2 transport and NV evidence
         if: always()
@@ -112,3 +113,4 @@ jobs:
             tests/tpm2_protocol_test.cpp
             tests/qemu_tpm2_nv.sh
             docs/TPM2_TIS_NV_COUNTER_0.1.1.md
+            GNUmakefile
