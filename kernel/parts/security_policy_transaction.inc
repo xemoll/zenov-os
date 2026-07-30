@@ -252,7 +252,7 @@ bool acquire(const char* live_path, uint32_t capacity, uint32_t& size) {
     return true;
 }
 
-bool restore_verified(const char* live_path, uint32_t size, uint8_t* readback, uint32_t capacity) {
+[[maybe_unused]] bool restore_verified(const char* live_path, uint32_t size, uint8_t* readback, uint32_t capacity) {
     if (!busy || !live_path || !*live_path || !size || size > workspace_bytes || !readback || capacity < size) return false;
     if (!storage::write_file(live_path, rollback_data, size, false)) return false;
     uint32_t actual = 0U;
@@ -319,5 +319,5 @@ bool commit() {
 }
 
 bool discard() { return commit(); }
-bool release() { return discard(); }
+[[maybe_unused]] bool release() { return discard(); }
 } // namespace security_policy_transaction
