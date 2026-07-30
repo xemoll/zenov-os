@@ -24,8 +24,14 @@ const char* configured_terminal_cursor = terminal_cursor;
 #include "ui_theme.inc"
 #include "ui_shell.inc"
 #include "ui_apps.inc"
+
+#define render_scene render_scene_base
 #include "ui_files.inc"
+#undef render_scene
+
 #include "ui_scaler.inc"
+
+void render_scene();
 
 #define init init_base
 #define handle_navigation_key handle_navigation_key_base
@@ -35,7 +41,15 @@ const char* configured_terminal_cursor = terminal_cursor;
 #undef handle_navigation_key
 #undef init
 
+#define init init_files_base
+#define handle_navigation_key handle_navigation_key_files_base
+#define on_mouse_packet on_mouse_packet_files_base
 #include "ui_files_runtime.inc"
+#undef on_mouse_packet
+#undef handle_navigation_key
+#undef init
+
+#include "ui_productivity.inc"
 
 #undef terminal_cursor
 #undef desktop_theme
