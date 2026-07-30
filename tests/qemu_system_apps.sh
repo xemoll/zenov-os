@@ -19,10 +19,34 @@ wait_for() {
   return 1
 }
 
+marker_count() {
+  local file="$1" text="$2"
+  if [[ ! -f "$file" ]]; then printf '0\n'; return; fi
+  grep -Fc "$text" "$file" 2>/dev/null || true
+}
+
+wait_for_marker_count() {
+  local file="$1" text="$2" expected="$3" current
+  for _ in $(seq 1 1800); do
+    current="$(marker_count "$file" "$text")"
+    [[ "$current" =~ ^[0-9]+$ ]] && (( current >= expected )) && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+sendkey_and_wait_frame() {
+  local serial="$1" key="$2" before
+  before="$(marker_count "$serial" 'UI_FRAME_PRESENTED')"
+  echo "sendkey $key 10"
+  wait_for_marker_count "$serial" 'UI_FRAME_PRESENTED' "$((before + 1))"
+}
+
 capture() {
   local file="$(cd "$OUT" && pwd)/$1.ppm"
   echo "screendump $file"
-  sleep 0.7
+  for _ in $(seq 1 100); do [[ -s "$file" ]] && return 0; sleep 0.1; done
+  return 1
 }
 
 first_controller() {
@@ -34,19 +58,22 @@ first_controller() {
   echo 'sendkey ret 10'
   wait_for "$serial" 'UI_PRODUCTIVITY_OPEN_OK' || { echo quit; return 1; }
   wait_for "$serial" 'UI_PRODUCTIVITY_PAGE Clock' || { echo quit; return 1; }
-  capture clock
-  echo 'sendkey tab 10'
+  capture clock || { echo quit; return 1; }
+
+  sendkey_and_wait_frame "$serial" tab || { echo quit; return 1; }
   wait_for "$serial" 'UI_PRODUCTIVITY_PAGE Calendar' || { echo quit; return 1; }
-  capture calendar
-  echo 'sendkey ret 10'
+  capture calendar || { echo quit; return 1; }
+
+  sendkey_and_wait_frame "$serial" ret || { echo quit; return 1; }
   wait_for "$serial" 'UI_PRODUCTIVITY_PAGE Notes' || { echo quit; return 1; }
-  capture notes
+  capture notes || { echo quit; return 1; }
   for key in z e n o v minus n o t e; do echo "sendkey $key 10"; done
   echo 'sendkey f2 10'
   wait_for "$serial" 'UI_PRODUCTIVITY_SAVE_OK path=/docs/note-' || { echo quit; return 1; }
-  echo 'sendkey tab 10'
+
+  sendkey_and_wait_frame "$serial" tab || { echo quit; return 1; }
   wait_for "$serial" 'UI_PRODUCTIVITY_PAGE Notepad' || { echo quit; return 1; }
-  capture notepad
+  capture notepad || { echo quit; return 1; }
   for key in s c r a t c h; do echo "sendkey $key 10"; done
   echo 'sendkey f2 10'
   wait_for "$serial" 'UI_PRODUCTIVITY_SAVE_OK path=/docs/scratchpad.txt' || { echo quit; return 1; }
@@ -82,7 +109,9 @@ second_controller() {
   echo 'sendkey down 10'; echo 'sendkey down 10'; echo 'sendkey down 10'; sleep 0.15
   echo 'sendkey ret 10'
   wait_for "$serial" 'UI_PRODUCTIVITY_OPEN_OK' || { echo quit; return 1; }
-  echo 'sendkey tab 10'; echo 'sendkey tab 10'; echo 'sendkey tab 10'
+  sendkey_and_wait_frame "$serial" tab || { echo quit; return 1; }
+  sendkey_and_wait_frame "$serial" tab || { echo quit; return 1; }
+  sendkey_and_wait_frame "$serial" tab || { echo quit; return 1; }
   wait_for "$serial" 'UI_PRODUCTIVITY_PAGE Notepad' || { echo quit; return 1; }
   wait_for "$serial" 'UI_PRODUCTIVITY_LOAD_OK path=/docs/scratchpad.txt bytes=19' || { echo quit; return 1; }
   echo quit
@@ -94,6 +123,7 @@ for name in clock calendar notes notepad; do
   test -s "$OUT/$name.ppm"
   test "$(sed -n '2p' "$OUT/$name.ppm" | tr -d '\r')" = '1024 768'
 done
+test "$(sha256sum "$OUT"/{clock,calendar,notes,notepad}.ppm | awk '{print $1}' | sort -u | wc -l)" -eq 4
 grep -Fq 'UI_PRODUCTIVITY_SAVE_OK path=/docs/scratchpad.txt' "$OUT/serial-first.log"
 grep -Fq 'UI_PRODUCTIVITY_LOAD_OK path=/docs/scratchpad.txt bytes=19' "$OUT/serial-reboot.log"
-echo 'SYSTEM_APPS_QEMU_OK apps=clock,calendar,notes,notepad persistence=reboot'
+echo 'SYSTEM_APPS_QEMU_OK apps=clock,calendar,notes,notepad persistence=reboot frames=synchronized'
