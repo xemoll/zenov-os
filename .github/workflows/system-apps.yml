@@ -63,11 +63,13 @@ jobs:
         run: |
           set -euo pipefail
           grep -Fq 'constexpr unsigned int editor_capacity = 2048U;' kernel/parts/ui_productivity_model.inc
-          grep -Fq 'storage::guarded_read_file_result' kernel/parts/ui_productivity.inc
-          grep -Fq 'storage::guarded_write_file_result' kernel/parts/ui_productivity.inc
-          grep -Fq 'storage::sync_metadata()' kernel/parts/ui_productivity.inc
-          grep -Fq 'UI_PRODUCTIVITY_LOAD_OK path=' kernel/parts/ui_productivity.inc
-          grep -Fq 'UI_PRODUCTIVITY_SAVE_OK path=' kernel/parts/ui_productivity.inc
+          grep -Fq 'storage::guarded_read_file_result' kernel/parts/ui_productivity_state.inc
+          grep -Fq 'storage::guarded_write_file_result' kernel/parts/ui_productivity_state.inc
+          grep -Fq 'storage::sync_metadata()' kernel/parts/ui_productivity_state.inc
+          grep -Fq 'UI_PRODUCTIVITY_LOAD_OK path=' kernel/parts/ui_productivity_state.inc
+          grep -Fq 'UI_PRODUCTIVITY_SAVE_OK path=' kernel/parts/ui_productivity_state.inc
+          grep -Fq '#include "ui_productivity_state.inc"' kernel/parts/ui_productivity.inc
+          grep -Fq '#include "ui_productivity_views.inc"' kernel/parts/ui_productivity.inc
           grep -Fq 'UI_SYSTEM_APPS_READY clock=yes calendar=yes notes=zenovfs notepad=zenovfs' kernel/parts/ui_productivity_runtime.inc
           grep -Fq 'SYSTEM_APPS_QEMU_OK apps=clock,calendar,notes,notepad persistence=reboot' ci-logs/qemu-system-apps.log
           test -s build/qemu-system-apps/clock.ppm
@@ -93,6 +95,8 @@ jobs:
             build/qemu-system-apps/
             kernel/parts/ui_productivity_model.inc
             kernel/parts/ui_productivity.inc
+            kernel/parts/ui_productivity_state.inc
+            kernel/parts/ui_productivity_views.inc
             kernel/parts/ui_productivity_runtime.inc
             tests/productivity_apps_test.cpp
             tests/qemu_system_apps.sh
