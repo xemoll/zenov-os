@@ -59,7 +59,8 @@ bool busy = false;
 Domain recovered_domain = Domain::none;
 
 bool text_equal(const char* left, const char* right) {
-    if (!left || !right) return left == right;
+    if (!left) return !right || !*right;
+    if (!right) return !*left;
     uint32_t index = 0U;
     while (left[index] && right[index]) {
         if (left[index] != right[index]) return false;
