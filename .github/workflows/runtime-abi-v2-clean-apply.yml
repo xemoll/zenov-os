@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/runtime-provider-abi-v2-clean
+  workflow_dispatch:
 
 concurrency:
   group: runtime-abi-v2-clean-apply
@@ -105,9 +106,7 @@ jobs:
           git rm -r .v2-staging .github/workflows/runtime-abi-v2-clean-apply.yml
           git diff --cached --name-only | LC_ALL=C sort > ci-logs/committed-files.txt
           cat ci-logs/expected-files.txt > ci-logs/allowed-files.txt
-          find .v2-staging -maxdepth 1 -name 'payload.*' -type f -printf '%p\n' 2>/dev/null || true
           printf '%s\n' '.github/workflows/runtime-abi-v2-clean-apply.yml' >> ci-logs/allowed-files.txt
-          # deleted payload paths are visible in the index even though the directory is gone
           for index in $(seq -w 0 30); do printf '.v2-staging/payload.%s\n' "$index" >> ci-logs/allowed-files.txt; done
           LC_ALL=C sort -o ci-logs/allowed-files.txt ci-logs/allowed-files.txt
           cmp ci-logs/allowed-files.txt ci-logs/committed-files.txt
