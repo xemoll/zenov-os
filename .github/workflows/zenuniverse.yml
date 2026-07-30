@@ -9,8 +9,11 @@ on:
       - 'universe.mk'
       - 'tools/zenuniverse/**'
       - 'tests/zenuniverse_test.sh'
+      - 'tests/zenuniverse_runtime_provider_test.sh'
       - 'packages/universe/**'
       - 'docs/ZENUNIVERSE_REPOSITORY_0.1.1.md'
+      - 'docs/RUNTIME_PROVIDER_ABI_0.1.1.md'
+      - 'docs/INDEX.md'
       - '.github/workflows/zenuniverse.yml'
   pull_request:
     branches:
@@ -20,8 +23,11 @@ on:
       - 'universe.mk'
       - 'tools/zenuniverse/**'
       - 'tests/zenuniverse_test.sh'
+      - 'tests/zenuniverse_runtime_provider_test.sh'
       - 'packages/universe/**'
       - 'docs/ZENUNIVERSE_REPOSITORY_0.1.1.md'
+      - 'docs/RUNTIME_PROVIDER_ABI_0.1.1.md'
+      - 'docs/INDEX.md'
       - '.github/workflows/zenuniverse.yml'
   merge_group:
     types:
@@ -42,8 +48,8 @@ env:
 
 jobs:
   universal-catalog:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -60,8 +66,8 @@ jobs:
           test -z "$(git status --porcelain)"
           echo "tested-source-revision=$actual_revision"
       - name: Install strict native toolchain
-        run: sudo apt-get update && sudo apt-get install -y build-essential
-      - name: Build and test universal catalog
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang
+      - name: Build and test provider, artifact and launch contracts
         run: make universe-check
       - name: Verify deterministic catalog independently
         run: |
@@ -70,14 +76,62 @@ jobs:
           make --no-print-directory BUILD=/tmp/zenuniverse-rebuild universe-check
           cmp build/zenuniverse.zuc /tmp/zenuniverse-rebuild/zenuniverse.zuc
           grep -q '^ZENUNIVERSE1$' build/zenuniverse.zuc
-          grep -q '^count=16$' build/zenuniverse.zuc
+          grep -q '^count=22$' build/zenuniverse.zuc
+          grep -q '^provider-abi=zen-runtime-provider-1$' build/zenuniverse.zuc
+          grep -q '^requires-any=graphics.opengl3.1|graphics.vulkan1.0$' build/zenuniverse.zuc
+          ! grep -q -- '-or-vulkan' build/zenuniverse.zuc
       - name: Verify provider policy inventory
         run: |
           set -euo pipefail
-          test "$(find packages/universe -name '*.zsource' | wc -l)" -eq 16
+          test "$(find packages/universe -name '*.zsource' | wc -l)" -eq 22
+          runtime_count="$(grep -Rl '^kind=runtime$' packages/universe --include='*.zsource' | wc -l)"
+          test "$runtime_count" -eq 11
+          test "$(grep -Rl '^provider-abi=zen-runtime-provider-1$' packages/universe/runtime-*.zsource | wc -l)" -eq 11
+          test "$(grep -Rl '^launch-mode=' packages/universe/runtime-*.zsource | wc -l)" -eq 11
+          grep -q '^delivery=builtin$' packages/universe/runtime-native.zsource
+          grep -q '^availability=available$' packages/universe/runtime-native.zsource
+          grep -q '^entrypoint=@kernel-loader$' packages/universe/runtime-native.zsource
+          grep -q '^asset=firmware.playstation1-bios$' packages/universe/runtime-duckstation.zsource
+          grep -q '^asset=firmware.playstation2-bios$' packages/universe/runtime-pcsx2.zsource
+          grep -q '^arg=-batch$' packages/universe/runtime-duckstation.zsource
+          grep -q '^arg=--$' packages/universe/runtime-duckstation.zsource
+          grep -q '^arg=%artifact%$' packages/universe/runtime-duckstation.zsource
           ! grep -R '^mirror=' packages/universe/profile-*game.zsource
-          grep -q '^delivery=user-supplied$' packages/universe/profile-playstation2-game.zsource
-          grep -q '^delivery=user-supplied$' packages/universe/profile-playstation3-game.zsource
-          grep -q '^delivery=user-supplied$' packages/universe/profile-xbox-game.zsource
-          grep -q '^delivery=user-supplied$' packages/universe/profile-xbox360-game.zsource
           ! grep -R -E 'BEGIN (RSA )?PRIVATE KEY|BEGIN PRIVATE KEY' tools/zenuniverse packages/universe
+      - name: Verify retained executable evidence
+        run: |
+          set -euo pipefail
+          provider_dir=build/zenuniverse-runtime-test
+          general_dir=build/zenuniverse-test
+          test -x "$provider_dir/zenuniverse"
+          test -x "$provider_dir/zenuniverse-sanitized"
+          grep -q '^ZENUNIVERSE_LAUNCH_READY profile=org.zenov.profile.native-app reasons=0$' "$provider_dir/native-launch.log"
+          grep -q '^ZENUNIVERSE_LAUNCH_BLOCKED profile=org.zenov.profile.playstation1-game reasons=13$' "$provider_dir/ps1-launch-missing.log"
+          grep -q '^asset=firmware.playstation1-bios bytes=960 sha256=' "$provider_dir/ps1-launch-bios.log"
+          grep -q 'no satisfiable capability alternative: graphics.opengl3.1|graphics.vulkan1.0' "$provider_dir/ps1.log"
+          grep -q 'ZENUNIVERSE_RESOLVE_OK' "$general_dir/resolved.log"
+          test -s "$provider_dir/fixtures/hello.zartifact"
+          test -s "$provider_dir/fixtures/hello.zlaunch"
+          cmp "$provider_dir/native-launch.log" "$provider_dir/fixtures/hello.zlaunch"
+          sha256sum "$provider_dir/fixtures/hello.zex" "$provider_dir/fixtures/game.chd" "$provider_dir/fixtures/ps1-bios.bin" > build/runtime-fixture-sha256.txt
+          echo 'ZENUNIVERSE_PROVIDER_GATE_OK schema=v1 catalog=22 native=ready foreign=fail-closed artifact=content-addressed assets=hashed alternatives=typed sanitizers=yes'
+      - name: Upload provider ABI v1 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: zenuniverse-runtime-provider-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            build/zenuniverse
+            build/zenuniverse.zuc
+            build/zenuniverse-test/
+            build/zenuniverse-runtime-test/
+            build/runtime-fixture-sha256.txt
+            tools/zenuniverse/
+            tests/zenuniverse_test.sh
+            tests/zenuniverse_runtime_provider_test.sh
+            packages/universe/runtime-*.zsource
+            packages/universe/profile-native-app.zsource
+            packages/universe/profile-playstation1-game.zsource
+            packages/universe/profile-psp-game.zsource
+            docs/RUNTIME_PROVIDER_ABI_0.1.1.md
