@@ -7,16 +7,16 @@ namespace zenuniverse {
 struct Descriptor {
     std::string schema,id,version,kind,platform,architecture,artifact,delivery,runtime,availability,entrypoint,channel,category,license,description,homepage,sha;
     std::uint64_t bytes = 0;
-    std::vector<std::string> mirrors,requirements,provides;
+    std::vector<std::string> mirrors,requirements,provides,assets,accepts;
     fs::path source;
 };
 
 const std::set<std::string> kinds={"application","game","runtime","sdk","toolchain","profile","firmware"};
-const std::set<std::string> platforms={"zenov","linux","windows","macos","playstation2","playstation3","xbox","xbox360"};
+const std::set<std::string> platforms={"zenov","linux","windows","macos","playstation1","playstation-portable","playstation2","playstation3","xbox","xbox360"};
 const std::set<std::string> architectures={"any","x86","x86_64","arm64","ppc64"};
-const std::set<std::string> artifacts={"zpk","zex1","elf32","elf64","appimage","flatpak","deb","rpm","tar","exe","msi","msix","appx","dmg","pkg","app","iso","disc-image","rom","runtime-bundle","metadata"};
+const std::set<std::string> artifacts={"zpk","zex1","elf32","elf64","appimage","flatpak","deb","rpm","tar","exe","msi","msix","appx","dmg","pkg","app","iso","disc-image","rom","psx-exe","bin-cue","chd","pbp","cso","runtime-bundle","metadata"};
 const std::set<std::string> deliveries={"embedded","https","user-supplied","metadata-only"};
-const std::set<std::string> runtimes={"native","linux-abi","wine","proton","qemu-user","qemu-system","darling","pcsx2","rpcs3","xemu","xenia","external"};
+const std::set<std::string> runtimes={"native","linux-abi","wine","proton","qemu-user","qemu-system","darling","duckstation","ppsspp","pcsx2","rpcs3","xemu","xenia","external"};
 const std::set<std::string> availability={"available","planned","external"};
 
 std::uint64_t parse_u64(const std::string& value, const std::string& field) {
@@ -35,7 +35,12 @@ Descriptor parse_descriptor(const fs::path& path) {
         ++number; if (!line.empty()&&line.back()=='\r') line.pop_back(); line=trim(line); if (line.empty()||line[0]=='#') continue;
         const auto eq=line.find('='); if (eq==std::string::npos||eq==0U) throw Error(path.string()+":"+std::to_string(number)+": expected key=value");
         auto key=trim(line.substr(0,eq)), value=trim(line.substr(eq+1)); if (value.empty()) throw Error(path.string()+":"+std::to_string(number)+": empty value");
-        if (key=="mirror") d.mirrors.push_back(value); else if (key=="requires") d.requirements.push_back(value); else if (key=="provides") d.provides.push_back(value); else if (key=="bytes") { if (!seen.insert(key).second) throw Error("duplicate bytes"); d.bytes=parse_u64(value,"bytes"); }
+        if (key=="mirror") d.mirrors.push_back(value);
+        else if (key=="requires") d.requirements.push_back(value);
+        else if (key=="provides") d.provides.push_back(value);
+        else if (key=="asset") d.assets.push_back(value);
+        else if (key=="accepts") d.accepts.push_back(value);
+        else if (key=="bytes") { if (!seen.insert(key).second) throw Error("duplicate bytes"); d.bytes=parse_u64(value,"bytes"); }
         else { auto it=scalar.find(key); if (it==scalar.end()) throw Error(path.string()+":"+std::to_string(number)+": unknown key "+key); if (!seen.insert(key).second) throw Error("duplicate "+key); *it->second=value; }
     }
     return d;
@@ -52,25 +57,32 @@ void validate_descriptor(const Descriptor& d) {
     std::set<std::string> unique;
     for (const auto& v:d.requirements) { if (!safe_id(v)||!unique.insert(v).second) throw Error("invalid or duplicate requires in "+d.source.string()); }
     unique.clear(); for (const auto& v:d.provides) { if (!safe_id(v)||!unique.insert(v).second) throw Error("invalid or duplicate provides in "+d.source.string()); }
+    unique.clear(); for (const auto& v:d.assets) { if (!safe_id(v)||!unique.insert(v).second) throw Error("invalid or duplicate asset in "+d.source.string()); }
+    unique.clear(); for (const auto& v:d.accepts) { if (!artifacts.count(v)||!unique.insert(v).second) throw Error("invalid or duplicate accepts in "+d.source.string()); }
     unique.clear(); for (const auto& v:d.mirrors) { if (!https_url(v)||!unique.insert(v).second) throw Error("invalid or duplicate HTTPS mirror in "+d.source.string()); }
     if (d.delivery=="https") { if (d.mirrors.empty()||!hex64(d.sha)||d.bytes==0U) throw Error("https delivery requires mirror, bytes and lowercase sha256: "+d.source.string()); }
     if (d.delivery=="embedded") { if (!d.mirrors.empty()||!hex64(d.sha)||d.bytes==0U) throw Error("embedded delivery requires bytes/sha256 and no mirrors: "+d.source.string()); }
     if (d.delivery=="metadata-only") { if (!d.mirrors.empty()||d.sha!="-"||d.bytes!=0U) throw Error("metadata-only requires bytes=0 sha256=- and no mirrors: "+d.source.string()); }
     if (d.delivery=="user-supplied") { if (!d.mirrors.empty()||d.sha!="-"||d.bytes!=0U) throw Error("user-supplied content cannot publish mirrors or fixed bytes: "+d.source.string()); }
-    if ((d.platform=="playstation2"||d.platform=="playstation3"||d.platform=="xbox"||d.platform=="xbox360") && d.kind=="game" && d.delivery!="user-supplied") throw Error("console game content must be user-supplied: "+d.source.string());
-    const std::map<std::string,std::set<std::string>> allowed={{"windows",{"exe","msi","msix","appx","runtime-bundle","metadata"}},{"linux",{"elf32","elf64","appimage","flatpak","deb","rpm","tar","runtime-bundle","metadata"}},{"macos",{"dmg","pkg","app","runtime-bundle","metadata"}},{"playstation2",{"iso","disc-image","metadata"}},{"playstation3",{"iso","disc-image","metadata"}},{"xbox",{"iso","disc-image","rom","metadata"}},{"xbox360",{"iso","disc-image","rom","metadata"}},{"zenov",{"zpk","zex1","elf32","runtime-bundle","metadata"}}};
+    const std::set<std::string> console_platforms={"playstation1","playstation-portable","playstation2","playstation3","xbox","xbox360"};
+    if (console_platforms.count(d.platform) && d.kind=="game" && d.delivery!="user-supplied") throw Error("console game content must be user-supplied: "+d.source.string());
+    const std::map<std::string,std::set<std::string>> allowed={{"windows",{"exe","msi","msix","appx","runtime-bundle","metadata"}},{"linux",{"elf32","elf64","appimage","flatpak","deb","rpm","tar","runtime-bundle","metadata"}},{"macos",{"dmg","pkg","app","runtime-bundle","metadata"}},{"playstation1",{"psx-exe","bin-cue","chd","pbp","iso","disc-image","metadata"}},{"playstation-portable",{"iso","disc-image","pbp","cso","metadata"}},{"playstation2",{"iso","disc-image","cso","metadata"}},{"playstation3",{"iso","disc-image","metadata"}},{"xbox",{"iso","disc-image","rom","metadata"}},{"xbox360",{"iso","disc-image","rom","metadata"}},{"zenov",{"zpk","zex1","elf32","runtime-bundle","metadata"}}};
     if (!allowed.at(d.platform).count(d.artifact)) throw Error("artifact/platform mismatch: "+d.source.string());
-    const std::map<std::string,std::set<std::string>> platform_runtime={{"windows",{"wine","proton","qemu-system","external"}},{"linux",{"linux-abi","qemu-user","qemu-system","external"}},{"macos",{"darling","qemu-system","external"}},{"playstation2",{"pcsx2","external"}},{"playstation3",{"rpcs3","external"}},{"xbox",{"xemu","external"}},{"xbox360",{"xenia","external"}},{"zenov",{"native","external"}}};
+    const std::map<std::string,std::set<std::string>> platform_runtime={{"windows",{"wine","proton","qemu-system","external"}},{"linux",{"linux-abi","qemu-user","qemu-system","external"}},{"macos",{"darling","qemu-system","external"}},{"playstation1",{"duckstation","external"}},{"playstation-portable",{"ppsspp","external"}},{"playstation2",{"pcsx2","external"}},{"playstation3",{"rpcs3","external"}},{"xbox",{"xemu","external"}},{"xbox360",{"xenia","external"}},{"zenov",{"native","external"}}};
     if (d.kind!="runtime" && !platform_runtime.at(d.platform).count(d.runtime)) throw Error("runtime/platform mismatch: "+d.source.string());
     if (d.kind=="runtime" && d.runtime!="native") throw Error("runtime provider itself must execute natively: "+d.source.string());
+    if (d.kind!="runtime" && !d.accepts.empty()) throw Error("only runtime providers may declare accepts: "+d.source.string());
     if (d.availability=="available" && (d.delivery=="metadata-only"||d.delivery=="user-supplied") && d.kind=="runtime") throw Error("available runtime must contain downloadable or embedded bytes: "+d.source.string());
 }
 
 std::string canonical(const Descriptor& d) {
-    auto mirrors=d.mirrors, req=d.requirements, prov=d.provides; std::sort(mirrors.begin(),mirrors.end()); std::sort(req.begin(),req.end()); std::sort(prov.begin(),prov.end());
+    auto mirrors=d.mirrors, req=d.requirements, prov=d.provides, assets=d.assets, accepts=d.accepts;
+    std::sort(mirrors.begin(),mirrors.end()); std::sort(req.begin(),req.end()); std::sort(prov.begin(),prov.end()); std::sort(assets.begin(),assets.end()); std::sort(accepts.begin(),accepts.end());
     std::ostringstream o;
     o<<"schema="<<d.schema<<'\n'<<"id="<<d.id<<'\n'<<"version="<<d.version<<'\n'<<"kind="<<d.kind<<'\n'<<"platform="<<d.platform<<'\n'<<"architecture="<<d.architecture<<'\n'<<"artifact="<<d.artifact<<'\n'<<"delivery="<<d.delivery<<'\n'<<"runtime="<<d.runtime<<'\n'<<"availability="<<d.availability<<'\n'<<"entrypoint="<<d.entrypoint<<'\n'<<"channel="<<d.channel<<'\n'<<"category="<<d.category<<'\n'<<"license="<<d.license<<'\n'<<"description="<<d.description<<'\n'<<"homepage="<<d.homepage<<'\n'<<"bytes="<<d.bytes<<'\n'<<"sha256="<<d.sha<<'\n';
     for (const auto& v : mirrors) o << "mirror=" << v << '\n';
+    for (const auto& v : accepts) o << "accepts=" << v << '\n';
+    for (const auto& v : assets) o << "asset=" << v << '\n';
     for (const auto& v : req) o << "requires=" << v << '\n';
     for (const auto& v : prov) o << "provides=" << v << '\n';
     return o.str();

@@ -9,8 +9,11 @@ on:
       - 'universe.mk'
       - 'tools/zenuniverse/**'
       - 'tests/zenuniverse_test.sh'
+      - 'tests/zenuniverse_runtime_provider_test.sh'
       - 'packages/universe/**'
       - 'docs/ZENUNIVERSE_REPOSITORY_0.1.1.md'
+      - 'docs/RUNTIME_PROVIDER_ABI_0.1.1.md'
+      - 'docs/INDEX.md'
       - '.github/workflows/zenuniverse.yml'
   pull_request:
     branches:
@@ -20,8 +23,11 @@ on:
       - 'universe.mk'
       - 'tools/zenuniverse/**'
       - 'tests/zenuniverse_test.sh'
+      - 'tests/zenuniverse_runtime_provider_test.sh'
       - 'packages/universe/**'
       - 'docs/ZENUNIVERSE_REPOSITORY_0.1.1.md'
+      - 'docs/RUNTIME_PROVIDER_ABI_0.1.1.md'
+      - 'docs/INDEX.md'
       - '.github/workflows/zenuniverse.yml'
   merge_group:
     types:
@@ -42,8 +48,8 @@ env:
 
 jobs:
   universal-catalog:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -60,7 +66,7 @@ jobs:
           test -z "$(git status --porcelain)"
           echo "tested-source-revision=$actual_revision"
       - name: Install strict native toolchain
-        run: sudo apt-get update && sudo apt-get install -y build-essential
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang
       - name: Build and test universal catalog
         run: make universe-check
       - name: Verify deterministic catalog independently
@@ -70,14 +76,55 @@ jobs:
           make --no-print-directory BUILD=/tmp/zenuniverse-rebuild universe-check
           cmp build/zenuniverse.zuc /tmp/zenuniverse-rebuild/zenuniverse.zuc
           grep -q '^ZENUNIVERSE1$' build/zenuniverse.zuc
-          grep -q '^count=16$' build/zenuniverse.zuc
+          grep -q '^count=20$' build/zenuniverse.zuc
       - name: Verify provider policy inventory
         run: |
           set -euo pipefail
-          test "$(find packages/universe -name '*.zsource' | wc -l)" -eq 16
+          test "$(find packages/universe -name '*.zsource' | wc -l)" -eq 20
           ! grep -R '^mirror=' packages/universe/profile-*game.zsource
+          grep -q '^delivery=user-supplied$' packages/universe/profile-playstation1-game.zsource
+          grep -q '^delivery=user-supplied$' packages/universe/profile-psp-game.zsource
           grep -q '^delivery=user-supplied$' packages/universe/profile-playstation2-game.zsource
           grep -q '^delivery=user-supplied$' packages/universe/profile-playstation3-game.zsource
           grep -q '^delivery=user-supplied$' packages/universe/profile-xbox-game.zsource
           grep -q '^delivery=user-supplied$' packages/universe/profile-xbox360-game.zsource
+          grep -q '^asset=firmware.playstation1-bios$' packages/universe/runtime-duckstation.zsource
+          grep -q '^asset=firmware.playstation2-bios$' packages/universe/runtime-pcsx2.zsource
+          grep -q '^accepts=psx-exe$' packages/universe/runtime-duckstation.zsource
+          grep -q '^accepts=cso$' packages/universe/runtime-ppsspp.zsource
           ! grep -R -E 'BEGIN (RSA )?PRIVATE KEY|BEGIN PRIVATE KEY' tools/zenuniverse packages/universe
+      - name: Verify current-host runtime plans fail closed
+        run: |
+          set -euo pipefail
+          set +e
+          build/zenuniverse runtime-plan --input packages/universe --package org.zenov.profile.playstation1-game --host-profile zenov-0.1.1-i686 > build/runtime-ps1.log 2>&1
+          ps1_status=$?
+          build/zenuniverse runtime-plan --input packages/universe --package org.zenov.profile.psp-game --host-profile zenov-0.1.1-i686 > build/runtime-psp.log 2>&1
+          psp_status=$?
+          set -e
+          test "$ps1_status" -eq 3
+          test "$psp_status" -eq 3
+          grep -q 'provider architecture mismatch: provider=org.zenov.runtime.duckstation package=x86_64 host=x86' build/runtime-ps1.log
+          grep -q '^required-asset=firmware.playstation1-bios source=user-supplied$' build/runtime-ps1.log
+          grep -q 'ZENUNIVERSE_RUNTIME_BLOCKED' build/runtime-ps1.log
+          grep -q 'ZENUNIVERSE_RUNTIME_BLOCKED' build/runtime-psp.log
+      - name: Upload runtime-provider evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: zenuniverse-runtime-provider-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            build/zenuniverse
+            build/zenuniverse.zuc
+            build/runtime-ps1.log
+            build/runtime-psp.log
+            tools/zenuniverse/
+            tests/zenuniverse_test.sh
+            tests/zenuniverse_runtime_provider_test.sh
+            packages/universe/runtime-duckstation.zsource
+            packages/universe/runtime-ppsspp.zsource
+            packages/universe/runtime-pcsx2.zsource
+            packages/universe/profile-playstation1-game.zsource
+            packages/universe/profile-psp-game.zsource
+            docs/RUNTIME_PROVIDER_ABI_0.1.1.md
