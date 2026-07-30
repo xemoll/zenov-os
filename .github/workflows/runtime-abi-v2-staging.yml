@@ -7,14 +7,23 @@ on:
     paths:
       - '.v2-staging/**'
       - '.github/workflows/runtime-abi-v2-staging.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.v2-staging/**'
+      - '.github/workflows/runtime-abi-v2-staging.yml'
   workflow_dispatch:
 
 concurrency:
-  group: runtime-abi-v2-staging-${{ github.ref }}
+  group: runtime-abi-v2-staging-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 permissions:
   contents: write
+
+env:
+  ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   apply-verified-payload:
@@ -23,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
           fetch-depth: 0
           persist-credentials: true
 
@@ -31,8 +40,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
-          test "$(git branch --show-current)" = "feature/runtime-provider-abi-v2-hardening"
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
           test -z "$(git status --porcelain=v1)"
 
       - name: Install strict toolchain
@@ -99,20 +108,25 @@ jobs:
           test -z "$(find tools tests packages docs .github -type l -print -quit)"
 
       - name: Commit verified production tree
+        if: github.event_name == 'push'
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .v2-staging
           git config user.name 'zenov-runtime-gate'
           git config user.email 'runtime-gate@users.noreply.github.com'
-          git add -A
+          while IFS= read -r path; do git add -- "$path"; done < ci-logs/expected-files.txt
+          git rm .v2-staging/payload.00 .v2-staging/payload.01 .v2-staging/payload.02 .v2-staging/payload.03
           git diff --cached --name-only | LC_ALL=C sort > ci-logs/committed-files.txt
-          grep -Fxq 'tools/zenuniverse/native_artifact.hpp' ci-logs/committed-files.txt
-          grep -Fxq 'tools/zenuniverse/launch_manifest.hpp' ci-logs/committed-files.txt
-          grep -Fxq 'docs/RUNTIME_PROVIDER_ABI_V2_0.1.1.md' ci-logs/committed-files.txt
-          ! grep -Eq '^\.v2-staging/' ci-logs/committed-files.txt
+          cat ci-logs/expected-files.txt > ci-logs/allowed-commit-files.txt
+          printf '%s\n' \
+            '.v2-staging/payload.00' \
+            '.v2-staging/payload.01' \
+            '.v2-staging/payload.02' \
+            '.v2-staging/payload.03' >> ci-logs/allowed-commit-files.txt
+          LC_ALL=C sort -o ci-logs/allowed-commit-files.txt ci-logs/allowed-commit-files.txt
+          cmp ci-logs/allowed-commit-files.txt ci-logs/committed-files.txt
           git commit -m 'ZenPkg: bind runtime artifacts and launch plans to exact catalog'
-          git push origin HEAD:feature/runtime-provider-abi-v2-hardening
+          git push origin HEAD:refs/heads/feature/runtime-provider-abi-v2-hardening
 
       - name: Upload staging evidence
         if: always()
@@ -124,4 +138,4 @@ jobs:
             ci-logs/
             build/zenuniverse-runtime-test/
             build/zenuniverse.zuc
-            /tmp/runtime-abi-v2-rebuild/zenuniverse.zuc
+            /tmp/zenuniverse-v2-rebuild/zenuniverse.zuc
