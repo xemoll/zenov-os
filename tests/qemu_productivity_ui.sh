@@ -33,8 +33,11 @@ wait_for_count() {
 capture() {
   local name="$1"
   local file="$(cd "$OUT" && pwd)/${name}.ppm"
-  echo "screendump $file"
+  # Application markers are emitted before refresh_desktop() returns. Allow the
+  # completed frame to reach the physical framebuffer before screendump.
   sleep 0.35
+  echo "screendump $file"
+  sleep 0.15
 }
 
 controller() {
@@ -99,7 +102,6 @@ controller() {
   wait_for_serial "UI_CLOCK_TIMER_SET_OK" || { echo quit; return 1; }
   echo "sendkey f4 10"
   wait_for_serial "UI_CLOCK_TIMER_RUNNING" || { echo quit; return 1; }
-  sleep 0.25
   capture clock-running
   echo "sendkey esc 10"
 
