@@ -90,7 +90,7 @@ def stage_pre() -> None:
 
 
 def patch_markers() -> None:
-    text = remove_compat_block(read_text(TEST_PATH))
+    text = remove_compat_block(read_text(TEST_PATH)).rstrip("\n") + "\n"
     current_count = text.count(CURRENT_MARKERS)
     extended_count = text.count(EXTENDED_MARKERS)
     if current_count == 1 and extended_count == 0:
