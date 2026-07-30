@@ -21,10 +21,18 @@ ZENPKG_FOREIGN_FORMAT_SRC := kernel/parts/package_foreign_format.inc kernel/part
 ZENPKG_FOREIGN_HOST_SRC := tools/zenpkg/foreign.hpp tools/zenpkg/foreign_import.hpp tools/zenpkg/foreign_probe.hpp
 ZENPKG_SHA256_SRC := tools/zenpkg/sha256.hpp tools/zenpkg/common.hpp
 
+POLICY_JOURNAL_TEST := $(BUILD)/security-policy-journal-test
+POLICY_JOURNAL_FIXTURE := $(BUILD)/zenovfs-policy-journal-fixture
+POLICY_JOURNAL_HOT_IMAGE := $(BUILD)/zenov-data-policy-journal-hot.img
+POLICY_JOURNAL_CORRUPT_IMAGE := $(BUILD)/zenov-data-policy-journal-corrupt.img
+POLICY_JOURNAL_QEMU_OUT := $(BUILD)/qemu/policy-journal
+POLICY_JOURNAL_QEMU_STAMP := $(POLICY_JOURNAL_QEMU_OUT)/.stamp
+POLICY_JOURNAL_SRC := kernel/parts/security_policy_format.inc kernel/parts/security_policy_transaction.inc
+
 $(ZENPKG_CHECK_STAMP): $(BUILD)/zenpkg-manifest.json $(ZENPKG_FOREIGN_CHECK_STAMP)
 $(BUILD)/zenpkg: $(ZENPKG_FOREIGN_FORMAT_SRC) $(ZENPKG_FOREIGN_HOST_SRC) $(ZENPKG_SHA256_SRC)
-$(BUILD)/kernel.o: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc
-$(BUILD)/build-manifest.json: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc
+$(BUILD)/kernel.o: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc $(POLICY_JOURNAL_SRC)
+$(BUILD)/build-manifest.json: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc $(POLICY_JOURNAL_SRC)
 
 ATA_POLICY_TEST := $(BUILD)/storage-ata-policy-test
 ATA_RECOVERY_POLICY_TEST := $(BUILD)/storage-ata-recovery-policy-test
@@ -38,7 +46,7 @@ ATA_READ_FAULT_STAMP := $(ATA_READ_FAULT_OUT)/.stamp
 BLOCK_STATUS_QEMU_OUT := $(BUILD)/qemu/block-status
 BLOCK_STATUS_QEMU_STAMP := $(BLOCK_STATUS_QEMU_OUT)/.stamp
 
-.PHONY: ata-eio-qemu ata-read-fault-qemu block-status-qemu zenpkg-foreign-check zenpkg-foreign-qemu
+.PHONY: ata-eio-qemu ata-read-fault-qemu block-status-qemu zenpkg-foreign-check zenpkg-foreign-qemu policy-journal-qemu
 
 $(ZENPKG_FOREIGN_FORMAT_TEST): tests/package_foreign_format_test.cpp $(ZENPKG_FOREIGN_FORMAT_SRC) | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
@@ -75,6 +83,37 @@ zenpkg-foreign-qemu: $(ZENPKG_FOREIGN_QEMU_STAMP)
 zenpkg-qemu: zenpkg-foreign-qemu
 qemu: zenpkg-foreign-qemu
 
+$(POLICY_JOURNAL_TEST): tests/security_policy_transaction_test.cpp $(POLICY_JOURNAL_SRC) $(ZENPKG_SHA256_SRC) | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+	$@
+
+$(POLICY_JOURNAL_FIXTURE): tools/zenovfs_policy_journal_fixture.cpp $(ZENPKG_SHA256_SRC) | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+$(POLICY_JOURNAL_HOT_IMAGE): all $(POLICY_JOURNAL_FIXTURE)
+	$(POLICY_JOURNAL_FIXTURE) --hot-zmid $(BUILD)/zenov-data.img $@
+	$(BUILD)/zenovfs-verify $@
+
+$(POLICY_JOURNAL_CORRUPT_IMAGE): $(POLICY_JOURNAL_HOT_IMAGE) $(POLICY_JOURNAL_FIXTURE)
+	$(POLICY_JOURNAL_FIXTURE) --corrupt-journal $(POLICY_JOURNAL_HOT_IMAGE) $@
+	$(BUILD)/zenovfs-verify $@
+
+$(POLICY_JOURNAL_QEMU_STAMP): all $(POLICY_JOURNAL_HOT_IMAGE) $(POLICY_JOURNAL_CORRUPT_IMAGE) tests/qemu_policy_journal.sh
+	@rm -rf $(POLICY_JOURNAL_QEMU_OUT)
+	@mkdir -p $(POLICY_JOURNAL_QEMU_OUT)
+	bash tests/qemu_policy_journal.sh \
+	  $(BUILD)/zenov-os.img \
+	  $(POLICY_JOURNAL_HOT_IMAGE) \
+	  $(POLICY_JOURNAL_CORRUPT_IMAGE) \
+	  $(POLICY_JOURNAL_QEMU_OUT)
+	$(BUILD)/zenovfs-verify $(POLICY_JOURNAL_QEMU_OUT)/hot-runtime.img
+	$(BUILD)/zenovfs-verify $(POLICY_JOURNAL_QEMU_OUT)/corrupt-runtime.img
+	@grep -Fq 'POLICY_TRANSACTION_QEMU_OK hot=replayed domain=ZMID policy=1 version=1 audit=restored journal=cleared reboot=clean corrupt=fail-closed' $(POLICY_JOURNAL_QEMU_OUT)/summary.log
+	@touch $@
+
+policy-journal-qemu: $(POLICY_JOURNAL_QEMU_STAMP)
+qemu: policy-journal-qemu
+
 $(ATA_POLICY_TEST): tests/storage_ata_policy_test.cpp kernel/parts/storage_ata_policy.inc | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 	$@
@@ -95,7 +134,7 @@ $(ZENOVFS_RESULT_TEST): tests/storage_fs_result_test.cpp kernel/parts/storage_bl
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 	$@
 
-check: $(ATA_POLICY_TEST) $(ATA_RECOVERY_POLICY_TEST) $(BLOCK_RESULT_TEST) $(BLOCK_DEVICE_ABI_TEST) $(ZENOVFS_RESULT_TEST)
+check: $(ATA_POLICY_TEST) $(ATA_RECOVERY_POLICY_TEST) $(BLOCK_RESULT_TEST) $(BLOCK_DEVICE_ABI_TEST) $(ZENOVFS_RESULT_TEST) $(POLICY_JOURNAL_TEST)
 
 $(ATA_EIO_QEMU_STAMP): all tests/qemu_ata_eio_retry.sh tests/blkdebug/ata-write-eio-once.conf $(BUILD)/zenovfs-verify
 	@rm -rf $(ATA_EIO_QEMU_OUT)
