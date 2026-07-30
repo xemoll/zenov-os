@@ -3,6 +3,7 @@ constexpr uint32_t workspace_bytes = 16U * 1024U;
 constexpr uint32_t version_backup_bytes = 16U;
 constexpr uint32_t journal_schema = 1U;
 constexpr uint8_t journal_state_prepared = 1U;
+constexpr uint32_t journal_path_bytes = 48U;
 constexpr const char* journal_path = "/security/policy-transaction.journal";
 
 enum class Domain : uint8_t { none = 0U, zgdb = 1U, zcap = 2U, zmid = 3U };
@@ -36,9 +37,9 @@ struct [[gnu::packed]] JournalHeader {
     uint32_t previous_version;
     uint32_t payload_size;
     uint8_t digest[32];
-    char live_path[48];
-    char version_path[48];
-    char auxiliary_path[48];
+    char live_path[journal_path_bytes];
+    char version_path[journal_path_bytes];
+    char auxiliary_path[journal_path_bytes];
     uint8_t reserved[16];
 };
 static_assert(sizeof(JournalHeader) == 224U);
@@ -58,27 +59,48 @@ uint32_t version_backup_size = 0U;
 bool busy = false;
 Domain recovered_domain = Domain::none;
 
+uint32_t bounded_text_length(const char* value, uint32_t capacity) {
+    if (!value) return 0U;
+    uint32_t length = 0U;
+    while (length < capacity && value[length]) ++length;
+    return length;
+}
+
 bool text_equal(const char* left, const char* right) {
     if (!left) return !right || !*right;
     if (!right) return !*left;
-    uint32_t index = 0U;
-    while (left[index] && right[index]) {
+    for (uint32_t index = 0U; index < journal_path_bytes; ++index) {
         if (left[index] != right[index]) return false;
-        ++index;
+        if (!left[index]) return true;
     }
-    return left[index] == right[index];
+    return false;
+}
+
+bool fixed_text_equal(const char* encoded, uint32_t capacity, const char* expected) {
+    if (!encoded || !capacity) return false;
+    const uint32_t expected_length = bounded_text_length(expected, capacity);
+    if (expected && expected_length == capacity) return false;
+    if (!expected) {
+        for (uint32_t index = 0U; index < capacity; ++index) if (encoded[index] != 0) return false;
+        return true;
+    }
+    for (uint32_t index = 0U; index < expected_length; ++index) {
+        if (encoded[index] != expected[index]) return false;
+    }
+    if (encoded[expected_length] != 0) return false;
+    for (uint32_t index = expected_length + 1U; index < capacity; ++index) {
+        if (encoded[index] != 0) return false;
+    }
+    return true;
 }
 
 bool copy_text(char* output, uint32_t capacity, const char* input) {
     if (!output || !capacity) return false;
     memset(output, 0, capacity);
     if (!input) return true;
-    uint32_t index = 0U;
-    while (input[index]) {
-        if (index + 1U >= capacity) return false;
-        output[index] = input[index];
-        ++index;
-    }
+    const uint32_t length = bounded_text_length(input, capacity);
+    if (length == capacity) return false;
+    if (length) memcpy(output, input, length);
     return true;
 }
 
@@ -102,6 +124,8 @@ const char* domain_name(Domain domain) {
         default: return "NONE";
     }
 }
+
+bool prepare_uncertain() { return busy; }
 
 void wipe() {
     volatile uint8_t* output = rollback_data;
@@ -146,9 +170,10 @@ bool validate_journal(uint8_t* journal, uint32_t size, const Descriptor*& descri
     for (uint8_t byte : header->reserved) if (byte != 0U) return false;
 
     descriptor = descriptor_for_domain(static_cast<Domain>(header->domain));
-    if (!descriptor || !text_equal(header->live_path, descriptor->live_path) ||
-        !text_equal(header->version_path, descriptor->version_path) ||
-        !text_equal(header->auxiliary_path, descriptor->auxiliary_path)) return false;
+    if (!descriptor ||
+        !fixed_text_equal(header->live_path, sizeof(header->live_path), descriptor->live_path) ||
+        !fixed_text_equal(header->version_path, sizeof(header->version_path), descriptor->version_path) ||
+        !fixed_text_equal(header->auxiliary_path, sizeof(header->auxiliary_path), descriptor->auxiliary_path)) return false;
     if (!header->policy_size || header->policy_size > descriptor->policy_capacity ||
         header->version_size < 2U || header->version_size > 11U || !header->previous_version) return false;
     if (descriptor->auxiliary_path) {
