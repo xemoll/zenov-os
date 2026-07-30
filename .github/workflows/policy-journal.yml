@@ -1,0 +1,143 @@
+name: ZenovOS Signed Policy Journal Recovery
+
+on:
+  pull_request:
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  durable-policy-journal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact tested source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl qemu-system-x86 zip unzip
+
+      - name: Run strict host and freestanding checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          make clean check 2>&1 | tee ci-logs/policy-journal-check.log
+          grep -Fq 'SECURITY_POLICY_JOURNAL_TEST_OK schema=1 hot=replayed commit=atomic audit=covered digest=verified corrupt=fail-closed crash-points=6' ci-logs/policy-journal-check.log
+
+      - name: Run policy journal model under Clang sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sanitizer=(-std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change
+            -fno-sanitize-recover=all -fno-omit-frame-pointer)
+          clang++ "${sanitizer[@]}" tests/security_policy_transaction_test.cpp -o ci-logs/security-policy-journal-test-clang
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            ci-logs/security-policy-journal-test-clang | tee ci-logs/policy-journal-clang.log
+          grep -Fqx 'SECURITY_POLICY_JOURNAL_TEST_OK schema=1 hot=replayed commit=atomic audit=covered digest=verified corrupt=fail-closed crash-points=6' ci-logs/policy-journal-clang.log
+
+      - name: Boot hot, cleared and corrupt journal images
+        shell: bash
+        run: |
+          set -euo pipefail
+          make policy-journal-qemu 2>&1 | tee ci-logs/policy-journal-qemu.log
+          grep -Fq 'POLICY_TRANSACTION_QEMU_OK hot=replayed domain=ZMID policy=1 version=1 audit=restored journal=cleared reboot=clean corrupt=fail-closed' ci-logs/policy-journal-qemu.log
+
+      - name: Verify deterministic rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          make deterministic 2>&1 | tee ci-logs/policy-journal-deterministic.log
+          grep -Fq 'deterministic rebuild: OK' ci-logs/policy-journal-deterministic.log
+
+      - name: Verify journal source and evidence contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'constexpr const char* journal_path = "/security/policy-transaction.journal";' kernel/parts/security_policy_transaction.inc
+          grep -Fq "header.magic[0] = 'Z'; header.magic[1] = 'P'; header.magic[2] = 'T'; header.magic[3] = 'J';" kernel/parts/security_policy_transaction.inc
+          grep -Fq 'bool recover_pending()' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'bool restore_hot_journal()' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'security_policy_transaction::recover_pending()' kernel/kernel.cpp
+          grep -Fq 'POLICY_TRANSACTION_RECOVERY_OK domain=' kernel/kernel.cpp
+          grep -Fq '"/security/policy-transaction.journal",' kernel/parts/security_paths.inc
+          grep -Fq 'add_file(disk, entries, 50, "/security/policy-transaction.journal", {});' tools/zenovfs_builder.cpp
+          grep -Fq '"/security/zenovguard.audit", 16U * 1024U, 16U * 1024U' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'security_policy_transaction::commit()' kernel/parts/zgdb_policy_transactional.inc
+          grep -Fq 'security_policy_transaction::commit()' kernel/parts/zcap_policy.inc
+          grep -Fq 'security_policy_transaction::commit()' kernel/parts/zmid_policy_transactional.inc
+          test -s build/qemu/policy-journal/hot-runtime.img
+          test -s build/qemu/policy-journal/corrupt-runtime.img
+          test -s build/qemu/policy-journal/serial-hot.log
+          test -s build/qemu/policy-journal/serial-clean-reboot.log
+          test -s build/qemu/policy-journal/serial-corrupt.log
+          grep -Fq 'POLICY_TRANSACTION_RECOVERY_OK domain=ZMID' build/qemu/policy-journal/serial-hot.log
+          grep -Fq 'POLICY_TRANSACTION_JOURNAL_CLEAN' build/qemu/policy-journal/serial-clean-reboot.log
+          grep -Fq 'Persistent signed policy transaction recovery failed.' build/qemu/policy-journal/serial-corrupt.log
+          echo 'POLICY_JOURNAL_SOURCE_CONTRACT_OK schema=ZPTJ1 domains=3 audit=covered prepare=durable hot=replayed corrupt=fail-closed'
+
+      - name: Upload policy journal evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: policy-journal-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            ci-logs/policy-journal-check.log
+            ci-logs/policy-journal-clang.log
+            ci-logs/policy-journal-qemu.log
+            ci-logs/policy-journal-deterministic.log
+            ci-logs/security-policy-journal-test-clang
+            build/security-policy-journal-test
+            build/zenovfs-policy-journal-fixture
+            build/KERNEL.BIN
+            build/kernel.map
+            build/zenov-os.img
+            build/zenov-data.img
+            build/zenov-data-policy-journal-hot.img
+            build/zenov-data-policy-journal-corrupt.img
+            build/build-manifest.json
+            build/qemu/policy-journal/summary.log
+            build/qemu/policy-journal/serial-hot.log
+            build/qemu/policy-journal/serial-clean-reboot.log
+            build/qemu/policy-journal/serial-corrupt.log
+            build/qemu/policy-journal/hot-runtime.img
+            build/qemu/policy-journal/corrupt-runtime.img
+            kernel/kernel.cpp
+            kernel/parts/security_policy_transaction.inc
+            kernel/parts/zgdb_policy_transactional.inc
+            kernel/parts/zcap_policy.inc
+            kernel/parts/zmid_policy_transactional.inc
+            tests/security_policy_transaction_test.cpp
+            tests/qemu_policy_journal.sh
+            tools/zenovfs_policy_journal_fixture.cpp
+            docs/SIGNED_POLICY_JOURNAL_0.1.1.md
