@@ -53,6 +53,7 @@ jobs:
           python3 .github/scripts/type_icon_post.py pre | tee /tmp/type-icon-evidence/pre-transform.log
           python3 .github/scripts/type_icon_pass.py | tee /tmp/type-icon-evidence/transform.log
           python3 .github/scripts/type_icon_post.py post | tee /tmp/type-icon-evidence/post-transform.log
+          rm -f .github/scripts/type_icon_pass.py .github/scripts/type_icon_post.py
           git diff --check
           ! grep -q 'type-icon-transform-compat' tests/qemu_display_ui.sh
           paths=(
