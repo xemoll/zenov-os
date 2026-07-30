@@ -16,14 +16,14 @@ def replace_once(path: str, old: str, new: str, label: str) -> None:
 
 replace_once(
     "kernel/parts/ui_runtime.inc",
-    """void change_settings_page(bool forward) {
+    r"""void change_settings_page(bool forward) {
     settings_page = forward ? static_cast<uint8_t>((settings_page + 1U) % settings_page_count)
                             : static_cast<uint8_t>((settings_page + settings_page_count - 1U) % settings_page_count);
     settings_focus = 0U;
     system_sound::play(system_sound::Event::select);
 }
 """,
-    """const char* settings_page_name() {
+    r"""const char* settings_page_name() {
     if (settings_page == 0U) return "General";
     if (settings_page == 1U) return "Style";
     if (settings_page == 2U) return "Access";
@@ -53,11 +53,11 @@ void change_settings_page(bool forward) {
 
 replace_once(
     "kernel/parts/ui_runtime.inc",
-    """        if (key == '\t' || key == key_down) settings_focus = static_cast<uint8_t>((settings_focus + 1U) % count);
+    r"""        if (key == '\t' || key == key_down) settings_focus = static_cast<uint8_t>((settings_focus + 1U) % count);
         else if (key == key_up) settings_focus = settings_focus == 0U ? static_cast<uint8_t>(count - 1U) : static_cast<uint8_t>(settings_focus - 1U);
         else if (key == key_left || key == key_right) return apply_settings_control(key == key_right);
 """,
-    """        if (key == '\t' || key == key_down) {
+    r"""        if (key == '\t' || key == key_down) {
             settings_focus = static_cast<uint8_t>((settings_focus + 1U) % count);
             report_settings_navigation();
         } else if (key == key_up) {
