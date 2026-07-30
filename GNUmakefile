@@ -133,7 +133,7 @@ $(TPM2_QEMU_STAMP): all tests/qemu_tpm2_nv.sh
 	@grep -Fq 'TPM2_NV_QEMU_OK tis=mmio locality=0 provision=explicit counter=1-2-3 reboot=persistent absent=compatible' $(TPM2_QEMU_OUT)/summary.log
 	@touch $@
 
- tpm2-qemu: $(TPM2_QEMU_STAMP)
+tpm2-qemu: $(TPM2_QEMU_STAMP)
 
 $(ATA_POLICY_TEST): tests/storage_ata_policy_test.cpp kernel/parts/storage_ata_policy.inc | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
