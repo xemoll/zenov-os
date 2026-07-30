@@ -1,0 +1,114 @@
+name: ZenovOS TPM2 TIS NV Counter
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tpm2-tis-nv:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact tested source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Install strict toolchain, QEMU and swtpm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang qemu-system-x86 swtpm
+
+      - name: Run protocol codec with GCC and Clang sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tests/tpm2_protocol_test.cpp -o ci-logs/tpm2-protocol-gcc
+          ci-logs/tpm2-protocol-gcc | tee ci-logs/tpm2-protocol-gcc.log
+          sanitizer=(-std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change
+            -fno-sanitize-recover=all -fno-omit-frame-pointer)
+          clang++ "${sanitizer[@]}" tests/tpm2_protocol_test.cpp -o ci-logs/tpm2-protocol-clang
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            ci-logs/tpm2-protocol-clang | tee ci-logs/tpm2-protocol-clang.log
+          grep -Fqx 'TPM2_PROTOCOL_TEST_OK commands=5 endian=canonical bounds=closed nv-public=exact counter=64bit auth=password-empty' ci-logs/tpm2-protocol-gcc.log
+          grep -Fqx 'TPM2_PROTOCOL_TEST_OK commands=5 endian=canonical bounds=closed nv-public=exact counter=64bit auth=password-empty' ci-logs/tpm2-protocol-clang.log
+
+      - name: Build strict freestanding system and boot persistent TPM phases
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make --no-print-directory all | tee ci-logs/tpm2-build.log
+          bash tests/qemu_tpm2_nv.sh build/zenov-os.img build/zenov-data.img build/qemu/tpm2-nv \
+            | tee ci-logs/tpm2-qemu.log
+          grep -Fqx 'TPM2_NV_QEMU_OK tis=mmio locality=0 provision=explicit counter=1-2-3 reboot=persistent absent=compatible' build/qemu/tpm2-nv/summary.log
+
+      - name: Verify deterministic rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/zenov-tpm2-rebuild
+          make --no-print-directory BUILD=/tmp/zenov-tpm2-rebuild all > ci-logs/tpm2-deterministic.log
+          cmp build/KERNEL.BIN /tmp/zenov-tpm2-rebuild/KERNEL.BIN
+          cmp build/zenov-os.img /tmp/zenov-tpm2-rebuild/zenov-os.img
+          cmp build/zenov-data.img /tmp/zenov-tpm2-rebuild/zenov-data.img
+
+      - name: Verify TPM boundary contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'constexpr uint32_t tpm_tis_base = 0xFED40000U;' kernel/parts/tpm2_tis.inc
+          grep -Fq 'write_through | cache_disable' kernel/parts/tpm2_tis.inc
+          grep -Fq 'constexpr uint32_t nv_index = 0x015A4F53U;' kernel/parts/tpm2_protocol.inc
+          grep -Fq 'bool provision_counter()' kernel/parts/tpm2_tis.inc
+          grep -Fq 'if (dispatch_tpm_command(line)) return;' kernel/kernel.cpp
+          grep -Fq 'The current layer does not yet bind ZPTJ1 commits' docs/TPM2_TIS_NV_COUNTER_0.1.1.md
+          echo 'TPM2_BOUNDARY_CONTRACT_OK access=supervisor-only provision=explicit policy-anchor=not-claimed'
+
+      - name: Upload TPM2 transport and NV evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tpm2-tis-nv-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            ci-logs/
+            build/KERNEL.BIN
+            build/kernel.map
+            build/zenov-os.img
+            build/zenov-data.img
+            build/qemu/tpm2-nv/
+            kernel/kernel.cpp
+            kernel/parts/tpm2_protocol.inc
+            kernel/parts/tpm2_tis.inc
+            kernel/parts/tpm2_commands.inc
+            tests/tpm2_protocol_test.cpp
+            tests/qemu_tpm2_nv.sh
+            docs/TPM2_TIS_NV_COUNTER_0.1.1.md
