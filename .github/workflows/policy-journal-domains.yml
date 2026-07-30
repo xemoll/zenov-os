@@ -1,0 +1,94 @@
+name: ZenovOS Policy Journal Domain Matrix
+
+on:
+  pull_request:
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  policy-journal-domains:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact tested source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Compile and run domain matrix with GCC
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tests/security_policy_journal_domains_test.cpp \
+            -o ci-logs/security-policy-journal-domains-gcc
+          ci-logs/security-policy-journal-domains-gcc | tee ci-logs/policy-journal-domains-gcc.log
+          grep -Fqx 'SECURITY_POLICY_JOURNAL_DOMAINS_OK domains=3 optional-aux=canonical replay=exact audit=covered' \
+            ci-logs/policy-journal-domains-gcc.log
+
+      - name: Compile and run domain matrix with Clang sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sanitizer=(-std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change
+            -fno-sanitize-recover=all -fno-omit-frame-pointer)
+          clang++ "${sanitizer[@]}" tests/security_policy_journal_domains_test.cpp \
+            -o ci-logs/security-policy-journal-domains-clang
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            ci-logs/security-policy-journal-domains-clang | tee ci-logs/policy-journal-domains-clang.log
+          grep -Fqx 'SECURITY_POLICY_JOURNAL_DOMAINS_OK domains=3 optional-aux=canonical replay=exact audit=covered' \
+            ci-logs/policy-journal-domains-clang.log
+
+      - name: Verify exact domain contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'Domain::zgdb' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'Domain::zcap' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'Domain::zmid' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'if (!left) return !right || !*right;' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'if (!right) return !*left;' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'SECURITY_POLICY_JOURNAL_DOMAINS_OK' tests/security_policy_journal_domains_test.cpp
+          echo 'POLICY_JOURNAL_DOMAIN_CONTRACT_OK domains=3 optional-aux=canonical replay=exact'
+
+      - name: Upload domain matrix evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: policy-journal-domains-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            ci-logs/security-policy-journal-domains-gcc
+            ci-logs/security-policy-journal-domains-clang
+            ci-logs/policy-journal-domains-gcc.log
+            ci-logs/policy-journal-domains-clang.log
+            kernel/parts/security_policy_transaction.inc
+            tests/security_policy_journal_domains_test.cpp
