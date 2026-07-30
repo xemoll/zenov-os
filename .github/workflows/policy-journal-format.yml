@@ -1,0 +1,98 @@
+name: ZenovOS Policy Journal Format Hardening
+
+on:
+  pull_request:
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  policy-journal-format:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact tested source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Run adversarial format model with GCC
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tests/security_policy_journal_format_test.cpp \
+            -o ci-logs/security-policy-journal-format-gcc
+          ci-logs/security-policy-journal-format-gcc | tee ci-logs/policy-journal-format-gcc.log
+          grep -Fqx 'SECURITY_POLICY_JOURNAL_FORMAT_OK paths=bounded padding=zeroed domain=closed digest=recomputed prepare=fail-closed' \
+            ci-logs/policy-journal-format-gcc.log
+
+      - name: Run adversarial format model with Clang sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sanitizer=(-std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change
+            -fno-sanitize-recover=all -fno-omit-frame-pointer)
+          clang++ "${sanitizer[@]}" tests/security_policy_journal_format_test.cpp \
+            -o ci-logs/security-policy-journal-format-clang
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            ci-logs/security-policy-journal-format-clang | tee ci-logs/policy-journal-format-clang.log
+          grep -Fqx 'SECURITY_POLICY_JOURNAL_FORMAT_OK paths=bounded padding=zeroed domain=closed digest=recomputed prepare=fail-closed' \
+            ci-logs/policy-journal-format-clang.log
+
+      - name: Verify bounded source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'constexpr uint32_t journal_path_bytes = 48U;' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'bool fixed_text_equal' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'if (encoded[expected_length] != 0) return false;' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'bool prepare_uncertain()' kernel/parts/security_policy_transaction.inc
+          grep -Fq 'ZGDB_UPDATE_JOURNAL_PREPARE_UNCERTAIN' kernel/parts/zgdb_policy_transactional.inc
+          grep -Fq 'ZCAP_UPDATE_JOURNAL_PREPARE_UNCERTAIN' kernel/parts/zcap_policy.inc
+          grep -Fq 'ZMID_UPDATE_JOURNAL_PREPARE_UNCERTAIN' kernel/parts/zmid_policy_transactional.inc
+          echo 'POLICY_JOURNAL_FORMAT_CONTRACT_OK paths=bounded padding=zeroed prepare=fail-closed'
+
+      - name: Upload format-hardening evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: policy-journal-format-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            ci-logs/security-policy-journal-format-gcc
+            ci-logs/security-policy-journal-format-clang
+            ci-logs/policy-journal-format-gcc.log
+            ci-logs/policy-journal-format-clang.log
+            kernel/parts/security_policy_transaction.inc
+            kernel/parts/zgdb_policy_transactional.inc
+            kernel/parts/zcap_policy.inc
+            kernel/parts/zmid_policy_transactional.inc
+            tests/security_policy_journal_format_test.cpp
