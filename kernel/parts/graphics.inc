@@ -64,6 +64,7 @@ void productivity_open_launcher_result(ProductivityApp app) {
     launcher_query_length = 0U;
     launcher_query[0] = 0;
     launcher_focus = 0U;
+    set_active_view(launcher_return_view);
     productivity_open(app);
     refresh_desktop();
 }
