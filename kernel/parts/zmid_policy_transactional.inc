@@ -118,7 +118,12 @@ bool update(const char* candidate_path) {
     uint32_t previous_size = 0U;
     if (!security_policy_transaction::acquire(
             "/security/zenovguard-intelligence.zmid", max_database_bytes, previous_size)) {
-        serial::line("ZMID_UPDATE_BACKUP_FAILED");
+        if (security_policy_transaction::prepare_uncertain()) {
+            ready = false;
+            serial::line("ZMID_UPDATE_JOURNAL_PREPARE_UNCERTAIN");
+        } else {
+            serial::line("ZMID_UPDATE_BACKUP_FAILED");
+        }
         return false;
     }
 
