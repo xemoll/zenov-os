@@ -72,8 +72,8 @@ void write8(uint32_t offset, uint8_t value) {
     asm volatile("" : : : "memory");
 }
 
-void serial_u64(uint64_t value) {
-    char text[21];
+void serial_u32(uint32_t value) {
+    char text[11];
     uint32_t count = 0U;
     do {
         text[count++] = static_cast<char>('0' + value % 10U);
@@ -89,14 +89,35 @@ void serial_hex32(uint32_t value) {
         if (shift == 0U) break;
     }
 }
+void serial_u64(uint64_t value) {
+    const uint32_t high = static_cast<uint32_t>(value >> 32U);
+    const uint32_t low = static_cast<uint32_t>(value);
+    if (high == 0U) {
+        serial_u32(low);
+        return;
+    }
+    serial_hex32(high);
+    serial::put('_');
+    constexpr char digits[] = "0123456789abcdef";
+    for (uint32_t shift = 28U;; shift -= 4U) {
+        serial::put(digits[(low >> shift) & 0xFU]);
+        if (shift == 0U) break;
+    }
+}
 void console_u64(uint64_t value) {
-    char text[21];
-    uint32_t count = 0U;
-    do {
-        text[count++] = static_cast<char>('0' + value % 10U);
-        value /= 10U;
-    } while (value && count < sizeof(text));
-    while (count) console::put(text[--count]);
+    const uint32_t high = static_cast<uint32_t>(value >> 32U);
+    const uint32_t low = static_cast<uint32_t>(value);
+    if (high == 0U) {
+        console::unsigned_dec(low);
+        return;
+    }
+    console::hex(high);
+    console::put('_');
+    constexpr char digits[] = "0123456789abcdef";
+    for (uint32_t shift = 28U;; shift -= 4U) {
+        console::put(digits[(low >> shift) & 0xFU]);
+        if (shift == 0U) break;
+    }
 }
 
 bool elapsed(uint32_t start, uint32_t limit) {
@@ -360,13 +381,14 @@ void init() {
         serial::line("TPM2_STARTUP_TRANSPORT_FAILED");
         return;
     }
+    uint32_t response_code = 0U;
     tpm2_protocol::ResponseHeader header{};
     if (!tpm2_protocol::parse_response_header(response_buffer, response_size, header)) {
         transport_ready = false;
         serial::line("TPM2_STARTUP_RESPONSE_FAILED");
         return;
     }
-    const uint32_t response_code = header.code;
+    response_code = header.code;
     if (response_code != tpm2_protocol::rc_success && response_code != tpm2_protocol::rc_initialize) {
         transport_ready = false;
         serial::write("TPM2_STARTUP_REJECTED rc=");
