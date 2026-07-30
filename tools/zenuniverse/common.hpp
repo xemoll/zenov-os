@@ -21,6 +21,19 @@ namespace fs = std::filesystem;
 
 namespace zenuniverse {
 
+struct StringLess {
+    using is_transparent = void;
+    bool operator()(std::string_view left, std::string_view right) const noexcept {
+        return std::lexicographical_compare(
+            left.begin(), left.end(), right.begin(), right.end(),
+            [](unsigned char a, unsigned char b) { return a < b; });
+    }
+};
+
+using StringSet = std::set<std::string, StringLess>;
+template <typename Value>
+using StringMap = std::map<std::string, Value, StringLess>;
+
 struct Error final : std::runtime_error { using std::runtime_error::runtime_error; };
 
 std::string trim(std::string value) {
@@ -57,6 +70,29 @@ bool https_url(std::string_view value) {
     return !host.empty() && host.find('.') != std::string_view::npos && host.front() != '.' && host.back() != '.';
 }
 
+std::string read_text_bounded(const fs::path& path, std::uintmax_t maximum) {
+    std::error_code ec;
+    const auto status = fs::symlink_status(path, ec);
+    if (ec) throw Error("cannot stat: " + path.string());
+    if (fs::is_symlink(status)) throw Error("symbolic links are not accepted: " + path.string());
+    if (!fs::is_regular_file(status)) throw Error("not a regular file: " + path.string());
+    const auto size = fs::file_size(path, ec);
+    if (ec) throw Error("cannot determine size: " + path.string());
+    if (size > maximum) throw Error("text file exceeds bounded read limit: " + path.string());
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw Error("cannot open: " + path.string());
+    std::string data(static_cast<std::size_t>(size), '\0');
+    if (!data.empty()) input.read(data.data(), static_cast<std::streamsize>(data.size()));
+    if (input.gcount() != static_cast<std::streamsize>(data.size()) || (!input.good() && !input.eof())) {
+        throw Error("cannot read exact text snapshot: " + path.string());
+    }
+    char extra = 0;
+    if (input.get(extra)) throw Error("text file changed while reading: " + path.string());
+    const auto final_size = fs::file_size(path, ec);
+    if (ec || final_size != size) throw Error("text file changed while reading: " + path.string());
+    return data;
+}
+
 std::string read_text(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) throw Error("cannot open: " + path.string());
@@ -88,6 +124,7 @@ struct Sha256 {
     std::uint64_t bytes = 0;
     std::size_t used = 0;
     static std::uint32_t rotr(std::uint32_t x, unsigned n) { return (x >> n) | (x << (32U - n)); }
+    static std::uint32_t add32(std::uint64_t value) { return static_cast<std::uint32_t>(value & 0xFFFFFFFFULL); }
     void block(const std::uint8_t* p) {
         static constexpr std::uint32_t k[64] = {
             0x428a2f98U,0x71374491U,0xb5c0fbcfU,0xe9b5dba5U,0x3956c25bU,0x59f111f1U,0x923f82a4U,0xab1c5ed5U,
@@ -100,16 +137,37 @@ struct Sha256 {
             0x748f82eeU,0x78a5636fU,0x84c87814U,0x8cc70208U,0x90befffaU,0xa4506cebU,0xbef9a3f7U,0xc67178f2U};
         std::uint32_t w[64]{};
         for (int i=0;i<16;++i) w[i]=(std::uint32_t(p[i*4])<<24)|(std::uint32_t(p[i*4+1])<<16)|(std::uint32_t(p[i*4+2])<<8)|p[i*4+3];
-        for (int i=16;i<64;++i) { const auto s0=rotr(w[i-15],7)^rotr(w[i-15],18)^(w[i-15]>>3); const auto s1=rotr(w[i-2],17)^rotr(w[i-2],19)^(w[i-2]>>10); w[i]=w[i-16]+s0+w[i-7]+s1; }
+        for (int i=16;i<64;++i) {
+            const auto s0=rotr(w[i-15],7)^rotr(w[i-15],18)^(w[i-15]>>3);
+            const auto s1=rotr(w[i-2],17)^rotr(w[i-2],19)^(w[i-2]>>10);
+            w[i]=add32(static_cast<std::uint64_t>(w[i-16])+s0+w[i-7]+s1);
+        }
         auto a=state[0],b=state[1],c=state[2],d=state[3],e=state[4],f=state[5],g=state[6],h=state[7];
-        for (int i=0;i<64;++i) { const auto S1=rotr(e,6)^rotr(e,11)^rotr(e,25); const auto ch=(e&f)^((~e)&g); const auto t1=h+S1+ch+k[i]+w[i]; const auto S0=rotr(a,2)^rotr(a,13)^rotr(a,22); const auto maj=(a&b)^(a&c)^(b&c); const auto t2=S0+maj; h=g;g=f;f=e;e=d+t1;d=c;c=b;b=a;a=t1+t2; }
-        state[0]+=a;state[1]+=b;state[2]+=c;state[3]+=d;state[4]+=e;state[5]+=f;state[6]+=g;state[7]+=h;
+        for (int i=0;i<64;++i) {
+            const auto S1=rotr(e,6)^rotr(e,11)^rotr(e,25);
+            const auto ch=(e&f)^((~e)&g);
+            const auto t1=add32(static_cast<std::uint64_t>(h)+S1+ch+k[i]+w[i]);
+            const auto S0=rotr(a,2)^rotr(a,13)^rotr(a,22);
+            const auto maj=(a&b)^(a&c)^(b&c);
+            const auto t2=add32(static_cast<std::uint64_t>(S0)+maj);
+            h=g;g=f;f=e;e=add32(static_cast<std::uint64_t>(d)+t1);d=c;c=b;b=a;a=add32(static_cast<std::uint64_t>(t1)+t2);
+        }
+        state[0]=add32(static_cast<std::uint64_t>(state[0])+a);
+        state[1]=add32(static_cast<std::uint64_t>(state[1])+b);
+        state[2]=add32(static_cast<std::uint64_t>(state[2])+c);
+        state[3]=add32(static_cast<std::uint64_t>(state[3])+d);
+        state[4]=add32(static_cast<std::uint64_t>(state[4])+e);
+        state[5]=add32(static_cast<std::uint64_t>(state[5])+f);
+        state[6]=add32(static_cast<std::uint64_t>(state[6])+g);
+        state[7]=add32(static_cast<std::uint64_t>(state[7])+h);
     }
     void update(std::string_view data) {
-        bytes += data.size();
+        if (data.size() > std::numeric_limits<std::uint64_t>::max() - bytes) throw Error("SHA-256 input length overflow");
+        bytes += static_cast<std::uint64_t>(data.size());
         for (unsigned char c : data) { buffer[used++]=c; if (used==64U) { block(buffer.data()); used=0; } }
     }
     std::string finish() {
+        if (bytes > std::numeric_limits<std::uint64_t>::max() / 8U) throw Error("SHA-256 bit length overflow");
         const std::uint64_t bits = bytes * 8U;
         buffer[used++] = 0x80U;
         if (used > 56U) { while (used<64U) buffer[used++]=0; block(buffer.data()); used=0; }
