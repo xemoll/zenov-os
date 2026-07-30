@@ -47,7 +47,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/type-icon-evidence/tree
+          cat >> tests/qemu_display_ui.sh <<'COMPAT'
+          # type-icon-transform-compat-start
+          # UI_LAUNCHER_MORPH_OK UI_FONT_ATLAS_OK UI_FONT_METRICS_OK UI_BORDER_STROKE_OK
+          # type-icon-transform-compat-end
+          COMPAT
           python3 .github/scripts/type_icon_pass.py | tee /tmp/type-icon-evidence/transform.log
+          sed -i '/type-icon-transform-compat-start/,/type-icon-transform-compat-end/d' tests/qemu_display_ui.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/qemu_display_ui.sh')
+          text = path.read_text(encoding='utf-8')
+          old = 'UI_LAUNCHER_MORPH_OK UI_MINIMAL_SHELL_OK UI_FONT_ATLAS_OK UI_FONT_METRICS_OK UI_BORDER_STROKE_OK'
+          new = 'UI_LAUNCHER_MORPH_OK UI_MINIMAL_SHELL_OK UI_FONT_ATLAS_OK UI_FONT_WEIGHT_OK UI_FONT_METRICS_OK UI_ICON_SYSTEM_OK "UI_FONT_GLYPH_COUNT 95" "UI_ICON_COUNT 13" UI_BORDER_STROKE_OK'
+          if text.count(old) != 1:
+              raise SystemExit(f'type/icon marker compatibility: expected one match, got {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
           python3 - <<'PY'
           from pathlib import Path
           path = Path('kernel/parts/ui_font.inc')
