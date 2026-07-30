@@ -18,6 +18,7 @@ static constexpr const char* protected_paths[] = {
     "/security/verified-reads.zvrt",
     "/security/verified-reads.version",
     "/security/zenovguard.audit",
+    "/security/policy-transaction.journal",
 };
 
 bool normalize_for_policy(const char* input, char output[48]) {
@@ -216,24 +217,5 @@ bool quarantine_restore(const char* source, const char* destination) {
         return false;
     }
     return rename_entry(normalized_source, normalized_destination);
-}
-
-bool quarantine_write_metadata(const char* path, const uint8_t* data, uint32_t size) {
-    char normalized[48]{};
-    if (!security_policy::normalize_for_policy(path, normalized) || !string_starts_with(normalized, "/quarantine/") ||
-        !string_starts_with(normalized + (string_length(normalized) > 5U ? string_length(normalized) - 5U : 0U), ".meta")) {
-        security_policy::report_protected_path("quarantine-metadata-rejected", path);
-        return false;
-    }
-    return write_file(normalized, data, size, false);
-}
-
-bool quarantine_remove(const char* path) {
-    char normalized[48]{};
-    if (!security_policy::normalize_for_policy(path, normalized) || !string_starts_with(normalized, "/quarantine/")) {
-        security_policy::report_protected_path("quarantine-remove-rejected", path);
-        return false;
-    }
-    return remove(normalized);
 }
 } // namespace storage
