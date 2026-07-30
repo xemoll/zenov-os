@@ -1,16 +1,13 @@
 name: ZenovOS native type and icon integration
 
 on:
-  push:
-    branches:
-      - agent/zenov-os-0.1.1-type-icon-integration
   pull_request:
     branches:
       - main
   workflow_dispatch:
 
 concurrency:
-  group: zenov-type-icon-integration
+  group: zenov-type-icon-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -30,14 +27,20 @@ jobs:
       - name: Verify integration source
         run: |
           set -euo pipefail
-          test "$(git merge-base HEAD 382e1c169b337bea587c0aba4ef4bd6c521f2ca6)" = \
-            382e1c169b337bea587c0aba4ef4bd6c521f2ca6
+          BASE=382e1c169b337bea587c0aba4ef4bd6c521f2ca6
+          test "$(git merge-base HEAD "$BASE")" = "$BASE"
           test "$(sha256sum .github/scripts/type_icon_pass.py | cut -d' ' -f1)" = \
             fc4e6cf085e2d78eecef23b563e7afda17d4e4a219f8a3c0bc0d33418996d87e
-          git diff --name-only 382e1c169b337bea587c0aba4ef4bd6c521f2ca6 HEAD | sort > /tmp/bootstrap-files.txt
+          test "$(sha256sum .github/scripts/type_icon_post.py | cut -d' ' -f1)" = \
+            d701e6487135d067121194aba85993ae8470a0ea779f77947eaf3168b11807e8
+          test "$(sha256sum third_party/inter/OFL.txt | cut -d' ' -f1)" = \
+            262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a
+          git diff --name-only "$BASE" HEAD | sort > /tmp/bootstrap-files.txt
           printf '%s\n' \
             .github/scripts/type_icon_pass.py \
-            .github/workflows/type-icon-integration.yml | sort > /tmp/expected-bootstrap-files.txt
+            .github/scripts/type_icon_post.py \
+            .github/workflows/type-icon-integration.yml \
+            third_party/inter/OFL.txt | sort > /tmp/expected-bootstrap-files.txt
           diff -u /tmp/expected-bootstrap-files.txt /tmp/bootstrap-files.txt
 
       - name: Install native toolchain and QEMU
@@ -47,133 +50,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/type-icon-evidence/tree
-          cat >> tests/qemu_display_ui.sh <<'COMPAT'
-          # type-icon-transform-compat-start
-          # UI_LAUNCHER_MORPH_OK UI_FONT_ATLAS_OK UI_FONT_METRICS_OK UI_BORDER_STROKE_OK
-          # type-icon-transform-compat-end
-          COMPAT
+          python3 .github/scripts/type_icon_post.py pre | tee /tmp/type-icon-evidence/pre-transform.log
           python3 .github/scripts/type_icon_pass.py | tee /tmp/type-icon-evidence/transform.log
-          sed -i '/type-icon-transform-compat-start/,/type-icon-transform-compat-end/d' tests/qemu_display_ui.sh
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('tests/qemu_display_ui.sh')
-          text = path.read_text(encoding='utf-8')
-          old = 'UI_LAUNCHER_MORPH_OK UI_MINIMAL_SHELL_OK UI_FONT_ATLAS_OK UI_FONT_METRICS_OK UI_BORDER_STROKE_OK'
-          new = 'UI_LAUNCHER_MORPH_OK UI_MINIMAL_SHELL_OK UI_FONT_ATLAS_OK UI_FONT_WEIGHT_OK UI_FONT_METRICS_OK UI_ICON_SYSTEM_OK "UI_FONT_GLYPH_COUNT 95" "UI_ICON_COUNT 13" UI_BORDER_STROKE_OK'
-          if text.count(old) != 1:
-              raise SystemExit(f'type/icon marker compatibility: expected one match, got {text.count(old)}')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          PY
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('kernel/parts/ui_font.inc')
-          text = path.read_text(encoding='utf-8')
-          header = '''/*
-           * UI bitmap glyph subset derived from Inter Regular and SemiBold.
-           * Copyright (c) 2016 The Inter Project Authors.
-           * Licensed under the SIL Open Font License 1.1; see third_party/inter/OFL.txt.
-           * This modified bitmap subset is not exposed under the reserved font family name.
-           */
-          '''
-          path.write_text(header + text, encoding='utf-8')
-          PY
-          mkdir -p third_party/inter
-          cat > third_party/inter/OFL.txt <<'OFL'
-          Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
-
-          This Font Software is licensed under the SIL Open Font License, Version 1.1.
-          This license is copied below, and is also available with a FAQ at:
-          http://scripts.sil.org/OFL
-
-          -----------------------------------------------------------
-          SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
-          -----------------------------------------------------------
-
-          PREAMBLE
-          The goals of the Open Font License (OFL) are to stimulate worldwide
-          development of collaborative font projects, to support the font creation
-          efforts of academic and linguistic communities, and to provide a free and
-          open framework in which fonts may be shared and improved in partnership
-          with others.
-
-          The OFL allows the licensed fonts to be used, studied, modified and
-          redistributed freely as long as they are not sold by themselves. The
-          fonts, including any derivative works, can be bundled, embedded,
-          redistributed and/or sold with any software provided that any reserved
-          names are not used by derivative works. The fonts and derivatives,
-          however, cannot be released under any other type of license. The
-          requirement for fonts to remain under this license does not apply
-          to any document created using the fonts or their derivatives.
-
-          DEFINITIONS
-          "Font Software" refers to the set of files released by the Copyright
-          Holder(s) under this license and clearly marked as such. This may
-          include source files, build scripts and documentation.
-
-          "Reserved Font Name" refers to any names specified as such after the
-          copyright statement(s).
-
-          "Original Version" refers to the collection of Font Software components as
-          distributed by the Copyright Holder(s).
-
-          "Modified Version" refers to any derivative made by adding to, deleting,
-          or substituting -- in part or in whole -- any of the components of the
-          Original Version, by changing formats or by porting the Font Software to a
-          new environment.
-
-          "Author" refers to any designer, engineer, programmer, technical
-          writer or other person who contributed to the Font Software.
-
-          PERMISSION AND CONDITIONS
-          Permission is hereby granted, free of charge, to any person obtaining
-          a copy of the Font Software, to use, study, copy, merge, embed, modify,
-          redistribute, and sell modified and unmodified copies of the Font
-          Software, subject to the following conditions:
-
-          1) Neither the Font Software nor any of its individual components,
-          in Original or Modified Versions, may be sold by itself.
-
-          2) Original or Modified Versions of the Font Software may be bundled,
-          redistributed and/or sold with any software, provided that each copy
-          contains the above copyright notice and this license. These can be
-          included either as stand-alone text files, human-readable headers or
-          in the appropriate machine-readable metadata fields within text or
-          binary files as long as those fields can be easily viewed by the user.
-
-          3) No Modified Version of the Font Software may use the Reserved Font
-          Name(s) unless explicit written permission is granted by the corresponding
-          Copyright Holder. This restriction only applies to the primary font name as
-          presented to the users.
-
-          4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
-          Software shall not be used to promote, endorse or advertise any
-          Modified Version, except to acknowledge the contribution(s) of the
-          Copyright Holder(s) and the Author(s) or with their explicit written
-          permission.
-
-          5) The Font Software, modified or unmodified, in part or in whole,
-          must be distributed entirely under this license, and must not be
-          distributed under any other license. The requirement for fonts to
-          remain under this license does not apply to any document created
-          using the Font Software.
-
-          TERMINATION
-          This license becomes null and void if any of the above conditions are
-          not met.
-
-          DISCLAIMER
-          THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-          EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
-          MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
-          OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
-          COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-          INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
-          DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-          FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
-          OTHER DEALINGS IN THE FONT SOFTWARE.
-          OFL
-          sed -i 's/^          //' third_party/inter/OFL.txt
+          python3 .github/scripts/type_icon_post.py post | tee /tmp/type-icon-evidence/post-transform.log
           git diff --check
+          ! grep -q 'type-icon-transform-compat' tests/qemu_display_ui.sh
           paths=(
             .github/workflows/adaptive-display.yml
             kernel/parts/ui_apps.inc
