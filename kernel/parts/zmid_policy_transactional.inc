@@ -1,6 +1,8 @@
+#define init init_unhardened [[maybe_unused]]
 #define update update_unhardened [[maybe_unused]]
 #include "zmid_policy.inc"
 #undef update
+#undef init
 
 namespace zmid {
 bool transaction_write_version(uint32_t value) {
@@ -9,6 +11,64 @@ bool transaction_write_version(uint32_t value) {
     if (!security_policy_format::format_nonzero_decimal_u32(value, text, sizeof(text), count)) return false;
     return storage::write_file("/security/zenovguard-intelligence.version",
         reinterpret_cast<const uint8_t*>(text), count, false);
+}
+
+bool init() {
+    uint8_t version_buffer[16]{};
+    uint32_t version_size = 0U;
+    if (!storage::read_file("/security/zenovguard-intelligence.version", version_buffer,
+            sizeof(version_buffer), version_size) ||
+        !parse_version(version_buffer, version_size, persistent_database_version)) {
+        serial::line("ZMID_INIT_FAILED reason=version-state");
+        ready = false;
+        return false;
+    }
+
+    uint32_t minimum = compiled_database_floor;
+    if (persistent_database_version > minimum) minimum = persistent_database_version;
+    Validation validation{};
+    uint32_t version = 0U, count = 0U;
+    if (!read_database("/security/zenovguard-intelligence.zmid", minimum,
+            validation, version, count)) {
+        serial::write("ZMID_INIT_FAILED reason=");
+        serial::line(validation_name(validation));
+        ready = false;
+        return false;
+    }
+
+    activate(candidate_records, count, version);
+    if (persistent_database_version < version &&
+        (!transaction_write_version(version) ||
+         !security_policy_transaction::version_matches(
+             "/security/zenovguard-intelligence.version", version) ||
+         !storage::sync_metadata())) {
+        ready = false;
+        serial::line("ZMID_INIT_FAILED reason=version-commit");
+        return false;
+    }
+    persistent_database_version = version;
+    ready = true;
+    if (!self_test()) {
+        ready = false;
+        serial::line("ZMID_SELFTEST_FAILED");
+        return false;
+    }
+    serial::line("ZMID_ROOT_KEY_OK id=6ca6a5275544c533");
+    serial::line("ZMID_PSS_SIGNATURE_OK");
+    serial::write("ZMID_DATABASE_VERSION_OK version=");
+    process::serial_u32(version);
+    serial::write("\r\n");
+    serial::write("ZMID_RULES_OK total=");
+    process::serial_u32(active_record_count);
+    serial::write(" hashes=");
+    process::serial_u32(hash_records);
+    serial::write(" patterns=");
+    process::serial_u32(pattern_records);
+    serial::write(" audit_only=");
+    process::serial_u32(audit_only_records);
+    serial::write("\r\n");
+    serial::line("ZMID_READY");
+    return true;
 }
 
 bool transaction_restore_update(uint32_t previous_version, uint32_t previous_size) {
