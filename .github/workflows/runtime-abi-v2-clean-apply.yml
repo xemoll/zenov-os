@@ -1,0 +1,127 @@
+name: Runtime ABI v2 clean apply
+
+on:
+  push:
+    branches:
+      - feature/runtime-provider-abi-v2-clean
+
+concurrency:
+  group: runtime-abi-v2-clean-apply
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test -z "$(git status --porcelain=v1)"
+          test "$(find .v2-staging -maxdepth 1 -name 'payload.*' -type f | wc -l)" -eq 31
+
+      - name: Install strict toolchain
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang
+
+      - name: Reconstruct exact production payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs /tmp/runtime-abi-v2/extracted
+          find .v2-staging -maxdepth 1 -name 'payload.*' -type f -print0 \
+            | sort -z \
+            | xargs -0 cat \
+            | tr -d '\r\n' \
+            | base64 --decode > /tmp/runtime-abi-v2/payload.tar.gz
+          actual_payload_sha="$(sha256sum /tmp/runtime-abi-v2/payload.tar.gz | cut -d' ' -f1)"
+          test "$actual_payload_sha" = '69d3b1c2c066dddff89254e2128a93d466833e5373a7f75e5a6b6ff185b280e1'
+          printf 'payload-sha256=%s\n' "$actual_payload_sha" | tee ci-logs/payload.log
+
+          tar -tzf /tmp/runtime-abi-v2/payload.tar.gz | LC_ALL=C sort > ci-logs/archive-files.txt
+          cat > ci-logs/expected-files.txt <<'EOF'
+          .github/workflows/zenuniverse.yml
+          docs/RUNTIME_PROVIDER_ABI_V2_0.1.1.md
+          packages/universe/runtime-duckstation.zsource
+          packages/universe/runtime-pcsx2.zsource
+          tests/zenuniverse_runtime_provider_test.sh
+          tools/zenuniverse/artifact_manifest.hpp
+          tools/zenuniverse/common.hpp
+          tools/zenuniverse/descriptor.hpp
+          tools/zenuniverse/launch_manifest.hpp
+          tools/zenuniverse/main.cpp
+          tools/zenuniverse/native_artifact.hpp
+          tools/zenuniverse/resolver.hpp
+          universe.mk
+          EOF
+          sed -i 's/^          //' ci-logs/expected-files.txt
+          LC_ALL=C sort -o ci-logs/expected-files.txt ci-logs/expected-files.txt
+          cmp ci-logs/expected-files.txt ci-logs/archive-files.txt
+          ! grep -Eq '(^/|(^|/)\.\.(/|$))' ci-logs/archive-files.txt
+          tar -xzf /tmp/runtime-abi-v2/payload.tar.gz -C /tmp/runtime-abi-v2/extracted --no-same-owner --no-same-permissions
+          while IFS= read -r path; do
+            test -f "/tmp/runtime-abi-v2/extracted/$path"
+            mkdir -p "$(dirname "$path")"
+            cp "/tmp/runtime-abi-v2/extracted/$path" "$path"
+          done < ci-logs/expected-files.txt
+          chmod +x tests/zenuniverse_runtime_provider_test.sh
+
+      - name: Run exact Runtime Provider ABI v2 gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build /tmp/zenuniverse-v2-rebuild
+          make --no-print-directory universe-check 2>&1 | tee ci-logs/universe-check.log
+          make --no-print-directory BUILD=/tmp/zenuniverse-v2-rebuild universe-check 2>&1 | tee ci-logs/universe-rebuild.log
+          cmp build/zenuniverse.zuc /tmp/zenuniverse-v2-rebuild/zenuniverse.zuc
+          marker='ZENUNIVERSE_RUNTIME_PROVIDER_V2_OK manifest=catalog-bound profile=version-bound provider=version-bound native=zenpkg-validated foreign=zenpkg-classified launch=sealed assets=size-constrained drift=blocked tamper=blocked sanitizers=yes'
+          grep -Fq "$marker" ci-logs/universe-check.log
+          grep -Fq "$marker" ci-logs/universe-rebuild.log
+          grep -Fq '^ZENARTIFACT2$' build/zenuniverse-runtime-test/fixtures/hello.zartifact
+          grep -Fq '^ZENLAUNCH2$' build/zenuniverse-runtime-test/fixtures/hello.zlaunch
+          grep -Fq 'native artifact violates ZenPkg loader contract' build/zenuniverse-runtime-test/fake-magic.log
+          grep -Fq 'declared artifact family does not match ZenPkg classifier' build/zenuniverse-runtime-test/fake-chd.log
+          grep -Fq 'catalog SHA-256 mismatch' build/zenuniverse-runtime-test/drift.log
+          grep -Fq 'shape=invalid' build/zenuniverse-runtime-test/ps1-wrong-bios.log
+          grep -Fq 'shape=valid' build/zenuniverse-runtime-test/ps1-shape-bios.log
+
+      - name: Publish clean verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'zenov-runtime-gate'
+          git config user.email 'runtime-gate@users.noreply.github.com'
+          while IFS= read -r path; do git add -- "$path"; done < ci-logs/expected-files.txt
+          git rm -r .v2-staging .github/workflows/runtime-abi-v2-clean-apply.yml
+          git diff --cached --name-only | LC_ALL=C sort > ci-logs/committed-files.txt
+          cat ci-logs/expected-files.txt > ci-logs/allowed-files.txt
+          find .v2-staging -maxdepth 1 -name 'payload.*' -type f -printf '%p\n' 2>/dev/null || true
+          printf '%s\n' '.github/workflows/runtime-abi-v2-clean-apply.yml' >> ci-logs/allowed-files.txt
+          # deleted payload paths are visible in the index even though the directory is gone
+          for index in $(seq -w 0 30); do printf '.v2-staging/payload.%s\n' "$index" >> ci-logs/allowed-files.txt; done
+          LC_ALL=C sort -o ci-logs/allowed-files.txt ci-logs/allowed-files.txt
+          cmp ci-logs/allowed-files.txt ci-logs/committed-files.txt
+          git commit -m 'ZenPkg: bind runtime artifacts and launch plans to exact catalog'
+          git push origin HEAD:refs/heads/feature/runtime-provider-abi-v2-clean
+
+      - name: Upload gate evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2
+        with:
+          name: runtime-abi-v2-clean-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            ci-logs/
+            build/zenuniverse-runtime-test/
+            build/zenuniverse.zuc
+            /tmp/zenuniverse-v2-rebuild/zenuniverse.zuc
