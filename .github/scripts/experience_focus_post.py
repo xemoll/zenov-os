@@ -86,6 +86,10 @@ replace_once(
   echo "sendkey ret 10"
 ''',
     '''  echo "sendkey end 10"
+  wait_for_serial "UI_SETTINGS_PAGE Style" || { echo quit; return 1; }
+  echo "sendkey end 10"
+  wait_for_serial "UI_SETTINGS_PAGE Access" || { echo quit; return 1; }
+  echo "sendkey end 10"
   wait_for_serial "UI_SETTINGS_PAGE Experience" || { echo quit; return 1; }
   wait_for_serial "UI_SETTINGS_FOCUS 0" || { echo quit; return 1; }
   sleep 0.15
@@ -102,7 +106,7 @@ replace_once(
   wait_for_serial "UI_SETTINGS_FOCUS 5" || { echo quit; return 1; }
   echo "sendkey ret 10"
 ''',
-    "synchronized Experience preview through runtime navigation evidence",
+    "synchronized General-to-Experience route and preview focus",
 )
 
 print("experience-focus-post: complete")
