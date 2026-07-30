@@ -270,6 +270,7 @@ int main() {
             "/security/zenovguard-intelligence.zmid", 256U, failed_size) && failed_size == 0U,
             "journal write failure propagated");
 
+        std::cout << "SECURITY_POLICY_TRANSACTION_TEST_OK format=4 backup=bounded nested=blocked readback=verified version=verified wipe=volatile\n";
         std::cout << "SECURITY_POLICY_JOURNAL_TEST_OK schema=1 hot=replayed commit=atomic audit=covered digest=verified corrupt=fail-closed crash-points=6\n";
         return 0;
     } catch (const std::exception& error) {
