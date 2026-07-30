@@ -74,6 +74,7 @@ jobs:
           cp /tmp/type-icon-bootstrap/type_icon_pass.py .github/scripts/
           cp /tmp/type-icon-bootstrap/type_icon_post.py .github/scripts/
           cp /tmp/type-icon-bootstrap/OFL.txt third_party/inter/OFL.txt
+          git add -N third_party/inter/OFL.txt
           git diff --check
 
       - name: Apply deterministic type and icon pass
