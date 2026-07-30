@@ -1,0 +1,142 @@
+name: ZenovOS advanced experience integration
+
+on:
+  push:
+    branches:
+      - agent/zenov-os-0.1.1-experience-integration
+  workflow_dispatch:
+
+concurrency:
+  group: zenov-experience-integration
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify integration bootstrap
+        run: |
+          set -euo pipefail
+          test -s .github/scripts/experience_pass.py
+          test -s kernel/parts/system_sound.inc
+          python3 -m py_compile .github/scripts/experience_pass.py
+          git merge-base --is-ancestor 385bd98b9a5f10722c84ad602ba32fb1563b73b5 HEAD
+
+      - name: Install native toolchain, QEMU and TPM dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils openssl qemu-system-x86 swtpm
+
+      - name: Rebase verified UI tree onto current main
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin main
+          MAIN_HEAD="$(git rev-parse origin/main)"
+          printf '%s\n' "$MAIN_HEAD" | tee /tmp/experience-main-head.txt
+          git merge --no-edit --no-ff origin/main
+          test "$(git merge-base HEAD "$MAIN_HEAD")" = "$MAIN_HEAD"
+
+      - name: Apply deterministic experience pass
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/experience-evidence
+          cp /tmp/experience-main-head.txt /tmp/experience-evidence/main-head.txt
+          python3 .github/scripts/experience_pass.py | tee /tmp/experience-evidence/transform.log
+          rm -f .github/scripts/experience_pass.py .github/workflows/experience-integration.yml
+          git add -N docs/UX_EXPERIENCE_0.1.1.md
+          git diff --check
+          MAIN_HEAD="$(cat /tmp/experience-main-head.txt)"
+          paths=(
+            .github/workflows/adaptive-display.yml
+            docs/UX_EXPERIENCE_0.1.1.md
+            kernel/kernel.cpp
+            kernel/parts/graphics_mapping.inc
+            kernel/parts/hardware.inc
+            kernel/parts/mouse_regression.inc
+            kernel/parts/system_sound.inc
+            kernel/parts/ui_apps.inc
+            kernel/parts/ui_files.inc
+            kernel/parts/ui_files_runtime.inc
+            kernel/parts/ui_font.inc
+            kernel/parts/ui_graphics_base.inc
+            kernel/parts/ui_runtime.inc
+            kernel/parts/ui_scaler.inc
+            kernel/parts/ui_shell.inc
+            kernel/parts/ui_theme.inc
+            tests/qemu_display_ui.sh
+            tests/qemu_zenpkg.sh
+            third_party/inter/OFL.txt
+          )
+          mapfile -t actual < <(git diff "$MAIN_HEAD" --name-only | sort)
+          mapfile -t expected < <(printf '%s\n' "${paths[@]}" | sort)
+          diff -u <(printf '%s\n' "${expected[@]}") <(printf '%s\n' "${actual[@]}")
+          git diff --stat "$MAIN_HEAD" -- "${paths[@]}" | tee /tmp/experience-evidence/source-stat.txt
+          git diff --binary "$MAIN_HEAD" -- "${paths[@]}" > /tmp/experience-evidence/source.diff
+          sha256sum /tmp/experience-evidence/source.diff | tee /tmp/experience-evidence/source-diff-sha256.txt
+          for path in "${paths[@]}"; do
+            mkdir -p "/tmp/experience-evidence/tree/$(dirname "$path")"
+            cp "$path" "/tmp/experience-evidence/tree/$path"
+          done
+
+      - name: Build strict native image
+        run: |
+          set -o pipefail
+          make clean check 2>&1 | tee /tmp/experience-evidence/native-check.log
+
+      - name: Run complete persistence and recovery QEMU matrix
+        run: |
+          set -o pipefail
+          make qemu 2>&1 | tee /tmp/experience-evidence/qemu.log
+
+      - name: Render and verify all display modes
+        run: |
+          set -o pipefail
+          bash tests/qemu_display_ui.sh build/zenov-os.img build/zenov-data.img build/qemu-experience 2>&1 | tee /tmp/experience-evidence/qemu-display.log
+
+      - name: Inspect experience evidence
+        run: |
+          set -euo pipefail
+          SERIAL=build/qemu-experience/serial.log
+          for marker in \
+            UI_SOUND_ENGINE_OK UI_SOUND_CONTRACT_OK UI_MOTION_PROFILES_OK UI_EXPERIENCE_SETTINGS_OK \
+            'UI_MOTION_PROFILE Fluid' 'UI_SOUND_THEME Soft' \
+            'UI_TRANSITION_FRAMES 7' 'UI_TRANSITION_TICKS 1' \
+            UI_REDUCED_MOTION_ON 'UI_TRANSITION_FRAMES 1' 'UI_TRANSITION_TICKS 0' \
+            UI_SOUND_PREVIEW_OK UI_SETTINGS_PERSIST_OK \
+            UI_ADAPTIVE_DISPLAY_OK UI_MINIMAL_SHELL_OK UI_FONT_ATLAS_OK UI_ICON_SYSTEM_OK \
+            'UI_ICON_COUNT 14' 'UI_DISPLAY_MODE_COUNT 32'; do
+            grep -q "$marker" "$SERIAL"
+          done
+          test ! -s build/qemu-experience/qemu.stderr
+          test -s build/qemu-experience/settings-experience-1024x768.ppm
+          test -s build/qemu-experience/settings-experience-preview-1024x768.ppm
+          grep -q '^ratio=0.00000$' build/qemu-experience/chrome-density-evidence.txt
+          grep -q '^matrix-minimum text=' build/qemu-experience/theme-contrast-matrix.txt
+          cp build/qemu-experience/*.txt /tmp/experience-evidence/ 2>/dev/null || true
+          cp build/qemu-experience/*.log /tmp/experience-evidence/ 2>/dev/null || true
+          cp build/qemu-experience/*.stderr /tmp/experience-evidence/ 2>/dev/null || true
+          cp build/qemu-experience/settings-experience-1024x768.ppm /tmp/experience-evidence/
+          cp build/qemu-experience/settings-experience-preview-1024x768.ppm /tmp/experience-evidence/
+          cp build/qemu-experience/start-1920x1080.ppm /tmp/experience-evidence/
+          cp build/qemu-experience/control-center-2560x1440.ppm /tmp/experience-evidence/
+
+      - name: Upload experience evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-experience-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          compression-level: 9
+          path: /tmp/experience-evidence
