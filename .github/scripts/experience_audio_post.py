@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 
 def replace_once(path: Path, old: str, new: str, label: str) -> None:
@@ -13,6 +14,30 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
         raise SystemExit(f"experience-audio-post: {label}: expected one match, got {count}")
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
     print(f"experience-audio-post: {label}")
+
+
+def validate_generated_checks(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    start_marker = "python3 - \"$AUDIO_WAV\" \"$OUT/system-sound-evidence.txt\" <<'PY'\n"
+    end_marker = "\nPY\n\ncheck_ppm() {\n"
+    start = text.find(start_marker)
+    if start < 0:
+        raise SystemExit("experience-audio-post: generated WAV analyzer start marker missing")
+    start += len(start_marker)
+    end = text.find(end_marker, start)
+    if end < 0:
+        raise SystemExit("experience-audio-post: generated WAV analyzer end marker missing")
+
+    analyzer = text[start:end]
+    try:
+        compile(analyzer, f"{path}:system-sound-analyzer", "exec")
+    except SyntaxError as exc:
+        raise SystemExit(
+            f"experience-audio-post: generated WAV analyzer syntax error: {exc}"
+        ) from exc
+
+    subprocess.run(["bash", "-n", str(path)], check=True)
+    print("experience-audio-post: generated shell and WAV analyzer syntax verified")
 
 
 script = Path("tests/qemu_display_ui.sh")
@@ -77,7 +102,7 @@ replace_once(
 
 check_ppm() {
 ''',
-    '''fi
+    r'''fi
 
 [[ -s "$AUDIO_WAV" ]] || { echo "qemu-display-ui: missing PC speaker WAV evidence" >&2; exit 1; }
 python3 - "$AUDIO_WAV" "$OUT/system-sound-evidence.txt" <<'PY'
@@ -135,4 +160,5 @@ check_ppm() {
     "validated non-silent WAV payload and emitted measurements",
 )
 
+validate_generated_checks(script)
 print("experience-audio-post: complete")
