@@ -3,9 +3,10 @@ bool productivity_tasks_append_quick() {
     constexpr const char* path = "/notes/tasks.md";
     char data[productivity_note_buffer_capacity]{};
     uint32_t size = 0U;
-    productivity_notes_reload();
-    if (productivity_tasks_source_exists(path)) {
-        if (!storage::security_read_file(path, reinterpret_cast<uint8_t*>(data), sizeof(data) - 1U, size)) {
+    const int32_t existing_index = storage::find_entry(path);
+    if (existing_index >= 0) {
+        if (storage::zfs_entries[existing_index].type != storage::zfs_type_file ||
+            !storage::security_read_file(path, reinterpret_cast<uint8_t*>(data), sizeof(data) - 1U, size)) {
             serial::line("UI_TASKS_ADD_FAILED");
             return false;
         }
