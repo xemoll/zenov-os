@@ -1,0 +1,26 @@
+.encoding = "UTF-8"
+config.version = "8"
+virtualHW.version = "10"
+displayName = "ZenovOS 0.1.1"
+guestOS = "other"
+firmware = "bios"
+memsize = "64"
+numvcpus = "1"
+
+ide0:0.present = "TRUE"
+ide0:0.fileName = "ZenovOS-0.1.1-data.vmdk"
+ide0:0.deviceType = "disk"
+
+ide1:0.present = "TRUE"
+ide1:0.fileName = "ZenovOS-0.1.1-x86.iso"
+ide1:0.deviceType = "cdrom-image"
+ide1:0.startConnected = "TRUE"
+
+bios.bootOrder = "cdrom,hdd"
+floppy0.present = "FALSE"
+ethernet0.present = "FALSE"
+sound.present = "FALSE"
+usb.present = "FALSE"
+
+mks.enable3d = "FALSE"
+svga.autodetect = "TRUE"
