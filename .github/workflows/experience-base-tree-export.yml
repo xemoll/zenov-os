@@ -1,0 +1,38 @@
+name: Export verified experience base tree
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  export-base-tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export exact parent tree
+        run: |
+          set -euo pipefail
+          tested_main=c21f3d65b0ba671f2cd4e25f6a57a7cfcc82f038
+          git cat-file -e "$tested_main^{commit}"
+          tree_sha="$(git rev-parse "$tested_main^{tree}")"
+          git cat-file -e "$tree_sha^{tree}"
+          printf '%s\n' "$tested_main" > publication-parent.txt
+          printf '%s\n' "$tree_sha" > publication-base-tree.txt
+          printf 'parent=%s\ntree=%s\n' "$tested_main" "$tree_sha"
+      - name: Upload base tree metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-experience-base-tree-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            publication-parent.txt
+            publication-base-tree.txt
