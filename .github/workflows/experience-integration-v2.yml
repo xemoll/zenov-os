@@ -35,13 +35,15 @@ jobs:
           test -s .github/scripts/experience_audio_post.py
           test -s .github/scripts/experience_focus_post.py
           test -s .github/scripts/experience_responsiveness_post.py
+          test -s .github/scripts/experience_mouse_regression_post.py
           test -s kernel/parts/system_sound.inc
           python3 .github/scripts/experience_prepare.py
           python3 -m py_compile \
             .github/scripts/experience_pass.py \
             .github/scripts/experience_audio_post.py \
             .github/scripts/experience_focus_post.py \
-            .github/scripts/experience_responsiveness_post.py
+            .github/scripts/experience_responsiveness_post.py \
+            .github/scripts/experience_mouse_regression_post.py
           git merge-base --is-ancestor 385bd98b9a5f10722c84ad602ba32fb1563b73b5 HEAD
 
       - name: Install native toolchain, QEMU and TPM dependencies
@@ -69,12 +71,14 @@ jobs:
           python3 .github/scripts/experience_audio_post.py | tee /tmp/experience-evidence/audio-post.log
           python3 .github/scripts/experience_focus_post.py | tee /tmp/experience-evidence/focus-post.log
           python3 .github/scripts/experience_responsiveness_post.py | tee /tmp/experience-evidence/responsiveness-post.log
+          python3 .github/scripts/experience_mouse_regression_post.py | tee /tmp/experience-evidence/mouse-regression-post.log
           rm -f \
             .github/scripts/experience_pass.py \
             .github/scripts/experience_prepare.py \
             .github/scripts/experience_audio_post.py \
             .github/scripts/experience_focus_post.py \
             .github/scripts/experience_responsiveness_post.py \
+            .github/scripts/experience_mouse_regression_post.py \
             .github/workflows/experience-integration.yml \
             .github/workflows/experience-integration-v2.yml
           git add -N docs/UX_EXPERIENCE_0.1.1.md
