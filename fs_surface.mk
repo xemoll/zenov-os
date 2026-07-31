@@ -21,3 +21,7 @@ $(FS_SURFACE_QEMU_STAMP): all tests/qemu_fs_surface.sh $(BUILD)/zenovfs-verify
 	@touch $@
 
 fs-surface-qemu: $(FS_SURFACE_QEMU_STAMP)
+
+# Keep optical-image support isolated from the native build graph. GNUmakefile
+# includes this file last, so these targets can reuse the verified raw image.
+include iso.mk
