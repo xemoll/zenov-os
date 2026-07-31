@@ -1,0 +1,72 @@
+ZenovOS 0.1.1 VM appliance quickstart
+=====================================
+
+Files
+-----
+ZenovOS-0.1.1-x86.iso        Read-only BIOS El Torito boot medium.
+ZenovOS-0.1.1-data.img        Canonical writable 16 MiB ZenovFS image.
+ZenovOS-0.1.1-data.qcow2      QEMU/KVM convenience disk.
+ZenovOS-0.1.1-data.vdi        VirtualBox convenience disk.
+ZenovOS-0.1.1-data.vmdk       VMware convenience disk.
+ZenovOS-0.1.1.vmx             VMware Workstation/Fusion configuration.
+prepare-vm.sh                 Linux/macOS preparation and launch helper.
+prepare-vm.ps1                Windows PowerShell preparation and launch helper.
+VM-APPLIANCE-MANIFEST.json    Canonical guest-content provenance.
+VM-SHA256SUMS.txt              Checksums for this appliance build.
+
+Recommended settings
+--------------------
+Architecture: 32-bit x86
+Firmware: legacy BIOS (not EFI/UEFI)
+Memory: 64 MiB
+CPU: 1
+Optical drive: ZenovOS-0.1.1-x86.iso
+Primary IDE disk: one writable ZenovOS data image
+Boot order: optical drive, then disk
+Networking: disabled; ZenovOS 0.1.1 has no networking stack
+
+Linux/macOS
+-----------
+chmod +x prepare-vm.sh
+./prepare-vm.sh qemu
+./prepare-vm.sh virtualbox
+./prepare-vm.sh vmware
+
+Prepare without starting:
+ZENOV_VM_START=0 ./prepare-vm.sh qemu
+
+Reset the selected writable disk from the canonical data image:
+ZENOV_VM_RESET=1 ./prepare-vm.sh qemu
+
+Windows PowerShell
+------------------
+.\prepare-vm.ps1 Qemu
+.\prepare-vm.ps1 VirtualBox
+.\prepare-vm.ps1 VMware
+
+Prepare without starting:
+.\prepare-vm.ps1 Qemu -PrepareOnly
+
+Reset the selected writable disk:
+.\prepare-vm.ps1 Qemu -ResetDisk
+
+Persistence and backups
+-----------------------
+The ISO is read-only. Files, settings, packages, security state and audit data
+are written to the attached data disk. Shut down the VM before copying or
+resetting that disk. Keep backups of the writable disk; resetting it destroys
+all changes made inside ZenovOS.
+
+Verification boundary
+---------------------
+QEMU optical boot and two-boot persistence are automated acceptance tests.
+QCOW2, VDI and VMDK containers are checked with qemu-img and converted back to
+raw for byte-for-byte comparison with the canonical ZenovFS image. VirtualBox
+and VMware configuration generation is validated in CI, but those proprietary
+hypervisors are not executed on GitHub-hosted runners.
+
+Current limitations
+-------------------
+This remains a live BIOS boot system rather than a hard-disk installer. UEFI,
+physical-hardware installation, networking, audio and guest additions/tools are
+not implemented in ZenovOS 0.1.1.
