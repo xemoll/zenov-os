@@ -15,13 +15,20 @@ on:
       - 'Makefile'
       - 'GNUmakefile'
       - 'Zenov.toml'
+      - 'README.md'
       - 'docs/ABI_0.1.1.md'
+      - 'docs/releases/v0.1.1.md'
   workflow_dispatch:
     inputs:
       source_sha:
-        description: 'Exact 40-character commit SHA on main to publish as v0.1.1'
+        description: 'Exact 40-character commit SHA referenced by v0.1.1'
         required: true
         type: string
+      sync_notes_only:
+        description: 'Update only the GitHub Release title/body; never change tag or assets'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -55,6 +62,8 @@ jobs:
           test "$actual_revision" = "$ZENOV_SOURCE_REVISION"
           test -z "$(git status --porcelain)"
           grep -Fq 'workflow_dispatch:' .github/workflows/release-v0.1.1.yml
+          grep -Fq 'sync_notes_only:' .github/workflows/release-v0.1.1.yml
+          grep -Fq '22a3eec9b97b0ef0fac35be641c2526c577b1964' docs/releases/v0.1.1.md
           ! grep -Fq 'git push origin HEAD:main' .github/workflows/release-v0.1.1.yml
           ! grep -Fq 'gh release delete-asset' .github/workflows/release-v0.1.1.yml
           ! grep -Fq 'actions/checkout@v' .github/workflows/release-v0.1.1.yml
@@ -114,8 +123,51 @@ jobs:
             build/qemu/serial-phase2.log
             build/qemu/screenshot.ppm
 
+  sync-release-notes:
+    if: github.event_name == 'workflow_dispatch' && inputs.sync_notes_only == true
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ZENOV_SOURCE_REVISION: ${{ inputs.source_sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify immutable tag and canonical notes
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin main
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          test "$(git rev-list -n1 "$RELEASE_TAG")" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
+          test -s docs/releases/v0.1.1.md
+          grep -Fq "$ZENOV_SOURCE_REVISION" docs/releases/v0.1.1.md
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+
+      - name: Synchronize GitHub Release title and body only
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title 'ZenovOS 0.1.1' \
+            --notes-file docs/releases/v0.1.1.md \
+            --latest
+          expected="$(cat docs/releases/v0.1.1.md)"
+          published="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq '.body')"
+          test "$published" = "$expected"
+
   publish:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.sync_notes_only != true
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -176,28 +228,12 @@ jobs:
               -f sha="$tag_object" >/dev/null
           fi
 
-      - name: Write release notes
+      - name: Read canonical release notes from main
         run: |
           set -euo pipefail
-          cat > /tmp/release-notes.md <<'NOTES'
-          # ZenovOS 0.1.1
-
-          Bootable 32-bit x86 system with paging, persistent ATA storage, typed ZenovFS error propagation and isolated ZEX1/ELF32 applications.
-
-          ## Recommended download
-
-          - `ZenovOS-0.1.1-x86.zip` — boot image, writable ZenovFS data image, installation guide and QEMU launchers for Linux/macOS and Windows
-
-          ## Other files
-
-          - `ZenovOS-0.1.1-x86.img` — raw bootable FAT12 system image
-          - `BUILD-MANIFEST.json` — machine-readable build provenance
-          - `SOURCE-REVISION.txt` — exact source commit SHA
-          - `INSTALL.txt` — setup, memory, storage, application and controls reference
-          - `SHA256SUMS.txt` — public download verification
-
-          Windows PE and DOS MZ `.exe` files are not supported.
-          NOTES
+          git show origin/main:docs/releases/v0.1.1.md > /tmp/release-notes.md
+          test -s /tmp/release-notes.md
+          grep -Fq "$ZENOV_SOURCE_REVISION" /tmp/release-notes.md
 
       - name: Publish once or verify immutable assets
         run: |
@@ -229,6 +265,11 @@ jobs:
               for asset in "${assets[@]}"; do
                 cmp "$asset" "/tmp/published-assets/$(basename "$asset")"
               done
+              gh release edit "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title 'ZenovOS 0.1.1' \
+                --notes-file /tmp/release-notes.md \
+                --latest
             fi
           else
             gh release create "$RELEASE_TAG" \
