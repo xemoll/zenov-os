@@ -127,6 +127,22 @@ jobs:
             build/ZenovOS-0.1.1-x86.iso \
             build/vm-appliances
 
+      - name: Execute packaged preparation helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZENOV_VM_START=0 bash dist-vm/prepare-vm.sh qemu \
+            | tee build/prepare-vm-sh.log
+          grep -Fq 'ZenovOS-0.1.1-x86.iso: OK' build/prepare-vm-sh.log
+          grep -Fq 'ZenovOS-0.1.1-data.img: OK' build/prepare-vm-sh.log
+          grep -Fq 'QEMU appliance prepared:' build/prepare-vm-sh.log
+
+          pwsh -NoProfile -File dist-vm/prepare-vm.ps1 Qemu -PrepareOnly \
+            | tee build/prepare-vm-ps1.log
+          grep -Fq 'ZenovOS-0.1.1-x86.iso: OK' build/prepare-vm-ps1.log
+          grep -Fq 'ZenovOS-0.1.1-data.img: OK' build/prepare-vm-ps1.log
+          grep -Fq 'QEMU appliance prepared:' build/prepare-vm-ps1.log
+
       - name: Preserve legacy package compatibility
         run: |
           set -euo pipefail
@@ -170,6 +186,8 @@ jobs:
             build/qemu/iso-persistence/serial-read.log
             build/qemu/iso-persistence/qemu-write.stderr
             build/qemu/iso-persistence/qemu-read.stderr
+            build/prepare-vm-sh.log
+            build/prepare-vm-ps1.log
             build/KERNEL.BIN
             build/kernel.elf
             build/kernel.map
