@@ -51,9 +51,17 @@ open_start_result() {
   echo "sendkey ret 10"
 }
 
+type_task_fixture() {
+  # ship #P1 #D-2099-12-31
+  for key in s h i p spc shift-3 p 1 spc shift-3 d minus 2 0 9 9 minus 1 2 minus 3 1; do
+    echo "sendkey $key 10"
+  done
+}
+
 controller() {
   wait_for_serial "ZENOVOS_UI_READY" || { echo quit; return 1; }
   wait_for_serial "UI_PRODUCTIVITY_APPS_READY notes=yes calendar=yes clock=yes scratchpad=yes" || { echo quit; return 1; }
+  wait_for_serial "UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting" || { echo quit; return 1; }
 
   open_start_result notes
   wait_for_serial "UI_NOTES_OPEN_APP_OK" || { echo quit; return 1; }
@@ -93,6 +101,19 @@ controller() {
   echo "sendkey esc 10"
   wait_for_serial "UI_PRODUCTIVITY_CLOSE_OK" || { echo quit; return 1; }
 
+  open_start_result tasks
+  wait_for_serial "UI_TASKS_OPEN_APP_OK" || { echo quit; return 1; }
+  echo "sendkey f4 10"
+  type_task_fixture
+  echo "sendkey ret 10"
+  wait_for_serial "UI_TASKS_ADD_OK" || { echo quit; return 1; }
+  capture tasks-open
+  echo "sendkey ret 10"
+  wait_for_serial "UI_TASKS_TOGGLE_OK" || { echo quit; return 1; }
+  echo "sendkey f3 10"
+  capture tasks-done
+  echo "sendkey esc 10"
+
   open_start_result calendar
   wait_for_serial "UI_CALENDAR_OPEN_APP_OK" || { echo quit; return 1; }
   echo "sendkey f4 10"
@@ -120,7 +141,7 @@ controller() {
 }
 
 set +e
-controller | timeout 150s "$QEMU" \
+controller | timeout 170s "$QEMU" \
   -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
   -drive "file=$RUNTIME_DATA,format=raw,if=ide,index=0,media=disk" \
   -boot a -m 32M -machine pc,vmport=off -vga std -display none \
@@ -147,17 +168,22 @@ check_ppm() {
   }
 }
 
-for image in notes-browser notes-editor scratchpad daily-note calendar-event clock-running; do
+for image in notes-browser notes-editor scratchpad daily-note tasks-open tasks-done calendar-event clock-running; do
   check_ppm "$OUT/$image.ppm"
 done
 
 for marker in \
   "UI_PRODUCTIVITY_APPS_READY notes=yes calendar=yes clock=yes scratchpad=yes" \
+  "UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting" \
   UI_PRODUCTIVITY_STORAGE_OK UI_NOTES_OPEN_APP_OK UI_NOTES_OPEN_OK UI_NOTES_SAVE_OK \
+  UI_TASKS_OPEN_APP_OK UI_TASKS_SCAN_OK UI_TASKS_ADD_OK UI_TASKS_TOGGLE_OK \
   UI_CALENDAR_OPEN_APP_OK UI_CALENDAR_SAVE_OK UI_CLOCK_OPEN_APP_OK \
   UI_CLOCK_STOPWATCH_RUNNING UI_CLOCK_TIMER_SET_OK UI_CLOCK_TIMER_RUNNING; do
   grep -Fq "$marker" "$SERIAL" || { echo "qemu-productivity-ui: missing marker: $marker" >&2; exit 1; }
 done
 
-printf 'qemu-productivity-ui: OK notes=local-markdown+scratch+daily calendar=persistent-events clock=rtc+stopwatch+countdown start-search=yes serial=%s screenshots=%s runtime=%s\n' \
+test "$(grep -Fc 'UI_TASKS_ADD_OK' "$SERIAL")" -eq 1
+test "$(grep -Fc 'UI_TASKS_TOGGLE_OK' "$SERIAL")" -eq 1
+
+printf 'qemu-productivity-ui: OK notes=local-markdown+scratch+daily tasks=aggregate+add+toggle calendar=persistent-events clock=rtc+stopwatch+countdown start-search=yes serial=%s screenshots=%s runtime=%s\n' \
   "$SERIAL" "$OUT/*.ppm" "$RUNTIME_DATA"
