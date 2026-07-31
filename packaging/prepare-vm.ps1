@@ -20,6 +20,7 @@ $Qcow2 = Join-Path $BaseDir "ZenovOS-$Version-data.qcow2"
 $Vdi = Join-Path $BaseDir "ZenovOS-$Version-data.vdi"
 $Vmdk = Join-Path $BaseDir "ZenovOS-$Version-data.vmdk"
 $Vmx = Join-Path $BaseDir "ZenovOS-$Version.vmx"
+$Checksums = Join-Path $BaseDir 'SHA256SUMS.txt'
 
 function Require-Command {
     param([Parameter(Mandatory)][string]$Name)
@@ -40,8 +41,44 @@ function Assert-File {
     }
 }
 
+function Assert-NativeSuccess {
+    param([Parameter(Mandatory)][string]$Operation)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Operation failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Assert-ImmutableSeeds {
+    if (-not (Test-Path -LiteralPath $Checksums -PathType Leaf)) {
+        return
+    }
+
+    $entries = @{}
+    foreach ($line in Get-Content -LiteralPath $Checksums) {
+        if ($line -match '^([0-9a-fA-F]{64})\s+\*?(.+)$') {
+            $entries[$Matches[2]] = $Matches[1].ToLowerInvariant()
+        }
+    }
+
+    $required = @(
+        @{ Name = "ZenovOS-$Version-x86.iso"; Path = $Iso },
+        @{ Name = "ZenovOS-$Version-data.img"; Path = $Raw }
+    )
+    foreach ($item in $required) {
+        if (-not $entries.ContainsKey($item.Name)) {
+            throw "Checksum entry is missing for $($item.Name)"
+        }
+        $actual = (Get-FileHash -LiteralPath $item.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $entries[$item.Name]) {
+            throw "SHA-256 mismatch for $($item.Name)"
+        }
+        Write-Host "$($item.Name): OK"
+    }
+}
+
 Assert-File $Iso
 Assert-File $Raw
+Assert-ImmutableSeeds
 
 switch ($Hypervisor) {
     'Qemu' {
@@ -52,10 +89,10 @@ switch ($Hypervisor) {
         }
         if (-not (Test-Path -LiteralPath $Qcow2)) {
             & $QemuImg convert -q -f raw -O qcow2 -o 'compat=1.1,cluster_size=65536' $Raw $Qcow2
-            if ($LASTEXITCODE -ne 0) { throw 'qemu-img conversion failed' }
+            Assert-NativeSuccess 'qemu-img conversion'
         }
         & $QemuImg check -q -f qcow2 $Qcow2
-        if ($LASTEXITCODE -ne 0) { throw 'qcow2 consistency check failed' }
+        Assert-NativeSuccess 'qcow2 consistency check'
         if ($PrepareOnly) {
             Write-Host "QEMU appliance prepared: $Qcow2"
             break
@@ -74,23 +111,28 @@ switch ($Hypervisor) {
         }
         if (-not (Test-Path -LiteralPath $Vdi)) {
             & $VBoxManage convertfromraw $Raw $Vdi --format VDI | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw 'VirtualBox VDI conversion failed' }
+            Assert-NativeSuccess 'VirtualBox VDI conversion'
         }
         & $VBoxManage showvminfo $VmName *> $null
         if ($LASTEXITCODE -eq 0) {
             throw "VirtualBox VM already exists: $VmName. Choose another -VmName or remove it explicitly."
         }
         & $VBoxManage createvm --name $VmName --ostype Other --register | Out-Null
+        Assert-NativeSuccess 'VirtualBox VM registration'
         try {
             & $VBoxManage modifyvm $VmName --memory 64 --firmware bios `
                 --boot1 dvd --boot2 disk --boot3 none --boot4 none `
                 --acpi on --ioapic off --nic1 none | Out-Null
+            Assert-NativeSuccess 'VirtualBox VM configuration'
             & $VBoxManage storagectl $VmName --name 'IDE Controller' --add ide `
                 --controller PIIX4 --bootable on | Out-Null
+            Assert-NativeSuccess 'VirtualBox IDE controller creation'
             & $VBoxManage storageattach $VmName --storagectl 'IDE Controller' `
                 --port 0 --device 0 --type hdd --medium $Vdi | Out-Null
+            Assert-NativeSuccess 'VirtualBox data disk attachment'
             & $VBoxManage storageattach $VmName --storagectl 'IDE Controller' `
                 --port 1 --device 0 --type dvddrive --medium $Iso | Out-Null
+            Assert-NativeSuccess 'VirtualBox ISO attachment'
         }
         catch {
             & $VBoxManage unregistervm $VmName *> $null
@@ -112,13 +154,14 @@ switch ($Hypervisor) {
             $VdiskManager = Get-Command 'vmware-vdiskmanager' -ErrorAction SilentlyContinue
             if ($VdiskManager) {
                 & $VdiskManager.Source -r $Raw -t 0 $Vmdk | Out-Null
+                Assert-NativeSuccess 'VMware VMDK conversion'
             }
             else {
                 $QemuImg = Require-Command 'qemu-img'
                 & $QemuImg convert -q -f raw -O vmdk `
                     -o 'subformat=monolithicSparse,compat6' $Raw $Vmdk
+                Assert-NativeSuccess 'qemu-img VMDK conversion'
             }
-            if ($LASTEXITCODE -ne 0) { throw 'VMware VMDK conversion failed' }
         }
         Assert-File $Vmx
         $Vmrun = Get-Command 'vmrun' -ErrorAction SilentlyContinue
