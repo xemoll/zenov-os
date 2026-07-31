@@ -7,7 +7,7 @@ ZenovOS is not a Linux distribution and does not reuse the Windows or macOS user
 ![ZenovOS graphical desktop](docs/screenshots/zenov-os-0.1.1-graphical-desktop.png)
 
 > [!IMPORTANT]
-> This README describes the current `main` branch. The downloadable `v0.1.1` release is immutable and pinned to source commit [`22a3eec9`](https://github.com/xemoll/zenov-os/commit/22a3eec9b97b0ef0fac35be641c2526c577b1964), published on 16 July 2026. Later work on `main` still uses the internal `0.1.1` version number but is not present in those older release images. Always check `SOURCE-REVISION.txt` before comparing a download with the source tree.
+> This README describes the current `main` branch. The downloadable `v0.1.1` release is immutable and pinned to source commit [`22a3eec9`](https://github.com/xemoll/zenov-os/commit/22a3eec9b97b0ef0fac35be641c2526c577b1964), published on 16 July 2026. Later work on `main` still uses the internal `0.1.1` version number but is not present in those older release images. Compare the original download with the pinned tag commit rather than with the newer `main` branch.
 
 ## What ZenovOS provides
 
@@ -126,7 +126,7 @@ The recommended download is `ZenovOS-0.1.1-x86.zip`. It contains the boot image,
 sha256sum -c SHA256SUMS.txt
 ```
 
-The release assets are tied to the exact commit recorded in `SOURCE-REVISION.txt`. Do not assume that a release image contains later `main` changes merely because both identify themselves as version `0.1.1`.
+The immutable `v0.1.1` tag identifies the exact source used for the original release. Later hardened publication runs may also expose `SOURCE-REVISION.txt`, but the original ZIP should be compared against the pinned tag, not against newer `main` commits.
 
 ## Build from source
 
