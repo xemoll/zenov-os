@@ -33,8 +33,6 @@ wait_for_count() {
 capture() {
   local name="$1"
   local file="$(cd "$OUT" && pwd)/${name}.ppm"
-  # Application markers are emitted before refresh_desktop() returns. Allow the
-  # completed frame to reach the physical framebuffer before screendump.
   sleep 0.35
   echo "screendump $file"
   sleep 0.15
@@ -53,7 +51,7 @@ open_start_result() {
 
 type_task_fixture() {
   # ship #P1 #D-2099-12-31
-  for key in s h i p spc shift-3 p 1 spc shift-3 d minus 2 0 9 9 minus 1 2 minus 3 1; do
+  for key in s h i p spc shift-3 shift-p 1 spc shift-3 shift-d minus 2 0 9 9 minus 1 2 minus 3 1; do
     echo "sendkey $key 10"
   done
 }
