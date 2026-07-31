@@ -22,7 +22,7 @@ permissions:
 jobs:
   system-apps:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -44,6 +44,32 @@ jobs:
       - name: Install strict toolchain and QEMU
         run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl qemu-system-x86
 
+      - name: Validate Markdown task model with GCC
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/system-apps-model
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tests/productivity_tasks_model.cpp -o build/system-apps-model/productivity-tasks-gcc
+          build/system-apps-model/productivity-tasks-gcc | tee build/system-apps-model/productivity-tasks-gcc.log
+          grep -Fqx 'PRODUCTIVITY_TASKS_MODEL_OK markdown=checkbox metadata=priority+due+waiting toggle=bounded leap=yes' \
+            build/system-apps-model/productivity-tasks-gcc.log
+
+      - name: Validate Markdown task model with Clang sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sanitizer=(-std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-integer-conversion
+            -fno-sanitize-recover=all -fno-omit-frame-pointer)
+          clang++ "${sanitizer[@]}" tests/productivity_tasks_model.cpp \
+            -o build/system-apps-model/productivity-tasks-clang
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            build/system-apps-model/productivity-tasks-clang | tee build/system-apps-model/productivity-tasks-clang.log
+          grep -Fqx 'PRODUCTIVITY_TASKS_MODEL_OK markdown=checkbox metadata=priority+due+waiting toggle=bounded leap=yes' \
+            build/system-apps-model/productivity-tasks-clang.log
+
       - name: Build strict native image
         run: make clean check
 
@@ -54,7 +80,20 @@ jobs:
           clang++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
             tools/zenovfs_productivity_verify.cpp -o build/zenovfs-productivity-verify
 
-      - name: Exercise Notes, Calendar and Clock
+      - name: Verify system-app source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'constexpr uint32_t productivity_task_capacity = 24U;' kernel/parts/ui_productivity_tasks_types.inc
+          grep -Fq 'storage::security_read_file' kernel/parts/ui_productivity_tasks_index.inc
+          grep -Fq 'storage::security_read_file' kernel/parts/ui_productivity_tasks_storage.inc
+          grep -Fq 'storage::guarded_write_file' kernel/parts/ui_productivity_tasks_storage.inc
+          grep -Fq "data[offset] = data[offset] == ' ' ? 'x' : ' ';" kernel/parts/ui_productivity_tasks_storage.inc
+          grep -Fq 'productivity_launcher_query_is("tasks")' kernel/parts/ui_productivity_tasks_runtime.inc
+          grep -Fq 'UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting' kernel/parts/ui_productivity_tasks_runtime.inc
+          echo 'SYSTEM_APPS_SOURCE_CONTRACT_OK tasks=bounded reads=guarded writes=guarded launcher=indexed'
+
+      - name: Exercise Notes, Tasks, Calendar and Clock
         run: bash tests/qemu_productivity_ui.sh build/zenov-os.img build/zenov-data.img build/qemu-productivity-ui
 
       - name: Verify persistent application state
@@ -63,12 +102,18 @@ jobs:
           set -euo pipefail
           build/zenovfs-verify build/qemu-productivity-ui/zenov-data-productivity.img | tee build/qemu-productivity-ui/zenovfs-verify.log
           build/zenovfs-productivity-verify build/qemu-productivity-ui/zenov-data-productivity.img | tee build/qemu-productivity-ui/productivity-verify.log
-          grep -Fq 'ZENOV_PRODUCTIVITY_RUNTIME_IMAGE_OK notes=markdown+scratch+daily calendar=events checksum=valid' build/qemu-productivity-ui/productivity-verify.log
+          grep -Fq 'ZENOV_PRODUCTIVITY_RUNTIME_IMAGE_OK notes=markdown+scratch+daily tasks=checkbox+metadata+toggle calendar=events checksum=valid geometry=bounded' build/qemu-productivity-ui/productivity-verify.log
           grep -Fq 'UI_PRODUCTIVITY_APPS_READY notes=yes calendar=yes clock=yes scratchpad=yes' build/qemu-productivity-ui/serial.log
+          grep -Fq 'UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting' build/qemu-productivity-ui/serial.log
+          grep -Fq 'UI_TASKS_ADD_OK' build/qemu-productivity-ui/serial.log
+          grep -Fq 'UI_TASKS_TOGGLE_OK' build/qemu-productivity-ui/serial.log
           grep -Fq 'UI_CLOCK_TIMER_RUNNING' build/qemu-productivity-ui/serial.log
           test -s build/qemu-productivity-ui/notes-editor.ppm
+          test -s build/qemu-productivity-ui/tasks-open.ppm
+          test -s build/qemu-productivity-ui/tasks-done.ppm
           test -s build/qemu-productivity-ui/calendar-event.ppm
           test -s build/qemu-productivity-ui/clock-running.ppm
+          test ! -s build/qemu-productivity-ui/qemu.stderr
 
       - name: Verify deterministic rebuild
         run: make deterministic
@@ -84,10 +129,14 @@ jobs:
             build/zenov-data.img
             build/KERNEL.BIN
             build/zenovfs-productivity-verify
+            build/system-apps-model/*
             build/qemu-productivity-ui/*.img
             build/qemu-productivity-ui/*.log
             build/qemu-productivity-ui/*.stderr
             build/qemu-productivity-ui/*.ppm
+            kernel/parts/graphics.inc
             kernel/parts/ui_productivity.inc
+            kernel/parts/ui_productivity_tasks*.inc
+            tests/productivity_tasks_model.cpp
             tests/qemu_productivity_ui.sh
             tools/zenovfs_productivity_verify.cpp
