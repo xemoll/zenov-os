@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Remove the obsolete pre-profile fixed four-frame transition assertion."""
+"""Remove the obsolete fixed-frame assertion before immutable publication."""
 
 from pathlib import Path
 
