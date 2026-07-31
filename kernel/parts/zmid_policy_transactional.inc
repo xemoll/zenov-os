@@ -5,7 +5,10 @@
 #undef classify
 #undef update
 #undef init
+#include "zmid_content_workspace.inc"
+#define heap zmid_content_workspace_allocator
 #include "zmid_content_inspection.inc"
+#undef heap
 
 namespace zmid {
 bool transaction_write_version(uint32_t value) {
