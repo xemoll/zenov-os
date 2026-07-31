@@ -38,7 +38,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify immutable publication input
+      - name: Verify source and recover only the failed matching draft
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = 'xemoll/zenov-os'
@@ -46,14 +46,31 @@ jobs:
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$RELEASE_SOURCE_SHA" origin/main
           test -z "$(git status --porcelain)"
+
+          mapfile -t matching_releases < <(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | [.id, .draft, .target_commitish] | @tsv"
+          )
+          test "${#matching_releases[@]}" -le 1
+          if [[ "${#matching_releases[@]}" -eq 1 ]]; then
+            IFS=$'\t' read -r release_id is_draft target_commitish <<<"${matching_releases[0]}"
+            test "$is_draft" = true
+            test "$target_commitish" = "$RELEASE_SOURCE_SHA"
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" >/dev/null
+            echo "recovered stale matching draft release id=$release_id"
+          fi
+
           if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "publication refused: tag already exists: $RELEASE_TAG" >&2
-            exit 1
+            git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            test "$(git rev-list -n1 "$RELEASE_TAG")" = "$RELEASE_SOURCE_SHA"
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" >/dev/null
+            git tag -d "$RELEASE_TAG" >/dev/null
+            echo "recovered stale matching tag=$RELEASE_TAG"
           fi
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "publication refused: release already exists: $RELEASE_TAG" >&2
-            exit 1
-          fi
+
+          test -z "$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id")"
+          ! git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1
 
       - name: Install native toolchain, QEMU and ISO tooling
         run: |
@@ -121,8 +138,7 @@ jobs:
           test -s /tmp/vm-release-notes.md
           grep -Fq "$RELEASE_SOURCE_SHA" /tmp/vm-release-notes.md
 
-      - name: Create verified draft release
-        id: draft
+      - name: Create, verify and publish the release transaction
         run: |
           set -euo pipefail
           assets=(
@@ -139,6 +155,40 @@ jobs:
             test -s "$asset"
           done
 
+          cleanup_failed_publication() {
+            rc=$?
+            if [[ $rc -ne 0 ]]; then
+              mapfile -t releases < <(
+                gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                  --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | [.id, .draft, .target_commitish] | @tsv" \
+                  2>/dev/null || true
+              )
+              if [[ "${#releases[@]}" -eq 1 ]]; then
+                IFS=$'\t' read -r release_id is_draft target_commitish <<<"${releases[0]}"
+                if [[ "$is_draft" == true && "$target_commitish" == "$RELEASE_SOURCE_SHA" ]]; then
+                  gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" >/dev/null || true
+                else
+                  echo "cleanup refused to delete non-draft or mismatched release" >&2
+                  exit "$rc"
+                fi
+              elif [[ "${#releases[@]}" -gt 1 ]]; then
+                echo "cleanup refused: multiple matching releases" >&2
+                exit "$rc"
+              fi
+
+              if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+                git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" || true
+                if [[ "$(git rev-list -n1 "$RELEASE_TAG" 2>/dev/null || true)" == "$RELEASE_SOURCE_SHA" ]]; then
+                  gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" >/dev/null || true
+                else
+                  echo "cleanup refused to delete mismatched tag" >&2
+                fi
+              fi
+            fi
+            exit "$rc"
+          }
+          trap cleanup_failed_publication EXIT
+
           tag_object="$(gh api \
             --method POST \
             "repos/$GITHUB_REPOSITORY/git/tags" \
@@ -150,19 +200,8 @@ jobs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
             -f ref="refs/tags/$RELEASE_TAG" \
             -f sha="$tag_object" >/dev/null
-
-          cleanup_failed_publication() {
-            rc=$?
-            if [[ $rc -ne 0 ]]; then
-              release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id' 2>/dev/null || true)"
-              if [[ -n "$release_id" ]]; then
-                gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" >/dev/null || true
-              fi
-              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" >/dev/null || true
-            fi
-            exit "$rc"
-          }
-          trap cleanup_failed_publication EXIT
+          git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          test "$(git rev-list -n1 "$RELEASE_TAG")" = "$RELEASE_SOURCE_SHA"
 
           gh release create "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
@@ -189,17 +228,12 @@ jobs:
             --jq '.assets[].name' | sort)"
           test "$actual_names" = "$expected_names"
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')" -eq 8
-          test "$(git rev-list -n1 "$RELEASE_TAG")" = "$RELEASE_SOURCE_SHA"
 
           gh release edit "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --draft=false \
             --prerelease
-          trap - EXIT
 
-      - name: Verify published release
-        run: |
-          set -euo pipefail
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')" = "$RELEASE_SOURCE_SHA"
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = false
           test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')" = true
@@ -209,6 +243,7 @@ jobs:
           test "$published" = "$expected"
           git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
           test "$(git rev-list -n1 "$RELEASE_TAG")" = "$RELEASE_SOURCE_SHA"
+          trap - EXIT
           echo "vm-release-publication=verified tag=$RELEASE_TAG source=$RELEASE_SOURCE_SHA assets=8"
 
       - name: Upload publication evidence
