@@ -1,0 +1,19 @@
+ZenovOS 0.1.1 VM appliance acceptance markers
+
+Required in the normal ISO boot log:
+ZENOVOS_BOOT_OK
+ZENOVFS_MOUNT_OK
+GRAPHICAL_DESKTOP_READY
+ZENOVOS_UI_READY
+
+Required in the two-boot persistence log:
+ZENOVOS_BOOT_OK (at least twice)
+ISO_VM_PERSISTENCE_OK (write and replay)
+SYNC_OK
+ZENOVFS_FSCK_OK
+
+Required host-side validation:
+qemu-img check for qcow2, vdi and vmdk
+16,777,216-byte virtual size for every data disk
+round-trip conversion to raw and byte-for-byte comparison
+SHA256SUMS.txt verification for all 14 direct assets
