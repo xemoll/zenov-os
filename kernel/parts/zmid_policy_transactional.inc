@@ -1,8 +1,11 @@
 #define init init_unhardened [[maybe_unused]]
 #define update update_unhardened [[maybe_unused]]
+#define classify classify_raw
 #include "zmid_policy.inc"
+#undef classify
 #undef update
 #undef init
+#include "zmid_content_inspection.inc"
 
 namespace zmid {
 bool transaction_write_version(uint32_t value) {
@@ -51,6 +54,11 @@ bool init() {
     if (!self_test()) {
         ready = false;
         serial::line("ZMID_SELFTEST_FAILED");
+        return false;
+    }
+    if (!content_inspection::init()) {
+        ready = false;
+        serial::line("ZMID_CONTENT_INSPECTION_FAILED");
         return false;
     }
     serial::line("ZMID_ROOT_KEY_OK id=6ca6a5275544c533");
