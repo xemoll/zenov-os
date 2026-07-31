@@ -1,0 +1,78 @@
+name: One-time ZenovOS v0.1.1 release-notes sync
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/one-time-sync-v0.1.1-release-notes.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  sync-release-notes:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'ops/sync-release-notes-v0.1.1' && github.event.pull_request.user.login == 'xemoll'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_TAG: v0.1.1
+      RELEASE_SOURCE_SHA: 22a3eec9b97b0ef0fac35be641c2526c577b1964
+      EXPECTED_MAIN_ANCESTOR: 3b32f1d7e075214fa2541d43dbc24c9937f5c93b
+      EXPECTED_NOTES_BLOB: da51d1f3b9f282545f16e12ca4fafa1d170f2562
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify canonical notes, immutable tag and existing assets
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'xemoll/zenov-os'
+          git merge-base --is-ancestor "$EXPECTED_MAIN_ANCESTOR" HEAD
+          test "$(git hash-object docs/releases/v0.1.1.md)" = "$EXPECTED_NOTES_BLOB"
+          grep -Fq "$RELEASE_SOURCE_SHA" docs/releases/v0.1.1.md
+          test -z "$(git status --porcelain)"
+          git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          test "$(git rev-list -n1 "$RELEASE_TAG")" = "$RELEASE_SOURCE_SHA"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')" = "$RELEASE_SOURCE_SHA"
+          gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '[.assets[] | {name: .name, size: .size}] | sort_by(.name)' \
+            > /tmp/assets-before.json
+          test "$(jq 'length' /tmp/assets-before.json)" -gt 0
+
+      - name: Publish canonical title and release body only
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title 'ZenovOS 0.1.1' \
+            --notes-file docs/releases/v0.1.1.md \
+            --latest
+
+      - name: Verify body, tag target and unchanged assets
+        run: |
+          set -euo pipefail
+          expected="$(cat docs/releases/v0.1.1.md)"
+          published="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq '.body')"
+          test "$published" = "$expected"
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')" = "$RELEASE_SOURCE_SHA"
+          gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '[.assets[] | {name: .name, size: .size}] | sort_by(.name)' \
+            > /tmp/assets-after.json
+          cmp /tmp/assets-before.json /tmp/assets-after.json
+          test "$(git rev-list -n1 "$RELEASE_TAG")" = "$RELEASE_SOURCE_SHA"
+          echo "release-notes-sync=verified"
