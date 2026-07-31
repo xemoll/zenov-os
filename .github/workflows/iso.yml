@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 35
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      ZENOV_REQUIRE_ISO: 1
       SOURCE_DATE_EPOCH: 1784160000
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
