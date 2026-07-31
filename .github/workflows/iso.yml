@@ -1,0 +1,131 @@
+name: ZenovOS BIOS ISO
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/iso.yml'
+      - 'Makefile'
+      - 'GNUmakefile'
+      - 'fs_surface.mk'
+      - 'iso.mk'
+      - 'boot/**'
+      - 'kernel/**'
+      - 'packaging/**'
+      - 'tools/build_iso.sh'
+      - 'tools/package_release.sh'
+      - 'tests/qemu_iso_smoke.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zenov-os-iso-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-boot-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      ZENOV_REQUIRE_ISO: 1
+      SOURCE_DATE_EPOCH: 1784160000
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source and scripts
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
+          bash -n tools/build_iso.sh
+          bash -n tools/package_release.sh
+          bash -n tests/qemu_iso_smoke.sh
+          bash -n packaging/run-qemu.sh
+
+      - name: Install native toolchain, QEMU and xorriso
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils qemu-system-x86 xorriso zip unzip
+
+      - name: Build and boot the ISO
+        run: |
+          set -euo pipefail
+          make all iso-check
+          test -s build/ZenovOS-0.1.1-x86.iso
+          xorriso -indev build/ZenovOS-0.1.1-x86.iso -report_el_torito plain
+          grep -Fq ZENOVOS_BOOT_OK build/qemu/iso/serial.log
+          grep -Fq ZENOVFS_MOUNT_OK build/qemu/iso/serial.log
+          grep -Fq GRAPHICAL_DESKTOP_READY build/qemu/iso/serial.log
+          grep -Fq ZENOVOS_UI_READY build/qemu/iso/serial.log
+
+      - name: Build direct VM artifacts and optional ZIP
+        run: |
+          set -euo pipefail
+          bash tools/package_release.sh \
+            build/zenov-os.img \
+            build/zenov-data.img \
+            dist \
+            package \
+            build/build-manifest.json \
+            build/ZenovOS-0.1.1-x86.iso
+          for asset in \
+            ZenovOS-0.1.1-x86.iso \
+            ZenovOS-0.1.1-data.img \
+            ZenovOS-0.1.1-x86.img \
+            ZenovOS-0.1.1-x86.zip \
+            BUILD-MANIFEST.json \
+            SOURCE-REVISION.txt \
+            INSTALL.txt \
+            SHA256SUMS.txt; do
+            test -s "dist/$asset"
+          done
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+
+      - name: Verify deterministic ISO and package rebuild
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/zenov-iso-dist /tmp/zenov-iso-package
+          bash tools/package_release.sh \
+            build/zenov-os.img \
+            build/zenov-data.img \
+            /tmp/zenov-iso-dist \
+            /tmp/zenov-iso-package \
+            build/build-manifest.json \
+            build/ZenovOS-0.1.1-x86.iso
+          for asset in \
+            ZenovOS-0.1.1-x86.iso \
+            ZenovOS-0.1.1-data.img \
+            ZenovOS-0.1.1-x86.img \
+            ZenovOS-0.1.1-x86.zip \
+            BUILD-MANIFEST.json \
+            SOURCE-REVISION.txt \
+            INSTALL.txt \
+            SHA256SUMS.txt; do
+            cmp "dist/$asset" "/tmp/zenov-iso-dist/$asset"
+          done
+
+      - name: Upload ISO verification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-iso-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/
+            build/ZenovOS-0.1.1-x86.iso
+            build/iso-root/
+            build/qemu/iso/serial.log
+            build/qemu/iso/qemu.stderr
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/build-manifest.json
