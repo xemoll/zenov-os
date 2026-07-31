@@ -7,7 +7,7 @@ ZenovOS is not a Linux distribution and does not reuse the Windows or macOS user
 ![ZenovOS graphical desktop](docs/screenshots/zenov-os-0.1.1-graphical-desktop.png)
 
 > [!IMPORTANT]
-> This README describes the current `main` branch. The downloadable `v0.1.1` release is immutable and pinned to source commit [`22a3eec9`](https://github.com/xemoll/zenov-os/commit/22a3eec9b97b0ef0fac35be641c2526c577b1964), published on 16 July 2026. Later work on `main` still uses the internal `0.1.1` version number but is not present in those older release images. Compare the original download with the pinned tag commit rather than with the newer `main` branch.
+> This README describes the current `main` branch. The original `v0.1.1` release remains immutable at source commit [`22a3eec9`](https://github.com/xemoll/zenov-os/commit/22a3eec9b97b0ef0fac35be641c2526c577b1964). For virtual machines, use the newer [`v0.1.1-vm1`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm1) prerelease, pinned to ISO source commit [`9353bacd`](https://github.com/xemoll/zenov-os/commit/9353bacdabfa8383fd885564be2336d5452d6faf). Later changes on `main` are not automatically present in either published image.
 
 ## What ZenovOS provides
 
@@ -25,6 +25,7 @@ ZenovOS is not a Linux distribution and does not reuse the Windows or macOS user
 | Packages | ZenPkg native package lifecycle, signed ZenRepo metadata, verified cache and deterministic launch plans |
 | Security | ZenovGuard signed trust, capabilities, malware intelligence, controlled-folder policy, authenticated reads, quarantine and persistent audit |
 | Hardware trust | Supervisor-only TPM 2.0 TIS FIFO transport with an explicitly provisioned persistent NV counter |
+| Distribution | Deterministic BIOS El Torito ISO, raw FAT12 image and separate writable ZenovFS data image |
 | Build | Reproducible host tools, deterministic images and QEMU-backed CI evidence |
 
 ## Desktop
@@ -131,17 +132,47 @@ The TPM counter is not yet bound to signed-policy generations or the policy tran
 
 See [Security model](docs/SECURITY_MODEL_0.1.1.md), [ZenovGuard](docs/ZENOVGUARD_0.1.1.md) and [TPM 2.0 boundary](docs/TPM2_TIS_NV_COUNTER_0.1.1.md).
 
-## Download and run
+## Download and run in a virtual machine
 
-The published release is available from [GitHub Releases](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1).
+Use the verified [`ZenovOS 0.1.1 VM Image 1`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm1) prerelease.
 
-The recommended download is `ZenovOS-0.1.1-x86.zip`. It contains the boot image, writable data image, installation guide and QEMU launchers. Use the included `SHA256SUMS.txt` to verify downloaded files:
+Download these two files directly; extracting the ZIP is not required:
+
+- `ZenovOS-0.1.1-x86.iso` — read-only bootable virtual CD/DVD;
+- `ZenovOS-0.1.1-data.img` — writable ZenovFS disk for files, settings, packages and audit state.
+
+Configure the VM as follows:
+
+| Setting | Value |
+| --- | --- |
+| Architecture | 32-bit x86 / i686 |
+| Firmware | Legacy BIOS; disable EFI/UEFI |
+| Memory | 64 MiB recommended |
+| Optical drive | Attach `ZenovOS-0.1.1-x86.iso` |
+| First IDE hard disk | Attach `ZenovOS-0.1.1-data.img` |
+| Boot order | Optical drive first |
+
+QEMU command:
+
+```bash
+qemu-system-i386 \
+  -m 64M \
+  -drive file=ZenovOS-0.1.1-data.img,format=raw,if=ide,index=0,media=disk \
+  -drive file=ZenovOS-0.1.1-x86.iso,format=raw,if=ide,index=2,media=cdrom,readonly=on \
+  -boot order=d,strict=on
+```
+
+Verify all downloaded files with the release checksum manifest:
 
 ```bash
 sha256sum -c SHA256SUMS.txt
 ```
 
-The immutable `v0.1.1` tag identifies the exact source used for the original release. Later hardened publication runs may also expose `SOURCE-REVISION.txt`, but the original ZIP should be compared against the pinned tag, not against newer `main` commits.
+The ISO is a live boot medium, not a hard-disk installer. Persistent state is written only to the separate data image. QEMU is the automated acceptance target; VirtualBox and VMware instructions are included in `INSTALL.txt` but are not currently exercised in CI.
+
+The optional `ZenovOS-0.1.1-x86.zip` contains the same ISO and data image together with launchers and documentation. The original immutable [`v0.1.1`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1) remains available as the historical raw-image release.
+
+See the complete [VM image release notes](docs/releases/v0.1.1-vm1.md).
 
 ## Build from source
 
@@ -151,7 +182,7 @@ A typical Debian/Ubuntu build host needs:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential binutils qemu-system-x86 openssl zip unzip
+sudo apt-get install -y build-essential binutils qemu-system-x86 xorriso openssl zip unzip
 ```
 
 ### Build and boot
@@ -164,11 +195,20 @@ make
 make qemu
 ```
 
+Build and verify the optical image:
+
+```bash
+make iso-check
+```
+
+This creates `build/ZenovOS-0.1.1-x86.iso`, boots it as an IDE CD-ROM in QEMU, verifies ZenovFS and graphical-desktop checkpoints, and compares a second ISO build byte-for-byte.
+
 ### Full verification
 
 ```bash
 make clean check
 make deterministic
+make iso-check
 ```
 
 The repository also contains focused host and QEMU gates for display modes, storage faults, package recovery, signed policies, authenticated reads, system applications and TPM lifecycle behavior. CI checks out and validates an exact source revision before accepting evidence.
@@ -199,7 +239,8 @@ Start with [the documentation index](docs/INDEX.md). The most useful entry point
 - [ZenovGuard](docs/ZENOVGUARD_0.1.1.md)
 - [Native package manager](docs/NATIVE_PACKAGE_MANAGER_0.1.1.md)
 - [Runtime Provider ABI](docs/RUNTIME_PROVIDER_ABI_0.1.1.md)
-- [Release notes for v0.1.1](docs/releases/v0.1.1.md)
+- [VM image release notes](docs/releases/v0.1.1-vm1.md)
+- [Original v0.1.1 release notes](docs/releases/v0.1.1.md)
 - [Roadmap](docs/ROADMAP_0.1.1.md)
 
 ## Development status
