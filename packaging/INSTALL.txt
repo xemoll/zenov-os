@@ -1,39 +1,65 @@
-ZenovOS 0.1.1 — installation and boot guide
-=================================================
+ZenovOS 0.1.1 - installation and virtual-machine boot guide
+=============================================================
 
-ZenovOS 0.1.1 uses two images:
+ZenovOS provides three system images:
 
-- ZenovOS-0.1.1-x86.img   bootable 1.44 MiB FAT12 system image
-- ZenovOS-0.1.1-data.img  persistent 16 MiB ATA/ZenovFS data volume
+- ZenovOS-0.1.1-x86.iso   bootable BIOS/El Torito virtual CD
+- ZenovOS-0.1.1-x86.img   bootable 1.44 MiB FAT12 fallback image
+- ZenovOS-0.1.1-data.img  writable 16 MiB ATA/ZenovFS data volume
 
-The system boots from the FAT12 image. User files, configuration and native
-applications are stored on the separate writable data image and survive a reboot.
-This release does not yet install itself to a physical hard disk.
+The ISO and FAT12 IMG contain the same verified ZenovOS boot filesystem. The ISO
+uses El Torito floppy emulation so existing BIOS boot code remains unchanged.
+User files, configuration, native applications, package state and security audit
+records are stored on the separate writable data image and survive a reboot.
 
-QUICK START
------------
-1. Extract ZenovOS-0.1.1-x86.zip.
-2. Keep both IMG files in the same directory.
-3. Install QEMU if it is not already available.
-4. Run ./run-qemu.sh on Linux/macOS or run-qemu.cmd on Windows.
+The ISO is a live boot medium, not a hard-disk installer. Legacy BIOS is required;
+UEFI and installation to physical hardware are not supported in this build.
 
-QEMU — MANUAL COMMAND
+QUICK START WITHOUT ZIP
+-----------------------
+1. Download ZenovOS-0.1.1-x86.iso and ZenovOS-0.1.1-data.img.
+2. Create a 32-bit x86 virtual machine using legacy BIOS.
+3. Attach the ISO as a virtual CD/DVD.
+4. Attach the data image as the first IDE hard disk.
+5. Put the optical drive first in the boot order and start the VM.
+
+QEMU - MANUAL COMMAND
 ---------------------
 qemu-system-i386 \
-  -drive file=ZenovOS-0.1.1-x86.img,format=raw,if=floppy \
+  -m 64M \
   -drive file=ZenovOS-0.1.1-data.img,format=raw,if=ide,index=0,media=disk \
-  -boot a -m 32M
+  -drive file=ZenovOS-0.1.1-x86.iso,format=raw,if=ide,index=2,media=cdrom,readonly=on \
+  -boot order=d,strict=on
+
+The packaged run-qemu.sh and run-qemu.cmd launch the ISO automatically when it
+is present and fall back to the raw FAT12 image otherwise.
 
 VIRTUALBOX
 ----------
 1. Create a new 32-bit "Other/Unknown" virtual machine.
-2. Use legacy BIOS, one CPU and at least 32 MiB RAM.
-3. Attach ZenovOS-0.1.1-x86.img to a floppy controller.
+2. Disable EFI. Use one CPU and at least 64 MiB RAM.
+3. Attach ZenovOS-0.1.1-x86.iso to the IDE optical drive.
 4. Attach ZenovOS-0.1.1-data.img as an IDE hard disk.
-5. Put the floppy device first in the boot order and start the VM.
+5. Put Optical before Hard Disk in the boot order and start the VM.
 
-These settings match the BIOS/floppy/IDE interfaces used by the system. The automated
-release acceptance test runs under QEMU; VirtualBox launch is not part of CI.
+VMWARE
+------
+1. Create an "Other 32-bit" virtual machine using BIOS firmware.
+2. Attach ZenovOS-0.1.1-x86.iso to the virtual CD/DVD drive.
+3. Attach ZenovOS-0.1.1-data.img as an existing IDE disk. Some VMware products
+   require converting the raw data image to VMDK before attachment.
+4. Boot from CD/DVD.
+
+Automated acceptance is performed under QEMU. VirtualBox and VMware launch paths
+are documented compatibility targets but are not currently exercised in CI.
+
+RAW FLOPPY FALLBACK
+-------------------
+qemu-system-i386 \
+  -m 64M \
+  -drive file=ZenovOS-0.1.1-x86.img,format=raw,if=floppy \
+  -drive file=ZenovOS-0.1.1-data.img,format=raw,if=ide,index=0,media=disk \
+  -boot a
 
 MEMORY AND SYSTEM DIAGNOSTICS
 -----------------------------
@@ -96,14 +122,15 @@ Windows or DOS .exe files are not supported. Dynamic ELF linking is not supporte
 
 VERIFY THE DOWNLOAD AND PROVENANCE
 ----------------------------------
-Outside the ZIP, SHA256SUMS.txt verifies the boot image, ZIP, build manifest and source
-revision file:
+SHA256SUMS.txt verifies the ISO, raw boot image, writable data image, ZIP, build
+manifest, source revision and installation guide:
 
 sha256sum -c SHA256SUMS.txt
 
-Inside the ZIP:
+Inside the optional ZIP:
 
-- IMAGE-SHA256SUMS.txt verifies both images, BUILD-MANIFEST.json and SOURCE-REVISION.txt.
+- IMAGE-SHA256SUMS.txt verifies the ISO, both IMG files, BUILD-MANIFEST.json and
+  SOURCE-REVISION.txt.
 - BUILD-MANIFEST.json records image hashes, the Zenov app ABI, canonical app hash,
   the merged Zenov compiler repository revision and the OS-side compiler source hash.
 - SOURCE-REVISION.txt records the exact ZenovOS commit used to create the package.
