@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           sanitizer=(-std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic
-            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-integer-truncation,implicit-integer-sign-change
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change
             -fno-sanitize-recover=all -fno-omit-frame-pointer)
           clang++ "${sanitizer[@]}" tests/productivity_tasks_model.cpp \
             -o build/system-apps-model/productivity-tasks-clang
