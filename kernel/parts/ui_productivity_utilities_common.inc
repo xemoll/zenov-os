@@ -108,18 +108,6 @@ int32_t productivity_utility_compare_datetime(uint16_t left_year, uint8_t left_m
     return 0;
 }
 
-void productivity_utility_format_datetime(char output[17], uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute) {
-    char date[11]{};
-    char time[6]{};
-    productivity_date_text(date, year, month, day);
-    productivity_time_text(time, hour, minute);
-    uint32_t length = 0U;
-    productivity_append_text(output, 17U, length, date);
-    if (length + 1U < 17U) output[length++] = ' ';
-    output[length] = 0;
-    productivity_append_text(output, 17U, length, time);
-}
-
 void productivity_utility_draw_int32(int32_t x, int32_t y, int32_t value, uint32_t color, uint8_t scale = 1U) {
     char text[16]{};
     productivity_utility_format_int32(text, sizeof(text), value);
