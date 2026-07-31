@@ -15,6 +15,7 @@ ZenovOS is not a Linux distribution and does not reuse the Windows or macOS user
 | --- | --- |
 | Platform | BIOS-bootable 32-bit x86/i686 system tested primarily in QEMU |
 | Desktop | Native kernel-rendered shell with Start, taskbar, Terminal, Files, Settings, Applications and System Center surfaces |
+| System apps | Persistent Notes/Notepad, Markdown-derived Tasks, local Calendar and RTC/PIT Clock surfaces |
 | Graphics | QEMU Standard VGA / Bochs VBE, 32-bit framebuffer, 22 verified modes from 640×480 to 1600×1200 |
 | Input | PS/2 keyboard and mouse with IRQ-driven input and resolution-independent pointer mapping |
 | Memory | E820 physical-memory discovery, 4 KiB paging, kernel heap and isolated ring-3 process window |
@@ -35,6 +36,7 @@ The current shell includes:
 - a bottom taskbar with Start, pinned system surfaces and a CMOS-backed clock;
 - searchable Start and Applications views;
 - Terminal, Files and Settings surfaces;
+- native Notes, Tasks, Calendar and Clock productivity applications;
 - Quick Settings for theme, display, motion, cursor, density and taskbar alignment;
 - persistent UI preferences in `/data/config/ui.cfg`;
 - keyboard and mouse navigation across every verified display mode.
@@ -53,6 +55,19 @@ F9                   Cycle verified display modes
 F10                  Quick Settings
 Escape               Close the active shell surface
 ```
+
+### Native system applications
+
+The productivity layer is functional rather than a visual imitation of another product. Applications open through Start search and persist state in ZenovFS:
+
+- **Notes / Notepad** — local Markdown vault, filename search, daily notes, scratchpad, lightweight properties, `[[wikilink]]` backlink discovery, word count and guarded save/delete;
+- **Tasks / Todo / Planner** — bounded aggregation of Markdown checkboxes, priorities, canonical due dates, waiting state, filters, quick-add and source-file checkbox mutation;
+- **Calendar** — Gregorian month navigation, RTC-backed Today action, persistent local events and direct opening of the selected daily note;
+- **Clock / Time** — CMOS time/date, monotonic PIT stopwatch and bounded countdown timer.
+
+Use `Super` or `F8`, type the application name and press Enter. System-app function keys are local to the active application, so the shell's established `F1`–`F4` behavior is preserved outside those surfaces.
+
+The current implementation is local-only and bounded. It does not claim rich Markdown rendering, plugins, graph/canvas views, CalDAV, invitations, recurrence, network synchronization, background notifications or an agent runtime. See [System applications](docs/SYSTEM_APPS_0.1.1.md).
 
 ## Applications and execution model
 
@@ -156,7 +171,7 @@ make clean check
 make deterministic
 ```
 
-The repository also contains focused host and QEMU gates for display modes, storage faults, package recovery, signed policies, authenticated reads and TPM lifecycle behavior. CI checks out and validates an exact source revision before accepting evidence.
+The repository also contains focused host and QEMU gates for display modes, storage faults, package recovery, signed policies, authenticated reads, system applications and TPM lifecycle behavior. CI checks out and validates an exact source revision before accepting evidence.
 
 ## Project boundaries
 
@@ -178,6 +193,7 @@ ZenovOS is an actively developed experimental operating system. The following ar
 Start with [the documentation index](docs/INDEX.md). The most useful entry points are:
 
 - [Desktop and controls](docs/DESKTOP_0.1.1.md)
+- [System applications](docs/SYSTEM_APPS_0.1.1.md)
 - [Application ABI](docs/ABI_0.1.1.md)
 - [Security model](docs/SECURITY_MODEL_0.1.1.md)
 - [ZenovGuard](docs/ZENOVGUARD_0.1.1.md)
