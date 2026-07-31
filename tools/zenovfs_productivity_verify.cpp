@@ -56,7 +56,7 @@ std::vector<std::uint8_t> read_image(const std::string& path) {
     if (!input) throw std::runtime_error("cannot open image: " + path);
     input.seekg(0, std::ios::end);
     const auto size = input.tellg();
-    if (size != static_cast<std::streamoff>(kExpectedSectors * kSectorSize)) {
+    if (size < 0 || size != static_cast<std::streamoff>(kExpectedSectors * kSectorSize)) {
         throw std::runtime_error("unexpected ZenovFS image size");
     }
     input.seekg(0, std::ios::beg);
@@ -69,6 +69,7 @@ std::vector<std::uint8_t> read_image(const std::string& path) {
 std::string path_of(const Entry& entry) {
     const auto end = std::find(std::begin(entry.path), std::end(entry.path), '\0');
     if (end == std::end(entry.path)) throw std::runtime_error("unterminated entry path");
+    if (end == std::begin(entry.path) || entry.path[0] != '/') throw std::runtime_error("noncanonical entry path");
     return std::string(entry.path, end);
 }
 
@@ -86,15 +87,28 @@ bool date_note_path(const std::string& path) {
     return true;
 }
 
+void verify_geometry(const Superblock& super, std::size_t disk_size) {
+    const std::uint64_t disk_sectors = disk_size / kSectorSize;
+    const std::uint64_t entry_bytes = static_cast<std::uint64_t>(super.entry_count) * sizeof(Entry);
+    const std::uint64_t entry_capacity = static_cast<std::uint64_t>(super.entry_sectors) * kSectorSize;
+    const std::uint64_t minimum_data_start = 1ULL + super.entry_sectors;
+    const std::uint64_t final_sector = static_cast<std::uint64_t>(super.data_start) +
+        static_cast<std::uint64_t>(super.entry_count) * super.slot_sectors;
+    if (super.total_sectors != disk_sectors || super.entry_count == 0U || super.entry_count > kMaxEntries ||
+        super.entry_sectors == 0U || super.slot_sectors == 0U || entry_bytes > entry_capacity ||
+        super.data_start < minimum_data_start || final_sector > disk_sectors) {
+        throw std::runtime_error("invalid ZenovFS geometry");
+    }
+}
+
 std::string file_data(const std::vector<std::uint8_t>& disk, const Superblock& super,
                       std::uint32_t index, const Entry& entry) {
-    if (entry.size > static_cast<std::uint64_t>(super.slot_sectors) * kSectorSize) {
-        throw std::runtime_error("file exceeds slot: " + path_of(entry));
-    }
+    const std::uint64_t slot_bytes = static_cast<std::uint64_t>(super.slot_sectors) * kSectorSize;
+    if (entry.size > slot_bytes) throw std::runtime_error("file exceeds slot: " + path_of(entry));
     const std::uint64_t sector = static_cast<std::uint64_t>(super.data_start) +
         static_cast<std::uint64_t>(index) * super.slot_sectors;
     const std::uint64_t offset = sector * kSectorSize;
-    if (offset + entry.size > disk.size()) throw std::runtime_error("file outside image");
+    if (offset > disk.size() || entry.size > disk.size() - offset) throw std::runtime_error("file outside image");
     if (fnv1a(disk.data() + offset, entry.size) != entry.checksum) {
         throw std::runtime_error("checksum mismatch: " + path_of(entry));
     }
@@ -111,10 +125,10 @@ int main(int argc, char** argv) {
         const auto disk = read_image(argv[1]);
         const auto* super = reinterpret_cast<const Superblock*>(disk.data());
         const char expected[8] = {'Z','E','N','O','V','F','S','1'};
-        if (std::memcmp(super->magic, expected, sizeof(expected)) != 0 || super->version != 1 ||
-            super->entry_count == 0 || super->entry_count > kMaxEntries || super->slot_sectors == 0) {
+        if (std::memcmp(super->magic, expected, sizeof(expected)) != 0 || super->version != 1U) {
             throw std::runtime_error("invalid ZenovFS superblock");
         }
+        verify_geometry(*super, disk.size());
 
         const auto* entries = reinterpret_cast<const Entry*>(disk.data() + kSectorSize);
         std::map<std::string, std::string> files;
@@ -123,12 +137,16 @@ int main(int argc, char** argv) {
         for (std::uint32_t i = 0; i < super->entry_count; ++i) {
             const Entry& entry = entries[i];
             if (!entry.used) continue;
+            if (entry.type != kFile && entry.type != kDirectory) throw std::runtime_error("unknown entry type");
             const std::string path = path_of(entry);
             if (entry.type == kDirectory) {
+                if (entry.size != 0U) throw std::runtime_error("directory carries payload");
                 if (path == "/notes") notes_directory = true;
                 if (path == "/calendar") calendar_directory = true;
-            } else if (entry.type == kFile) {
-                files.emplace(path, file_data(disk, *super, i, entry));
+            } else {
+                const auto [unused, inserted] = files.emplace(path, file_data(disk, *super, i, entry));
+                (void)unused;
+                if (!inserted) throw std::runtime_error("duplicate file path: " + path);
             }
         }
 
@@ -140,6 +158,12 @@ int main(int argc, char** argv) {
         const auto events = files.find("/calendar/events.db");
         if (events == files.end() || events->second.find("|meet\n") == std::string::npos) {
             throw std::runtime_error("calendar event persistence missing");
+        }
+        const auto tasks = files.find("/notes/tasks.md");
+        const std::string expected_task = "- [x] ship #P1 #D-2099-12-31\n";
+        if (tasks == files.end() || tasks->second.find(expected_task) == std::string::npos ||
+            tasks->second.find("- [ ] ship #P1 #D-2099-12-31\n") != std::string::npos) {
+            throw std::runtime_error("Markdown task add/toggle persistence missing");
         }
 
         bool normal_note = false;
@@ -154,7 +178,7 @@ int main(int argc, char** argv) {
         if (!normal_note) throw std::runtime_error("normal Markdown note persistence missing");
         if (!daily_note) throw std::runtime_error("daily note persistence missing");
 
-        std::cout << "ZENOV_PRODUCTIVITY_RUNTIME_IMAGE_OK notes=markdown+scratch+daily calendar=events checksum=valid\n";
+        std::cout << "ZENOV_PRODUCTIVITY_RUNTIME_IMAGE_OK notes=markdown+scratch+daily tasks=checkbox+metadata+toggle calendar=events checksum=valid geometry=bounded\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zenovfs-productivity-verify: " << error.what() << "\n";
