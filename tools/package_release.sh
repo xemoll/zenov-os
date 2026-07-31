@@ -13,6 +13,15 @@ SOURCE_REVISION="${ZENOV_SOURCE_REVISION:-$(git -C "$ROOT" rev-parse HEAD 2>/dev
 REQUIRE_ISO="${ZENOV_REQUIRE_ISO:-0}"
 ISO_ENABLED=0
 
+case "$DIST" in
+  /*) ;;
+  *) DIST="$ROOT/$DIST" ;;
+esac
+case "$PACKAGE" in
+  /*) ;;
+  *) PACKAGE="$ROOT/$PACKAGE" ;;
+esac
+
 for tool in zip unzip sha256sum git cmp stat; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "package-release: required tool not found: $tool" >&2
@@ -136,7 +145,7 @@ TZ=UTC touch -t 202607160000 "${stamp_files[@]}"
 
 (
   cd "$PACKAGE"
-  zip -X -9 "$ROOT/$DIST/ZenovOS-$VERSION-x86.zip" "${zip_files[@]}"
+  zip -X -9 "$DIST/ZenovOS-$VERSION-x86.zip" "${zip_files[@]}"
 )
 
 dist_hash_files=(
