@@ -13,6 +13,7 @@ QCOW2="$BASE_DIR/ZenovOS-$VERSION-data.qcow2"
 VDI="$BASE_DIR/ZenovOS-$VERSION-data.vdi"
 VMDK="$BASE_DIR/ZenovOS-$VERSION-data.vmdk"
 VMX="$BASE_DIR/ZenovOS-$VERSION.vmx"
+CHECKSUMS="$BASE_DIR/SHA256SUMS.txt"
 
 usage() {
   cat <<EOF
@@ -28,15 +29,35 @@ selected writable data disk. Keep a backup before setting ZENOV_VM_RESET=1.
 EOF
 }
 
+verify_immutable_seeds() {
+  local selected count
+  [[ -f "$CHECKSUMS" ]] || return 0
+  selected="$(grep -E "  (ZenovOS-$VERSION-x86\.iso|ZenovOS-$VERSION-data\.img)$" "$CHECKSUMS" || true)"
+  count="$(printf '%s\n' "$selected" | sed '/^$/d' | wc -l | tr -d ' ')"
+  [[ "$count" -eq 2 ]] || {
+    echo "Checksum file does not contain exactly the ISO and canonical data seed" >&2
+    exit 1
+  }
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$BASE_DIR" && printf '%s\n' "$selected" | sha256sum -c -)
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "$BASE_DIR" && printf '%s\n' "$selected" | shasum -a 256 -c -)
+  else
+    echo "SHA-256 verification requires sha256sum or shasum" >&2
+    exit 1
+  fi
+}
+
 case "$START_VM" in 0|1) ;; *) echo "ZENOV_VM_START must be 0 or 1" >&2; exit 2 ;; esac
 case "$RESET_DISK" in 0|1) ;; *) echo "ZENOV_VM_RESET must be 0 or 1" >&2; exit 2 ;; esac
 [[ -s "$ISO" ]] || { echo "Missing boot ISO: $ISO" >&2; exit 1; }
 [[ -s "$RAW" ]] || { echo "Missing canonical data image: $RAW" >&2; exit 1; }
+verify_immutable_seeds
 
 prepare_qemu() {
   command -v qemu-img >/dev/null 2>&1 || { echo "qemu-img was not found" >&2; exit 1; }
   command -v qemu-system-i386 >/dev/null 2>&1 || { echo "qemu-system-i386 was not found" >&2; exit 1; }
-  if [[ "$RESET_DISK" == 1 ]]; then rm -f "$QCOW2"; fi
+  if [[ "$RESET_DISK" == 1 ]]; then rm -f -- "$QCOW2"; fi
   if [[ ! -f "$QCOW2" ]]; then
     qemu-img convert -q -f raw -O qcow2 -o compat=1.1,cluster_size=65536 "$RAW" "$QCOW2"
   fi
@@ -56,7 +77,7 @@ prepare_qemu() {
 
 prepare_virtualbox() {
   command -v VBoxManage >/dev/null 2>&1 || { echo "VBoxManage was not found" >&2; exit 1; }
-  if [[ "$RESET_DISK" == 1 ]]; then rm -f "$VDI"; fi
+  if [[ "$RESET_DISK" == 1 ]]; then rm -f -- "$VDI"; fi
   if [[ ! -f "$VDI" ]]; then
     VBoxManage convertfromraw "$RAW" "$VDI" --format VDI >/dev/null
   fi
@@ -90,7 +111,7 @@ prepare_virtualbox() {
 }
 
 prepare_vmware() {
-  if [[ "$RESET_DISK" == 1 ]]; then rm -f "$VMDK"; fi
+  if [[ "$RESET_DISK" == 1 ]]; then rm -f -- "$VMDK"; fi
   if [[ ! -f "$VMDK" ]]; then
     if command -v vmware-vdiskmanager >/dev/null 2>&1; then
       vmware-vdiskmanager -r "$RAW" -t 0 "$VMDK" >/dev/null
@@ -103,7 +124,7 @@ prepare_vmware() {
   fi
   [[ -s "$VMX" ]] || { echo "Missing VMware configuration: $VMX" >&2; exit 1; }
   if command -v qemu-img >/dev/null 2>&1; then qemu-img check -q -f vmdk "$VMDK"; fi
-  if [[ "$START_VM" == 1 && -x "$(command -v vmrun 2>/dev/null || true)" ]]; then
+  if [[ "$START_VM" == 1 ]] && command -v vmrun >/dev/null 2>&1; then
     vmrun start "$VMX" gui
   else
     printf 'VMware appliance prepared. Open: %s\n' "$VMX"
