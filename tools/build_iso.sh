@@ -8,13 +8,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="0.1.1"
 VOLUME_ID="ZENOVOS_011"
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-1784160000}"
+ISO_DATE="2026071600000000"
 
-for tool in xorriso sha256sum cmp stat od; do
+for tool in xorriso sha256sum cmp stat od touch; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "build-iso: required tool not found: $tool" >&2
     exit 1
   }
 done
+[[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]] || {
+  echo "build-iso: SOURCE_DATE_EPOCH must be an integer" >&2
+  exit 1
+}
 
 [[ -f "$BOOT_IMAGE" ]] || {
   echo "build-iso: boot image not found: $BOOT_IMAGE" >&2
@@ -35,6 +40,16 @@ cp "$BOOT_IMAGE" "$ISO_ROOT/BOOT/ZENOVOS.IMG"
 cp "$ROOT/packaging/ISO-README.txt" "$ISO_ROOT/README.TXT"
 printf '%s\n' "$VERSION" > "$ISO_ROOT/VERSION.TXT"
 
+# SOURCE_DATE_EPOCH alone makes xorrisofs inherit source mtimes. Normalize every
+# source node as well as the volume and El Torito catalog timestamps so builds
+# remain byte-identical even when ISO_ROOT and OUTPUT_ISO use different paths.
+TZ=UTC touch -d "@$SOURCE_DATE_EPOCH" \
+  "$ISO_ROOT/BOOT/ZENOVOS.IMG" \
+  "$ISO_ROOT/README.TXT" \
+  "$ISO_ROOT/VERSION.TXT" \
+  "$ISO_ROOT/BOOT" \
+  "$ISO_ROOT"
+
 # Keep the existing verified FAT12 loader as the only boot authority. El Torito
 # floppy emulation presents the 1.44 MiB image as BIOS drive A: and therefore
 # does not require GRUB, ISOLINUX, or a second stage with a different trust path.
@@ -44,6 +59,8 @@ SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" xorriso -as mkisofs \
   -V "$VOLUME_ID" \
   -A "ZenovOS $VERSION" \
   -p "ZenovOS Project" \
+  --modification-date="$ISO_DATE" \
+  --set_all_file_dates "$ISO_DATE" \
   -b BOOT/ZENOVOS.IMG \
   -c BOOT/BOOT.CAT \
   -o "$OUTPUT_ISO" \
