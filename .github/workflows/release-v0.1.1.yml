@@ -159,11 +159,12 @@ jobs:
             --title 'ZenovOS 0.1.1' \
             --notes-file docs/releases/v0.1.1.md \
             --latest
-          gh release view "$RELEASE_TAG" \
+          expected="$(cat docs/releases/v0.1.1.md)"
+          published="$(gh release view "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --json body \
-            --jq '.body' > /tmp/published-release-notes.md
-          cmp docs/releases/v0.1.1.md /tmp/published-release-notes.md
+            --jq '.body')"
+          test "$published" = "$expected"
 
   publish:
     if: github.event_name == 'workflow_dispatch' && inputs.sync_notes_only != true
