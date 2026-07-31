@@ -1,0 +1,338 @@
+name: One-time ZenovOS 0.1.1 VM Image 2 publication
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/one-time-publish-v0.1.1-vm2.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zenov-os-v0.1.1-vm2-publication
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: v0.1.1-vm2
+  RELEASE_SOURCE_SHA: d60cf00f67bc07f00070a56b237843bc8387866f
+  SOURCE_DATE_EPOCH: 1784160000
+  ZENOV_REQUIRE_ISO: 1
+
+jobs:
+  publish-vm-image:
+    if: >-
+      github.repository == 'xemoll/zenov-os' &&
+      github.event.pull_request.head.ref == 'ops/publish-v0.1.1-vm2' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.user.login == 'xemoll'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ZENOV_SOURCE_REVISION: d60cf00f67bc07f00070a56b237843bc8387866f
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.RELEASE_SOURCE_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify source and recover only matching failed drafts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'xemoll/zenov-os'
+          test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
+          test "$ZENOV_SOURCE_REVISION" = "$RELEASE_SOURCE_SHA"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$RELEASE_SOURCE_SHA" origin/main
+          test -z "$(git status --porcelain)"
+
+          mapfile -t matching_releases < <(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | [.id, .draft, .target_commitish] | @tsv"
+          )
+          test "${#matching_releases[@]}" -le 1
+          if [[ "${#matching_releases[@]}" -eq 1 ]]; then
+            IFS=$'\t' read -r release_id is_draft target_commitish <<<"${matching_releases[0]}"
+            test "$is_draft" = true
+            test "$target_commitish" = "$RELEASE_SOURCE_SHA"
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" >/dev/null
+            echo "recovered stale matching draft release id=$release_id"
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            test "$(git rev-list -n1 "$RELEASE_TAG")" = "$RELEASE_SOURCE_SHA"
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" >/dev/null
+            git tag -d "$RELEASE_TAG" >/dev/null
+            echo "recovered stale matching tag=$RELEASE_TAG"
+          fi
+
+          test -z "$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id")"
+          ! git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1
+
+      - name: Install native toolchain, QEMU and ISO tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            binutils \
+            qemu-system-x86 \
+            qemu-utils \
+            xorriso \
+            zip \
+            unzip \
+            python3
+
+      - name: Build and verify exact VM distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make all vm-check
+          test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+
+          assets=(
+            ZenovOS-0.1.1-x86.iso
+            ZenovOS-0.1.1-x86.img
+            ZenovOS-0.1.1-data.img
+            ZenovOS-0.1.1-data.qcow2
+            ZenovOS-0.1.1-data.vdi
+            ZenovOS-0.1.1-data.vmdk
+            ZenovOS-0.1.1.vmx
+            prepare-vm.sh
+            prepare-vm.ps1
+            VM-QUICKSTART.txt
+            VM-APPLIANCE-MANIFEST.json
+            BUILD-MANIFEST.json
+            SOURCE-REVISION.txt
+            SHA256SUMS.txt
+          )
+          for asset in "${assets[@]}"; do
+            test -s "dist-vm/$asset"
+          done
+          test "$(find dist-vm -maxdepth 1 -type f | wc -l)" -eq 14
+          (cd dist-vm && sha256sum -c SHA256SUMS.txt)
+          grep -qx "$RELEASE_SOURCE_SHA" dist-vm/SOURCE-REVISION.txt
+          grep -Fq ZENOVOS_BOOT_OK build/qemu/iso/serial.log
+          grep -Fq ZENOVFS_MOUNT_OK build/qemu/iso/serial.log
+          grep -Fq GRAPHICAL_DESKTOP_READY build/qemu/iso/serial.log
+          test "$(grep -Fc ZENOVOS_BOOT_OK build/qemu/iso-persistence/serial.log)" -ge 2
+          test "$(grep -Fc ISO_VM_PERSISTENCE_OK build/qemu/iso-persistence/serial.log)" -ge 2
+          grep -Fq ZENOVFS_FSCK_OK build/qemu/iso-persistence/serial-read.log
+
+      - name: Prepare canonical release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          iso_sha="$(awk '$2 == "ZenovOS-0.1.1-x86.iso" {print $1}' dist-vm/SHA256SUMS.txt)"
+          raw_sha="$(awk '$2 == "ZenovOS-0.1.1-data.img" {print $1}' dist-vm/SHA256SUMS.txt)"
+          test "${#iso_sha}" -eq 64
+          test "${#raw_sha}" -eq 64
+          published_date="$(date -u +%F)"
+
+          cat > /tmp/vm2-release-notes.md <<NOTES
+          # ZenovOS 0.1.1 VM Image 2
+
+          **Published:** $published_date UTC  
+          **Tag:** \`$RELEASE_TAG\`  
+          **Source commit:** \`$RELEASE_SOURCE_SHA\`  
+          **Target:** legacy BIOS, 32-bit x86 virtual machines
+
+          VM Image 2 is the persistent multi-hypervisor ZenovOS distribution. It boots from the verified read-only El Torito ISO and stores files, settings, packages, security state and audit data on a separate writable ZenovFS disk.
+
+          ## Recommended direct downloads
+
+          - QEMU/KVM: \`ZenovOS-0.1.1-x86.iso\` + \`ZenovOS-0.1.1-data.qcow2\`
+          - VirtualBox: \`ZenovOS-0.1.1-x86.iso\` + \`ZenovOS-0.1.1-data.vdi\`
+          - VMware: \`ZenovOS-0.1.1-x86.iso\` + \`ZenovOS-0.1.1-data.vmdk\` + \`ZenovOS-0.1.1.vmx\`
+          - Raw fallback: \`ZenovOS-0.1.1-data.img\`
+
+          No ZIP extraction is required. Linux/macOS users can use \`prepare-vm.sh\`; Windows users can use \`prepare-vm.ps1\`.
+
+          ## Verified behavior
+
+          The publication workflow rebuilt this exact source and required:
+
+          - normal BIOS El Torito boot to the graphical desktop;
+          - two optical boots using the same writable QCOW2 disk;
+          - a ZenovFS write and \`sync\` during the first boot;
+          - payload replay and \`fsck\` during the second boot;
+          - QCOW2, VDI and VMDK consistency and exact 16 MiB virtual size;
+          - conversion of every convenience disk back to raw and byte-for-byte comparison with the canonical ZenovFS image;
+          - execution of both packaged preparation helpers in prepare-only mode;
+          - checksum verification of all 14 direct assets;
+          - download and byte comparison of every uploaded release asset before publication.
+
+          ## Primary checksums
+
+          - \`ZenovOS-0.1.1-x86.iso\`: \`$iso_sha\`
+          - \`ZenovOS-0.1.1-data.img\`: \`$raw_sha\`
+
+          Use \`SHA256SUMS.txt\` for the complete asset set.
+
+          ## Required VM settings
+
+          - 32-bit x86 guest;
+          - legacy BIOS, not UEFI;
+          - 64 MiB RAM and one CPU;
+          - ISO as IDE CD/DVD, first in boot order;
+          - exactly one writable ZenovOS data disk as the primary IDE disk;
+          - networking disabled because ZenovOS 0.1.1 has no network stack.
+
+          ## Current limitations
+
+          - live BIOS boot rather than installation of a bootloader onto the hard disk;
+          - no UEFI or physical-hardware installer;
+          - no networking, audio, guest additions/tools or accelerated 3D;
+          - QEMU is the automated runtime acceptance target;
+          - VirtualBox and VMware artifacts are structurally and semantically verified, but those proprietary hypervisors are not executed in GitHub-hosted CI.
+          NOTES
+
+          test -s /tmp/vm2-release-notes.md
+          grep -Fq "$RELEASE_SOURCE_SHA" /tmp/vm2-release-notes.md
+          grep -Fq "$iso_sha" /tmp/vm2-release-notes.md
+          grep -Fq "$raw_sha" /tmp/vm2-release-notes.md
+          printf 'ISO_SHA256=%s\nRAW_SHA256=%s\n' "$iso_sha" "$raw_sha" >> "$GITHUB_ENV"
+
+      - name: Create, verify and publish release transaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets=(
+            dist-vm/ZenovOS-0.1.1-x86.iso
+            dist-vm/ZenovOS-0.1.1-x86.img
+            dist-vm/ZenovOS-0.1.1-data.img
+            dist-vm/ZenovOS-0.1.1-data.qcow2
+            dist-vm/ZenovOS-0.1.1-data.vdi
+            dist-vm/ZenovOS-0.1.1-data.vmdk
+            dist-vm/ZenovOS-0.1.1.vmx
+            dist-vm/prepare-vm.sh
+            dist-vm/prepare-vm.ps1
+            dist-vm/VM-QUICKSTART.txt
+            dist-vm/VM-APPLIANCE-MANIFEST.json
+            dist-vm/BUILD-MANIFEST.json
+            dist-vm/SOURCE-REVISION.txt
+            dist-vm/SHA256SUMS.txt
+          )
+
+          cleanup_failed_publication() {
+            rc=$?
+            if [[ $rc -ne 0 ]]; then
+              mapfile -t releases < <(
+                gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                  --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | [.id, .draft, .target_commitish] | @tsv" \
+                  2>/dev/null || true
+              )
+              if [[ "${#releases[@]}" -eq 1 ]]; then
+                IFS=$'\t' read -r release_id is_draft target_commitish <<<"${releases[0]}"
+                if [[ "$is_draft" == true && "$target_commitish" == "$RELEASE_SOURCE_SHA" ]]; then
+                  gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" >/dev/null || true
+                else
+                  echo "cleanup refused to delete non-draft or mismatched release" >&2
+                fi
+              elif [[ "${#releases[@]}" -gt 1 ]]; then
+                echo "cleanup refused: multiple matching releases" >&2
+              fi
+
+              if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+                git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" || true
+                if [[ "$(git rev-list -n1 "$RELEASE_TAG" 2>/dev/null || true)" == "$RELEASE_SOURCE_SHA" ]]; then
+                  gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" >/dev/null || true
+                else
+                  echo "cleanup refused to delete mismatched tag" >&2
+                fi
+              fi
+            fi
+            exit "$rc"
+          }
+          trap cleanup_failed_publication EXIT
+
+          tag_object="$(gh api \
+            --method POST \
+            "repos/$GITHUB_REPOSITORY/git/tags" \
+            -f tag="$RELEASE_TAG" \
+            -f message='ZenovOS 0.1.1 VM Image 2' \
+            -f object="$RELEASE_SOURCE_SHA" \
+            -f type='commit' \
+            --jq '.sha')"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$RELEASE_TAG" \
+            -f sha="$tag_object" >/dev/null
+          git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          test "$(git rev-list -n1 "$RELEASE_TAG")" = "$RELEASE_SOURCE_SHA"
+
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_SOURCE_SHA" \
+            --title 'ZenovOS 0.1.1 VM Image 2' \
+            --notes-file /tmp/vm2-release-notes.md \
+            --draft \
+            --prerelease
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY"
+
+          rm -rf /tmp/vm2-release-download
+          mkdir -p /tmp/vm2-release-download
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir /tmp/vm2-release-download
+          for asset in "${assets[@]}"; do
+            cmp "$asset" "/tmp/vm2-release-download/$(basename "$asset")"
+          done
+
+          expected_names="$(printf '%s\n' "${assets[@]##*/}" | sort)"
+          actual_names="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[].name' | sort)"
+          test "$actual_names" = "$expected_names"
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')" -eq 14
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq '.targetCommitish')" = "$RELEASE_SOURCE_SHA"
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = true
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq '.isPrerelease')" = true
+          published_body="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')"
+          expected_body="$(cat /tmp/vm2-release-notes.md)"
+          test "$published_body" = "$expected_body"
+          test "$(git rev-list -n1 "$RELEASE_TAG")" = "$RELEASE_SOURCE_SHA"
+
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --prerelease
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')" = false
+          test "$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')" -eq 14
+          trap - EXIT
+
+          echo "vm2-release-publication=verified tag=$RELEASE_TAG source=$RELEASE_SOURCE_SHA assets=14 iso=$ISO_SHA256 raw=$RAW_SHA256"
+
+      - name: Upload publication evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-v0.1.1-vm2-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist-vm/
+            build/vm-appliances/
+            build/ZenovOS-0.1.1-x86.iso
+            build/qemu/iso/serial.log
+            build/qemu/iso/qemu.stderr
+            build/qemu/iso-persistence/serial.log
+            build/qemu/iso-persistence/serial-write.log
+            build/qemu/iso-persistence/serial-read.log
+            build/qemu/iso-persistence/qemu-write.stderr
+            build/qemu/iso-persistence/qemu-read.stderr
+            build/prepare-vm-sh.log
+            build/prepare-vm-ps1.log
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/build-manifest.json
+            /tmp/vm2-release-notes.md
