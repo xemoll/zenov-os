@@ -85,9 +85,3 @@ void productivity_tasks_scan() {
     productivity_tasks_rebuild_visible();
     serial::line("UI_TASKS_SCAN_OK");
 }
-
-bool productivity_tasks_source_exists(const char* path) {
-    for (uint32_t index = 0U; index < productivity_note_count; ++index)
-        if (string_equal(productivity_notes[index].path, path)) return true;
-    return false;
-}
