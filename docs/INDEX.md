@@ -23,6 +23,7 @@
 - [`RUNTIME_PROVIDER_ABI_0.1.1.md`](RUNTIME_PROVIDER_ABI_0.1.1.md) — verified host profiles, runtime architecture/capability gating, accepted artifact families and user-supplied firmware requirements.
 - [`ZENOVFS1_TRANSACTIONS.md`](ZENOVFS1_TRANSACTIONS.md) — interrupted-write ordering and recovery.
 - [`POST_MERGE_HARDENING.md`](POST_MERGE_HARDENING.md) — process-window scrub and W^X audit delta.
+- [`releases/v0.1.1.md`](releases/v0.1.1.md) — immutable tagged release notes, downloads, changes since 0.1.0 and known limitations.
 - [`RELEASE_CHECKLIST_0.1.1.md`](RELEASE_CHECKLIST_0.1.1.md) — final-main verification and publication gate.
 - [`SOURCE_ARCHITECTURE.md`](SOURCE_ARCHITECTURE.md) — modular Zenov configuration and scale contracts.
 - [`ZEX_ABI.md`](ZEX_ABI.md) and [`ELF32_ABI.md`](ELF32_ABI.md) — format-specific references.
