@@ -87,11 +87,14 @@ jobs:
           grep -Fq 'constexpr uint32_t productivity_task_capacity = 24U;' kernel/parts/ui_productivity_tasks_types.inc
           grep -Fq 'storage::security_read_file' kernel/parts/ui_productivity_tasks_index.inc
           grep -Fq 'storage::security_read_file' kernel/parts/ui_productivity_tasks_storage.inc
+          grep -Fq 'const int32_t existing_index = storage::find_entry(path);' kernel/parts/ui_productivity_tasks_storage.inc
+          grep -Fq 'storage::zfs_entries[existing_index].type != storage::zfs_type_file' kernel/parts/ui_productivity_tasks_storage.inc
+          ! grep -Fq 'productivity_tasks_source_exists' kernel/parts/ui_productivity_tasks*.inc
           grep -Fq 'storage::guarded_write_file' kernel/parts/ui_productivity_tasks_storage.inc
           grep -Fq "data[offset] = data[offset] == ' ' ? 'x' : ' ';" kernel/parts/ui_productivity_tasks_storage.inc
           grep -Fq 'productivity_launcher_query_is("tasks")' kernel/parts/ui_productivity_tasks_runtime.inc
           grep -Fq 'UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting' kernel/parts/ui_productivity_tasks_runtime.inc
-          echo 'SYSTEM_APPS_SOURCE_CONTRACT_OK tasks=bounded reads=guarded writes=guarded launcher=indexed'
+          echo 'SYSTEM_APPS_SOURCE_CONTRACT_OK tasks=bounded existence=zenovfs reads=guarded writes=guarded launcher=indexed'
 
       - name: Exercise Notes, Tasks, Calendar and Clock
         run: bash tests/qemu_productivity_ui.sh build/zenov-os.img build/zenov-data.img build/qemu-productivity-ui
