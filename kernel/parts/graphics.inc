@@ -49,44 +49,17 @@ void render_scene();
 #undef handle_navigation_key
 #undef init
 
+#define render_scene render_scene_productivity_base
+#define init init_productivity_base
 #define handle_navigation_key handle_navigation_key_productivity_base
+#define on_mouse_packet on_mouse_packet_productivity_base
 #include "ui_productivity.inc"
+#undef on_mouse_packet
 #undef handle_navigation_key
+#undef init
+#undef render_scene
 
-bool productivity_launcher_query_is(const char* name) {
-    if (!name || launcher_query_length != string_length(name)) return false;
-    for (uint32_t index = 0U; index < launcher_query_length; ++index)
-        if (!productivity_ascii_equal_ci(launcher_query[index], name[index])) return false;
-    return true;
-}
-
-void productivity_open_launcher_result(ProductivityApp app) {
-    launcher_query_length = 0U;
-    launcher_query[0] = 0;
-    launcher_focus = 0U;
-    set_active_view(launcher_return_view);
-    productivity_open(app);
-    refresh_desktop();
-}
-
-bool handle_navigation_key(uint16_t key) {
-    if (!productivity_overlay_open) {
-        if (active_view == View::launcher && (key == '\n' || key == ' ')) {
-            if (productivity_launcher_query_is("notes") || productivity_launcher_query_is("notepad")) {
-                productivity_open_launcher_result(ProductivityApp::notes); return true;
-            }
-            if (productivity_launcher_query_is("calendar")) {
-                productivity_open_launcher_result(ProductivityApp::calendar); return true;
-            }
-            if (productivity_launcher_query_is("clock") || productivity_launcher_query_is("time")) {
-                productivity_open_launcher_result(ProductivityApp::clock); return true;
-            }
-        }
-        if (key == key_f1 || key == key_f2 || key == key_f3)
-            return handle_navigation_key_files_base(key);
-    }
-    return handle_navigation_key_productivity_base(key);
-}
+#include "ui_productivity_tasks.inc"
 
 #undef terminal_cursor
 #undef desktop_theme
