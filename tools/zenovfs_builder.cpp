@@ -110,7 +110,8 @@ int main(int argc, char** argv) {
             "capabilities=ZCAP1\ncapability_root=9202c73fad96ad66\n"
             "intelligence=ZMID1\nintelligence_root=6ca6a5275544c533\n"
             "ransomware_policy=ZRWP1\nransomware_root=7186b2bd819e47dc\n"
-            "verified_reads=ZVRT1\nverified_reads_root=d28215ec62269ffc\naudit=ZGAL1\n"));
+            "verified_reads=ZVRT1\nverified_reads_root=d28215ec62269ffc\naudit=ZGAL1\n"
+            "policy_transaction_journal=ZPTJ1\n"));
         add_file(disk, entries, 8, "/apps/args.elf", args); add_file(disk, entries, 9, "/apps/console.elf", console);
         add_file(disk, entries, 10, "/apps/protect.elf", protect); add_file(disk, entries, 11, "/apps/kaccess.elf", kaccess);
         add_file(disk, entries, 12, "/apps/zenovapp.zex", zenovapp);
@@ -150,6 +151,7 @@ int main(int argc, char** argv) {
         add_file(disk, entries, 47, "/security/verified-reads.version", text_bytes("1\n"));
         add_file(disk, entries, 48, "/security/updates/verified-reads-tampered.zvrt", zvrt_tampered);
         add_file(disk, entries, 49, "/security/updates/verified-reads-wrong-key.zvrt", zvrt_wrong_key);
+        add_file(disk, entries, 50, "/security/policy-transaction.journal", {});
         std::memcpy(disk.data(), &super, sizeof(super));
         std::memcpy(disk.data() + kSectorSize, entries.data(), sizeof(entries));
         std::ofstream output(argv[27], std::ios::binary | std::ios::trunc);
@@ -157,7 +159,7 @@ int main(int argc, char** argv) {
         output.write(reinterpret_cast<const char*>(disk.data()), static_cast<std::streamsize>(disk.size()));
         if (!output) throw std::runtime_error("cannot write output image");
         std::cout << "zenovfs-builder: OK version=0.1.1 entries=" << kEntryCount
-                  << " apps=7 zgdb=schema2-v3+v4+2-negative zcap=schema1-v1+v2+2-negative zmid=schema1-v1+v2+2-negative zrwp=schema1-v1-audit+v2-block+2-negative zvrt=schema1-v1+2-negative rules=hash+pattern audit=ZGAL1-8288B zenov_source_app=" << zenovapp.size() << "\n";
+                  << " apps=7 zgdb=schema2-v3+v4+2-negative zcap=schema1-v1+v2+2-negative zmid=schema1-v1+v2+2-negative zrwp=schema1-v1-audit+v2-block+2-negative zvrt=schema1-v1+2-negative rules=hash+pattern audit=ZGAL1-8288B policy_journal=ZPTJ1-empty zenov_source_app=" << zenovapp.size() << "\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zenovfs-builder: " << error.what() << "\n";

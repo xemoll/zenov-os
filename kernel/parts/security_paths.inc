@@ -18,6 +18,7 @@ static constexpr const char* protected_paths[] = {
     "/security/verified-reads.zvrt",
     "/security/verified-reads.version",
     "/security/zenovguard.audit",
+    "/security/policy-transaction.journal",
 };
 
 bool normalize_for_policy(const char* input, char output[48]) {

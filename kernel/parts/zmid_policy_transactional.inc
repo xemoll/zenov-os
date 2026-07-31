@@ -71,16 +71,9 @@ bool init() {
     return true;
 }
 
-bool transaction_restore_update(uint32_t previous_version, uint32_t previous_size) {
-    const bool database_restored = security_policy_transaction::restore_verified(
-        "/security/zenovguard-intelligence.zmid", previous_size,
-        process::application_buffer, max_database_bytes);
-    const bool version_restored = database_restored && transaction_write_version(previous_version) &&
-        security_policy_transaction::version_matches(
-            "/security/zenovguard-intelligence.version", previous_version);
-    const bool metadata_synced = version_restored && storage::sync_metadata();
-    security_policy_transaction::release();
-    if (!database_restored || !version_restored || !metadata_synced) {
+bool transaction_restore_update(uint32_t previous_version, [[maybe_unused]] uint32_t previous_size) {
+    const bool restored = security_policy_transaction::rollback();
+    if (!restored) {
         ready = false;
         serial::line("ZMID_UPDATE_ROLLBACK_FAILED");
         return false;
@@ -89,6 +82,13 @@ bool transaction_restore_update(uint32_t previous_version, uint32_t previous_siz
     ready = true;
     serial::line("ZMID_UPDATE_ROLLBACK_OK");
     return true;
+}
+
+bool transaction_discard_prepared() {
+    if (security_policy_transaction::discard()) return true;
+    ready = false;
+    serial::line("ZMID_UPDATE_JOURNAL_DISCARD_FAILED");
+    return false;
 }
 
 bool update(const char* candidate_path) {
@@ -118,13 +118,18 @@ bool update(const char* candidate_path) {
     uint32_t previous_size = 0U;
     if (!security_policy_transaction::acquire(
             "/security/zenovguard-intelligence.zmid", max_database_bytes, previous_size)) {
-        serial::line("ZMID_UPDATE_BACKUP_FAILED");
+        if (security_policy_transaction::prepare_uncertain()) {
+            ready = false;
+            serial::line("ZMID_UPDATE_JOURNAL_PREPARE_UNCERTAIN");
+        } else {
+            serial::line("ZMID_UPDATE_BACKUP_FAILED");
+        }
         return false;
     }
 
     uint32_t size = 0U;
     if (!storage::read_file(candidate_path, process::application_buffer, max_database_bytes, size)) {
-        security_policy_transaction::release();
+        (void)transaction_discard_prepared();
         serial::line("ZMID_UPDATE_CANDIDATE_READ_FAILED");
         return false;
     }
@@ -132,7 +137,7 @@ bool update(const char* candidate_path) {
     validation = validate(process::application_buffer, size, next_version,
         candidate_records, final_count, final_version);
     if (validation != Validation::okay || final_version != version || final_count != count) {
-        security_policy_transaction::release();
+        (void)transaction_discard_prepared();
         serial::line("ZMID_UPDATE_CANDIDATE_CHANGED");
         return false;
     }
@@ -185,8 +190,12 @@ bool update(const char* candidate_path) {
         serial::line("ZMID_UPDATE_AUDIT_FAILED");
         return false;
     }
+    if (!security_policy_transaction::commit()) {
+        ready = false;
+        serial::line("ZMID_UPDATE_COMMIT_UNCERTAIN");
+        return false;
+    }
 
-    security_policy_transaction::release();
     activate(candidate_records, count, version);
     persistent_database_version = version;
     ready = true;
