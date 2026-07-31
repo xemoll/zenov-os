@@ -24,4 +24,3 @@ usb.present = "FALSE"
 
 mks.enable3d = "FALSE"
 svga.autodetect = "TRUE"
-extendedConfigFile = "ZenovOS-0.1.1.vmxf"
