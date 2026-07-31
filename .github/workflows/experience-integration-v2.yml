@@ -34,12 +34,14 @@ jobs:
           test -s .github/scripts/experience_prepare.py
           test -s .github/scripts/experience_audio_post.py
           test -s .github/scripts/experience_focus_post.py
+          test -s .github/scripts/experience_responsiveness_post.py
           test -s kernel/parts/system_sound.inc
           python3 .github/scripts/experience_prepare.py
           python3 -m py_compile \
             .github/scripts/experience_pass.py \
             .github/scripts/experience_audio_post.py \
-            .github/scripts/experience_focus_post.py
+            .github/scripts/experience_focus_post.py \
+            .github/scripts/experience_responsiveness_post.py
           git merge-base --is-ancestor 385bd98b9a5f10722c84ad602ba32fb1563b73b5 HEAD
 
       - name: Install native toolchain, QEMU and TPM dependencies
@@ -66,11 +68,13 @@ jobs:
           python3 .github/scripts/experience_pass.py | tee /tmp/experience-evidence/transform.log
           python3 .github/scripts/experience_audio_post.py | tee /tmp/experience-evidence/audio-post.log
           python3 .github/scripts/experience_focus_post.py | tee /tmp/experience-evidence/focus-post.log
+          python3 .github/scripts/experience_responsiveness_post.py | tee /tmp/experience-evidence/responsiveness-post.log
           rm -f \
             .github/scripts/experience_pass.py \
             .github/scripts/experience_prepare.py \
             .github/scripts/experience_audio_post.py \
             .github/scripts/experience_focus_post.py \
+            .github/scripts/experience_responsiveness_post.py \
             .github/workflows/experience-integration.yml \
             .github/workflows/experience-integration-v2.yml
           git add -N docs/UX_EXPERIENCE_0.1.1.md
@@ -134,9 +138,11 @@ jobs:
             UI_REDUCED_MOTION_ON 'UI_TRANSITION_FRAMES 1' 'UI_TRANSITION_TICKS 0' \
             'UI_SETTINGS_PAGE Experience' 'UI_SETTINGS_FOCUS 5' UI_SOUND_PREVIEW_OK UI_SETTINGS_PERSIST_OK \
             UI_ADAPTIVE_DISPLAY_OK UI_MINIMAL_SHELL_OK UI_FONT_ATLAS_OK UI_ICON_SYSTEM_OK \
-            'UI_ICON_COUNT 14' 'UI_DISPLAY_MODE_COUNT 32'; do
+            PS2_MOUSE_DEFERRED_QUEUE_OK 'UI_ICON_COUNT 14' 'UI_DISPLAY_MODE_COUNT 32'; do
             grep -q "$marker" "$SERIAL"
           done
+          ! grep -q 'PS2_MOUSE_DEFERRED_QUEUE_OVERFLOW' "$SERIAL"
+          grep -Fq 'input=deferred-irq-safe motion=interrupt-idle' /tmp/experience-evidence/qemu-display.log
           test ! -s build/qemu-experience/qemu.stderr
           test -s build/qemu-experience/settings-experience-1024x768.ppm
           test -s build/qemu-experience/settings-experience-preview-1024x768.ppm
