@@ -163,11 +163,41 @@ int property_test() {
                 static_cast<std::uint32_t>(decoded.size()), decoded_size)) return 11;
     }
     if (!zmid::content_inspection::self_test()) return 12;
+
+    static constexpr std::uint8_t path_sensitive[] = "not a zip archive";
+    std::uint8_t digest[security_guard::sha256_bytes]{};
+    security_guard::sha256(path_sensitive, sizeof(path_sensitive) - 1U, digest);
+    security_guard::ScanResult result{};
+    zmid::content_inspection::clear_cache();
+    if (zmid::classify("/cache/plain.txt", path_sensitive, sizeof(path_sensitive) - 1U, digest, result)) return 13;
+    result = {};
+    if (!zmid::classify("/cache/plain.zip", path_sensitive, sizeof(path_sensitive) - 1U, digest, result) ||
+        result.verdict != security_guard::Verdict::suspicious ||
+        std::strcmp(result.signature, "Container.Unsupported") != 0) return 14;
+    const std::uint32_t cache_before = zmid::content_inspection::cache_hits;
+    result = {};
+    if (!zmid::classify("/cache/plain.zip", path_sensitive, sizeof(path_sensitive) - 1U, digest, result) ||
+        zmid::content_inspection::cache_hits != cache_before + 1U) return 15;
+
+    zmid::content_inspection::clear_cache();
+    result = {};
+    if (!zmid::classify("/cache/plain.zip", path_sensitive, sizeof(path_sensitive) - 1U, digest, result)) return 16;
+    result = {};
+    if (zmid::classify("/cache/plain.txt", path_sensitive, sizeof(path_sensitive) - 1U, digest, result)) return 17;
+
     std::cout << "ZMID_BASE64_PROPERTY_OK cases=" << cases
-              << " invalid=" << std::size(invalid) << " selftest=1\n";
+              << " invalid=" << std::size(invalid)
+              << " selftest=1 cache-context=2\n";
     return 0;
 }
 } // namespace
+
+const char* inspection_name(zmid::content_inspection::InspectionResult result) {
+    using InspectionResult = zmid::content_inspection::InspectionResult;
+    if (result == InspectionResult::clean) return "clean";
+    if (result == InspectionResult::matched) return "matched";
+    return "unsupported";
+}
 
 int main(int argc, char** argv) {
     try {
@@ -182,6 +212,9 @@ int main(int argc, char** argv) {
             const auto verdict = zmid::content_inspection::inspect_payload(
                 argv[index], input.data(), static_cast<std::uint32_t>(input.size()), 0U,
                 scratch.data(), alternate.data(), result);
+            std::cout << "ZMID_HOST_CASE path=" << argv[index]
+                      << " result=" << inspection_name(verdict)
+                      << " signature=" << result.signature << "\n";
             if (verdict == zmid::content_inspection::InspectionResult::clean) ++clean;
             else if (verdict == zmid::content_inspection::InspectionResult::matched) ++matched;
             else ++unsupported;

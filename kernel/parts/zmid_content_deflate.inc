@@ -236,7 +236,7 @@ bool inflate_raw(const uint8_t* input,
             }
         }
     }
-    return true;
+    return reader.offset == input_size;
 }
 
 uint32_t crc32(const uint8_t* data, uint32_t size) {

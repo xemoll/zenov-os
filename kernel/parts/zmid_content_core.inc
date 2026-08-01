@@ -21,6 +21,7 @@ struct CacheEntry {
     bool valid = false;
     bool matched = false;
     uint32_t database_version = 0U;
+    char path_context[48]{};
     uint8_t digest[security_guard::sha256_bytes]{};
     security_guard::Verdict verdict = security_guard::Verdict::error;
     uint8_t action = 0U;
@@ -28,6 +29,15 @@ struct CacheEntry {
 };
 
 CacheEntry cache[cache_capacity]{};
+
+bool path_context_equal(const char stored[48], const char* path) {
+    if (!path) path = "";
+    for (uint32_t index = 0U; index < 48U; ++index) {
+        if (stored[index] != path[index]) return false;
+        if (!path[index]) return true;
+    }
+    return false;
+}
 
 uint16_t load_le16(const uint8_t* data) {
     return static_cast<uint16_t>(data[0]) |
@@ -40,6 +50,7 @@ uint32_t load_le32(const uint8_t* data) {
         (static_cast<uint32_t>(data[2]) << 16U) |
         (static_cast<uint32_t>(data[3]) << 24U);
 }
+
 
 bool range_fits(uint32_t offset, uint32_t length, uint32_t size) {
     return offset <= size && length <= size - offset;

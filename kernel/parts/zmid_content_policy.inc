@@ -1,8 +1,10 @@
 bool cache_lookup(const uint8_t digest[security_guard::sha256_bytes],
+                  const char* path,
                   security_guard::ScanResult& result,
                   bool& matched) {
     for (const auto& entry : cache) {
         if (!entry.valid || entry.database_version != active_database_version ||
+            !path_context_equal(entry.path_context, path) ||
             !security_guard::digest_equal(entry.digest, digest)) continue;
         ++cache_hits;
         matched = entry.matched;
@@ -17,6 +19,7 @@ bool cache_lookup(const uint8_t digest[security_guard::sha256_bytes],
 }
 
 void cache_store(const uint8_t digest[security_guard::sha256_bytes],
+                 const char* path,
                  bool matched,
                  const security_guard::ScanResult& result) {
     CacheEntry& entry = cache[cache_next++ % cache_capacity];
@@ -24,6 +27,7 @@ void cache_store(const uint8_t digest[security_guard::sha256_bytes],
     entry.valid = true;
     entry.matched = matched;
     entry.database_version = active_database_version;
+    storage::path_copy(entry.path_context, path ? path : "", sizeof(entry.path_context));
     memcpy(entry.digest, digest, sizeof(entry.digest));
     if (matched) {
         entry.verdict = result.verdict;
@@ -71,7 +75,7 @@ bool self_test() {
 
 bool init() {
     if (!self_test()) return false;
-    serial::line("ZMID_CONTENT_INSPECTION_OK base64=2 tokens=1 casefold=1 zip=2 eocd=1 sfx=1 deflate=1 depth=2 entries=16 expanded=65536 cache=16");
+    serial::line("ZMID_CONTENT_INSPECTION_OK base64=2 tokens=1 casefold=1 zip=2 eocd=1 sfx=1 sfx-prefix=1 alias-safe=1 deflate=1 depth=2 entries=16 expanded=65536 cache=16 cache-path=1");
     return true;
 }
 
@@ -88,8 +92,9 @@ bool classify(const char* path,
     }
     if (!ready || (!data && size) || !digest) return false;
 
+    storage::path_copy(result.path, path ? path : "", sizeof(result.path));
     bool matched = false;
-    if (content_inspection::cache_lookup(digest, result, matched)) return matched;
+    if (content_inspection::cache_lookup(digest, path, result, matched)) return matched;
     if (!content_inspection::ensure_workspace()) {
         result.verdict = security_guard::Verdict::suspicious;
         storage::path_copy(result.signature, "Inspection.Workspace", sizeof(result.signature));
@@ -108,7 +113,7 @@ bool classify(const char* path,
         matched = inspection == content_inspection::InspectionResult::matched;
         if (matched) ++content_inspection::transformed_hits;
     }
-    content_inspection::cache_store(digest, matched, result);
+    content_inspection::cache_store(digest, path, matched, result);
     return matched;
 }
 

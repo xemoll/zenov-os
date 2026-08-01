@@ -36,9 +36,10 @@ bool looks_like_zip(const uint8_t* data, uint32_t size) {
 
 bool path_has_zip_extension(const char* path) {
     if (!path) return false;
+    constexpr uint32_t max_path_scan = 1024U;
     uint32_t length = 0U;
-    while (path[length] && length < 47U) ++length;
-    if (length < 4U || path[length]) return false;
+    while (length < max_path_scan && path[length]) ++length;
+    if (length < 4U || length == max_path_scan) return false;
     const char a = path[length - 3U], b = path[length - 2U], c = path[length - 1U];
     return path[length - 4U] == '.' && (a == 'z' || a == 'Z') &&
         (b == 'i' || b == 'I') && (c == 'p' || c == 'P');
@@ -113,7 +114,8 @@ InspectionResult inspect_zip(const char* path,
         const uint16_t local_name_size = load_le16(data + local_offset + 26U);
         const uint16_t local_extra_size = load_le16(data + local_offset + 28U);
         if (local_version_needed != version_needed || local_flags != flags || local_method != method ||
-            local_crc != expected_crc || local_compressed != compressed_size || local_expanded != expanded_size ||
+            local_crc != expected_crc ||
+            local_compressed != compressed_size || local_expanded != expanded_size ||
             local_name_size != name_size ||
             !range_fits(local_offset + 30U, static_cast<uint32_t>(local_name_size) + local_extra_size, central_offset) ||
             !storage::bytes_equal(data + local_offset + 30U, data + central_cursor + 46U, name_size)) {
@@ -129,7 +131,13 @@ InspectionResult inspect_zip(const char* path,
         central_cursor += 46U + variable_size;
     }
     if (central_cursor != eocd_offset) return InspectionResult::unsupported;
-    if (!total_entries) return central_size == 0U ? InspectionResult::clean : InspectionResult::unsupported;
+    if (!total_entries && central_size != 0U) return InspectionResult::unsupported;
+    if (archive_base) {
+        const InspectionResult prefix = inspect_payload(path, data, archive_base,
+            max_archive_depth, output, nullptr, result);
+        if (prefix != InspectionResult::clean) return prefix;
+    }
+    if (!total_entries) return InspectionResult::clean;
 
     for (uint32_t i = 1U; i < total_entries; ++i) {
         ZipEntryView value = entries[i];
@@ -167,30 +175,31 @@ InspectionResult inspect_zip(const char* path,
         total_expanded += actual_size;
         if (classify_decoded(path, output, actual_size, result,
                 archive_depth ? "ZIP2" : "ZIP")) return InspectionResult::matched;
+        uint8_t* nested_alternate = alternate;
+        if (data == alternate && entry_index + 1U < total_entries) nested_alternate = nullptr;
         const InspectionResult nested = inspect_payload(path, output, actual_size,
-            archive_depth + 1U, alternate, output, result);
+            archive_depth + 1U, output, nested_alternate, result);
         if (nested != InspectionResult::clean) return nested;
     }
     return InspectionResult::clean;
 }
 
 InspectionResult inspect_decoded_payload(const char* path,
-                                         const uint8_t* decoded,
+                                         uint8_t* decoded,
                                          uint32_t decoded_size,
                                          uint32_t archive_depth,
-                                         uint8_t* scratch,
                                          uint8_t* alternate,
                                          security_guard::ScanResult& result,
                                          const char* layer) {
     if (classify_decoded(path, decoded, decoded_size, result, layer)) return InspectionResult::matched;
     if (looks_like_zip(decoded, decoded_size)) {
-        const InspectionResult archive = inspect_zip(path, decoded, decoded_size,
-            archive_depth + 1U, alternate, scratch, result);
+        const InspectionResult archive = inspect_payload(path, decoded, decoded_size,
+            archive_depth + 1U, decoded, alternate, result);
         if (archive != InspectionResult::clean) return archive;
     }
     if (text_case_candidate(decoded, decoded_size)) {
-        uppercase_copy(decoded, decoded_size, alternate);
-        if (classify_decoded(path, alternate, decoded_size, result, "Base64Case")) {
+        uppercase_copy(decoded, decoded_size, decoded);
+        if (classify_decoded(path, decoded, decoded_size, result, "Base64Case")) {
             return InspectionResult::matched;
         }
     }
@@ -217,7 +226,7 @@ InspectionResult inspect_embedded_base64(const char* path,
         uint32_t decoded_size = 0U;
         if (!decode_base64(data + start, token_size, scratch, workspace_bytes, decoded_size) || !decoded_size) continue;
         const InspectionResult decoded = inspect_decoded_payload(path, scratch, decoded_size,
-            archive_depth, alternate, scratch, result, "Base64Token");
+            archive_depth, alternate, result, "Base64Token");
         if (decoded != InspectionResult::clean) return decoded;
     }
     return InspectionResult::clean;
@@ -232,13 +241,18 @@ InspectionResult inspect_payload(const char* path,
                                  security_guard::ScanResult& result) {
     if (!data && size) return InspectionResult::unsupported;
     if (looks_like_zip(data, size) || (archive_depth == 0U && path_has_zip_extension(path))) {
+        if (scratch == data) {
+            if (!alternate || alternate == data) return InspectionResult::unsupported;
+            return inspect_zip(path, data, size, archive_depth, alternate, scratch, result);
+        }
+        if (!scratch) return InspectionResult::unsupported;
         return inspect_zip(path, data, size, archive_depth, scratch, alternate, result);
     }
 
     uint32_t decoded_size = 0U;
     if (decode_base64(data, size, scratch, workspace_bytes, decoded_size) && decoded_size) {
         const InspectionResult decoded = inspect_decoded_payload(path, scratch, decoded_size,
-            archive_depth, alternate, scratch, result, "Base64");
+            archive_depth, alternate, result, "Base64");
         if (decoded != InspectionResult::clean) return decoded;
     }
 
