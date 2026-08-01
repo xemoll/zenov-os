@@ -2,12 +2,14 @@ enum class ProductivityUtilityApp : uint8_t { none, calculator, reminders };
 enum class ProductivityCalculatorMode : uint8_t { standard, programmer, date, units };
 enum class ProductivityCalculatorError : uint8_t { none, syntax, overflow, divide_by_zero, shift_range };
 enum class ProductivityUnitGroup : uint8_t { length, temperature, storage };
-enum class ProductivityReminderFilter : uint8_t { today, overdue, scheduled, done };
+enum class ProductivityReminderFilter : uint8_t { today, overdue, week, scheduled, done };
+enum class ProductivityReminderRepeat : uint8_t { none, daily, weekly, monthly };
 enum class ProductivityAgendaKind : uint8_t { reminder, task, event };
 
 constexpr uint8_t productivity_calculator_history_capacity = 8U;
 constexpr uint8_t productivity_calculator_input_capacity = 49U;
 constexpr uint8_t productivity_reminder_capacity = 24U;
+constexpr uint8_t productivity_reminder_input_capacity = 65U;
 constexpr uint8_t productivity_agenda_capacity = 48U;
 constexpr uint8_t productivity_agenda_visible_rows = 8U;
 constexpr int32_t productivity_calc_int_max = 2147483647;
@@ -28,6 +30,8 @@ struct ProductivityReminder {
     uint8_t minute;
     bool done;
     bool notified;
+    ProductivityReminderRepeat repeat;
+    uint8_t repeat_day;
 };
 
 struct ProductivityAgendaItem {
@@ -69,9 +73,11 @@ uint8_t productivity_agenda_count = 0U;
 uint8_t productivity_agenda_focus = 0U;
 uint8_t productivity_agenda_scroll = 0U;
 bool productivity_reminder_adding = false;
-char productivity_reminder_input[41]{};
+char productivity_reminder_input[productivity_reminder_input_capacity]{};
 uint8_t productivity_reminder_input_size = 0U;
+ProductivityReminderRepeat productivity_reminder_add_repeat = ProductivityReminderRepeat::none;
 bool productivity_utilities_storage_ready = false;
 bool productivity_reminder_banner_active = false;
 char productivity_reminder_banner_title[41]{};
+ProductivityReminderRepeat productivity_reminder_banner_repeat = ProductivityReminderRepeat::none;
 uint32_t productivity_reminder_banner_started = 0U;
