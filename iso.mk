@@ -6,10 +6,11 @@ ISO_DETERMINISTIC_DIR ?= /tmp/zenov-os-iso-deterministic
 VM_APPLIANCE_DIR ?= $(BUILD)/vm-appliances
 VM_APPLIANCE_REBUILD_DIR ?= /tmp/zenov-os-vm-appliances-rebuild
 VM_APPLIANCE_STAMP ?= $(VM_APPLIANCE_DIR)/.verified
+VM_LIFECYCLE_OUT ?= $(BUILD)/vm-lifecycle-test
 VM_DIST ?= dist-vm
 
 .PHONY: iso iso-qemu iso-persistence iso-deterministic iso-check \
-  vm-appliances vm-appliances-semantic vm-package vm-check
+  vm-appliances vm-appliances-semantic vm-lifecycle-check vm-package vm-check
 
 $(ISO_IMAGE): $(BUILD)/zenov-os.img tools/build_iso.sh packaging/ISO-README.txt
 	bash tools/build_iso.sh $(BUILD)/zenov-os.img $(ISO_IMAGE) $(ISO_ROOT)
@@ -66,7 +67,10 @@ vm-appliances-semantic: $(VM_APPLIANCE_STAMP)
 	cmp $(VM_APPLIANCE_DIR)/ZenovOS-0.1.1.vmx $(VM_APPLIANCE_REBUILD_DIR)/ZenovOS-0.1.1.vmx
 	@echo 'VM appliance semantic rebuild: OK (stable metadata and byte-identical guest-visible ZenovFS content)'
 
-vm-package: $(VM_APPLIANCE_STAMP) tools/package_vm_appliances.sh $(BUILD)/build-manifest.json
+vm-lifecycle-check: $(BUILD)/zenov-data.img packaging/manage-vm.sh tests/vm_lifecycle_test.sh
+	bash tests/vm_lifecycle_test.sh $(BUILD)/zenov-data.img $(VM_LIFECYCLE_OUT)
+
+vm-package: $(VM_APPLIANCE_STAMP) tools/package_vm_appliances.sh packaging/manage-vm.sh $(BUILD)/build-manifest.json
 	bash tools/package_vm_appliances.sh \
 	  $(BUILD)/zenov-os.img \
 	  $(BUILD)/zenov-data.img \
@@ -74,6 +78,10 @@ vm-package: $(VM_APPLIANCE_STAMP) tools/package_vm_appliances.sh $(BUILD)/build-
 	  $(VM_APPLIANCE_DIR) \
 	  $(VM_DIST) \
 	  $(BUILD)/build-manifest.json
+	install -m 0755 packaging/manage-vm.sh $(VM_DIST)/manage-vm.sh
+	@cd $(VM_DIST) && sha256sum manage-vm.sh >> SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt
+	@test "$$(find $(VM_DIST) -maxdepth 1 -type f | wc -l)" -eq 15
+	@echo 'VM lifecycle manager packaged: OK assets=15'
 
-vm-check: iso-check vm-appliances-semantic vm-package
-	@echo 'ZenovOS VM appliance verification: OK (QEMU persistence, QCOW2/VDI/VMDK roundtrip and direct no-ZIP packaging)'
+vm-check: iso-check vm-appliances-semantic vm-lifecycle-check vm-package
+	@echo 'ZenovOS VM verification: OK (optical boot, persistence, appliance roundtrip, transactional lifecycle and direct packaging)'
