@@ -7,10 +7,6 @@ int32_t base64_value(uint8_t value) {
     return -1;
 }
 
-bool base64_token_byte(uint8_t value) {
-    return base64_value(value) >= 0 || value == '=';
-}
-
 bool emit_base64_quartet(const uint8_t quartet[4],
                          uint32_t quartet_size,
                          uint8_t* output,
