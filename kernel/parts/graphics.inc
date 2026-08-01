@@ -59,7 +59,17 @@ void render_scene();
 #undef init
 #undef render_scene
 
+#define render_scene render_scene_tasks_base
+#define init init_tasks_base
+#define handle_navigation_key handle_navigation_key_tasks_base
+#define on_mouse_packet on_mouse_packet_tasks_base
 #include "ui_productivity_tasks.inc"
+#undef on_mouse_packet
+#undef handle_navigation_key
+#undef init
+#undef render_scene
+
+#include "ui_productivity_utilities.inc"
 
 #undef terminal_cursor
 #undef desktop_theme

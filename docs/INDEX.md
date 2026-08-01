@@ -2,6 +2,7 @@
 
 - [`DESKTOP_0.1.1.md`](DESKTOP_0.1.1.md) — adaptive native desktop, 22 verified VBE modes, hybrid scaling, Settings controls and framebuffer evidence.
 - [`SYSTEM_APPS_0.1.1.md`](SYSTEM_APPS_0.1.1.md) — functional Notes, Tasks, Calendar and Clock applications, persistent ZenovFS state, controls, verification and explicit boundaries.
+- [`PRODUCTIVITY_UTILITIES_0.1.1.md`](PRODUCTIVITY_UTILITIES_0.1.1.md) — bounded Calculator, persistent Reminders, integrated Agenda, local alarms and verification boundary.
 - [`VM_APPLIANCES_0.1.1.md`](VM_APPLIANCES_0.1.1.md) — published no-ZIP QCOW2/VDI/VMDK distribution, two-boot ISO persistence, launch helpers and verification boundary.
 - [`ROADMAP_0.1.1.md`](ROADMAP_0.1.1.md) — completed P0 contracts and remaining release-freeze work.
 - [`ABI_0.1.1.md`](ABI_0.1.1.md) — application memory, stack, syscall and executable-format contract.
