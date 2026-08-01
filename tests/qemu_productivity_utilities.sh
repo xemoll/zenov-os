@@ -29,91 +29,98 @@ wait_for_marker_count() {
   return 1
 }
 
+send_key() {
+  local key="$1"
+  echo "sendkey $key 20"
+  sleep 0.04
+}
+
 capture() {
   local out="$1" name="$2"
   local file="$(cd "$out" && pwd)/${name}.ppm"
-  sleep 0.35
+  sleep 0.8
   echo "screendump $file"
-  sleep 0.15
+  sleep 0.2
 }
 
 open_start_result() {
   local query="$1"
-  echo "sendkey f8 10"
+  send_key f8
   local index character
   for ((index = 0; index < ${#query}; ++index)); do
     character="${query:index:1}"
-    echo "sendkey $character 10"
+    send_key "$character"
   done
-  echo "sendkey ret 10"
+  send_key ret
 }
 
 SERIAL1="$(cd "$OUT" && pwd)/serial-phase1.log"
 controller_phase1() {
   wait_for_serial_file "$SERIAL1" "ZENOVOS_UI_READY" || { echo quit; return 1; }
-  wait_for_serial_file "$SERIAL1" "UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+recurrence+quick-capture" || { echo quit; return 1; }
+  wait_for_serial_file "$SERIAL1" "UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+recurrence+quick-capture+background" || { echo quit; return 1; }
 
   open_start_result calculator
   wait_for_serial_file "$SERIAL1" "UI_CALCULATOR_OPEN_OK" || { echo quit; return 1; }
-  for key in 2 shift-equal 3 shift-8 4; do echo "sendkey $key 10"; done
-  echo "sendkey ret 10"
+  for key in 2 shift-equal 3 shift-8 4; do send_key "$key"; done
+  send_key ret
   wait_for_serial_file "$SERIAL1" "UI_CALCULATOR_EVAL_OK" || { echo quit; return 1; }
   capture "$OUT" calculator-standard
 
-  echo "sendkey f2 10"
-  echo "sendkey delete 10"
-  for key in 0 x f shift-comma shift-comma 2; do echo "sendkey $key 10"; done
-  echo "sendkey ret 10"
+  send_key f2
+  send_key delete
+  for key in 0 x f shift-comma shift-comma 2; do send_key "$key"; done
+  send_key ret
   wait_for_marker_count "$SERIAL1" "UI_CALCULATOR_EVAL_OK" 2 || { echo quit; return 1; }
   capture "$OUT" calculator-programmer
 
-  echo "sendkey f3 10"
-  echo "sendkey tab 10"
-  echo "sendkey up 10"
+  send_key f3
+  send_key tab
+  send_key up
   capture "$OUT" calculator-date
-  echo "sendkey f4 10"
-  echo "sendkey delete 10"
-  echo "sendkey 1 10"
-  echo "sendkey f6 10"
-  echo "sendkey f7 10"
+  send_key f4
+  send_key delete
+  send_key 1
+  send_key f6
+  send_key f7
   capture "$OUT" calculator-units
-  echo "sendkey esc 10"
+  send_key esc
 
   open_start_result reminders
   wait_for_serial_file "$SERIAL1" "UI_REMINDERS_OPEN_OK" || { echo quit; return 1; }
 
-  echo "sendkey a 10"
-  for key in d r i n k spc w a t e r spc shift-2 shift-equal 1 m; do echo "sendkey $key 10"; done
+  send_key a
+  for key in d r i n k spc w a t e r spc shift-2 shift-equal 1 m; do send_key "$key"; done
   capture "$OUT" reminders-quick-add
-  echo "sendkey ret 10"
+  send_key ret
   wait_for_marker_count "$SERIAL1" "UI_REMINDER_ADD_OK" 1 || { echo quit; return 1; }
 
-  echo "sendkey a 10"
-  for key in s t a n d spc u p spc shift-2 shift-equal 1 m spc shift-1 d a i l y; do echo "sendkey $key 10"; done
+  send_key a
+  for key in s t a n d spc u p spc shift-2 shift-equal 1 m spc shift-1 d a i l y; do send_key "$key"; done
   capture "$OUT" reminders-quick-add-recurring
-  echo "sendkey ret 10"
+  send_key ret
   wait_for_marker_count "$SERIAL1" "UI_REMINDER_ADD_OK" 2 || { echo quit; return 1; }
   capture "$OUT" reminders-today
 
-  sleep 70
+  sleep 65
   wait_for_marker_count "$SERIAL1" "UI_REMINDER_ALARM_DUE" 1 || { echo quit; return 1; }
+  wait_for_serial_file "$SERIAL1" "UI_BACKGROUND_REMINDER_REFRESH_OK" || { echo quit; return 1; }
   capture "$OUT" reminders-alarm
-  echo "sendkey ret 10"
+  send_key ret
   wait_for_serial_file "$SERIAL1" "UI_REMINDER_TOGGLE_OK" || { echo quit; return 1; }
   wait_for_marker_count "$SERIAL1" "UI_REMINDER_ALARM_DUE" 2 || { echo quit; return 1; }
   capture "$OUT" reminders-recurring-alarm
-  echo "sendkey ret 10"
+  send_key ret
   wait_for_serial_file "$SERIAL1" "UI_REMINDER_REPEAT_ADVANCE_OK" || { echo quit; return 1; }
-  echo "sendkey f3 10"
+  send_key f3
   capture "$OUT" reminders-week
-  echo "sendkey f5 10"
+  send_key f5
   capture "$OUT" reminders-done
-  echo "sendkey esc 10"
+  send_key esc
   echo quit
 }
 
 set +e
-controller_phase1 | timeout 230s "$QEMU" \
+controller_phase1 | timeout 240s "$QEMU" \
   -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
   -drive "file=$RUNTIME_DATA,format=raw,if=ide,index=0,media=disk" \
   -boot a -m 32M -machine pc,vmport=off -vga std -display none \
@@ -132,16 +139,16 @@ fi
 SERIAL2="$(cd "$OUT" && pwd)/serial-phase2.log"
 controller_phase2() {
   wait_for_serial_file "$SERIAL2" "ZENOVOS_UI_READY" || { echo quit; return 1; }
-  wait_for_serial_file "$SERIAL2" "UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+recurrence+quick-capture" || { echo quit; return 1; }
+  wait_for_serial_file "$SERIAL2" "UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+recurrence+quick-capture+background" || { echo quit; return 1; }
   open_start_result calculator
   wait_for_serial_file "$SERIAL2" "UI_CALCULATOR_OPEN_OK" || { echo quit; return 1; }
   capture "$OUT" calculator-persisted
-  echo "sendkey esc 10"
+  send_key esc
   open_start_result reminders
   wait_for_serial_file "$SERIAL2" "UI_REMINDERS_OPEN_OK" || { echo quit; return 1; }
-  echo "sendkey f3 10"
+  send_key f3
   capture "$OUT" reminders-recurring-persisted
-  echo "sendkey f5 10"
+  send_key f5
   capture "$OUT" reminders-done-persisted
   echo quit
 }
@@ -181,10 +188,10 @@ for image in calculator-standard calculator-programmer calculator-date calculato
 done
 
 for marker in \
-  "UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+recurrence+quick-capture" \
+  "UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+recurrence+quick-capture+background" \
   UI_PRODUCTIVITY_UTILITIES_STORAGE_OK UI_CALCULATOR_OPEN_OK UI_CALCULATOR_EVAL_OK \
   UI_CALCULATOR_STATE_SAVE_OK UI_REMINDERS_OPEN_OK UI_REMINDER_ADD_OK UI_REMINDER_ALARM_DUE \
-  UI_REMINDER_TOGGLE_OK UI_REMINDER_REPEAT_ADVANCE_OK UI_REMINDERS_SAVE_OK; do
+  UI_BACKGROUND_REMINDER_REFRESH_OK UI_REMINDER_TOGGLE_OK UI_REMINDER_REPEAT_ADVANCE_OK UI_REMINDERS_SAVE_OK; do
   grep -Fq "$marker" "$SERIAL1" || { echo "qemu-productivity-utilities: missing phase1 marker: $marker" >&2; exit 1; }
 done
 
@@ -198,4 +205,4 @@ test "$(grep -Fc 'UI_REMINDER_REPEAT_ADVANCE_OK' "$SERIAL1")" -eq 1
 test ! -s "$OUT/qemu-phase1.stderr"
 test ! -s "$OUT/qemu-phase2.stderr"
 
-printf 'qemu-productivity-utilities: OK calculator=standard+programmer+date+units+history reminders=v2+quick-add+recurrence+alarm+reboot agenda=tasks+events+reminders+seven-day runtime=%s\n' "$RUNTIME_DATA"
+printf 'qemu-productivity-utilities: OK calculator=standard+programmer+date+units+history reminders=v2+quick-add+recurrence+background-alarm+reboot agenda=tasks+events+reminders+seven-day runtime=%s\n' "$RUNTIME_DATA"
