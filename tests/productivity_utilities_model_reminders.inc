@@ -128,7 +128,7 @@ bool advance_repeat(Reminder& reminder, const Reminder& now) {
             const std::uint32_t due_day = ordinal(reminder.year, reminder.month, reminder.day);
             const std::uint32_t now_day = ordinal(now.year, now.month, now.day);
             const std::uint32_t extra = ((now_day - due_day) / interval + 1U) * interval;
-            if (due_day > maximum - extra) return false;
+            if (extra > maximum || due_day > maximum - extra) return false;
             reminder = from_stamp(reminder, minute_stamp(reminder) + extra * 1440U);
         }
         return true;
