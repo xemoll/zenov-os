@@ -10,7 +10,7 @@ void background_tick();
 
 struct [[gnu::packed]] BootInfo { uint32_t magic; uint8_t drive; uint8_t e820_count; uint16_t reserved; };
 struct [[gnu::packed]] E820Entry { uint32_t base_low, base_high, length_low, length_high, type, attributes; };
-template <typename T> const volatile T* physical(uintptr_t address) { asm volatile("​" : "+r"(address)); return reinterpret_cast<const volatile T*>(address); }
+template <typename T> const volatile T* physical(uintptr_t address) { asm volatile("" : "+r"(address)); return reinterpret_cast<const volatile T*>(address); }
 const volatile BootInfo* boot_info() { return physical<BootInfo>(0x0500); }
 const volatile E820Entry* e820_entries() { return physical<E820Entry>(0x0600); }
 constexpr uint32_t boot_magic = 0x5A4F5331;
