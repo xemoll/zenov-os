@@ -3,11 +3,14 @@ extern "C" void user_abort_entry();
 extern "C" void isr44();
 namespace paging { uintptr_t fault_address(); }
 namespace process { void record_user_fault(uint32_t vector, uint32_t error, uint32_t eip, uintptr_t address); }
-namespace graphics { void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons); }
+namespace graphics {
+void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons);
+void background_tick();
+}
 
 struct [[gnu::packed]] BootInfo { uint32_t magic; uint8_t drive; uint8_t e820_count; uint16_t reserved; };
 struct [[gnu::packed]] E820Entry { uint32_t base_low, base_high, length_low, length_high, type, attributes; };
-template <typename T> const volatile T* physical(uintptr_t address) { asm volatile("" : "+r"(address)); return reinterpret_cast<const volatile T*>(address); }
+template <typename T> const volatile T* physical(uintptr_t address) { asm volatile("​" : "+r"(address)); return reinterpret_cast<const volatile T*>(address); }
 const volatile BootInfo* boot_info() { return physical<BootInfo>(0x0500); }
 const volatile E820Entry* e820_entries() { return physical<E820Entry>(0x0600); }
 constexpr uint32_t boot_magic = 0x5A4F5331;
@@ -45,7 +48,18 @@ volatile uint16_t key_queue[key_queue_capacity]; volatile uint32_t key_head = 0,
 bool shift_pressed = false, caps_lock = false, extended_scancode = false;
 void key_push(uint16_t key) { const uint32_t next = (key_head + 1) % key_queue_capacity; if (next != key_tail) { key_queue[key_head] = key; key_head = next; } }
 uint16_t key_pop_blocking() {
-    for (;;) { disable_interrupts(); if (key_tail != key_head) { const uint16_t key = key_queue[key_tail]; key_tail = (key_tail + 1) % key_queue_capacity; enable_interrupts(); return key; } asm volatile("sti; hlt; cli"); }
+    for (;;) {
+        disable_interrupts();
+        if (key_tail != key_head) {
+            const uint16_t key = key_queue[key_tail];
+            key_tail = (key_tail + 1) % key_queue_capacity;
+            enable_interrupts();
+            return key;
+        }
+        asm volatile("sti; hlt; cli");
+        enable_interrupts();
+        graphics::background_tick();
+    }
 }
 char key_ascii(uint8_t code, bool shifted) {
     switch (code) {
