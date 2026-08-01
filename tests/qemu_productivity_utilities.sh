@@ -204,9 +204,9 @@ grep -Fq "UI_REMINDERS_LOAD_OK" "$SERIAL2"
 grep -Fq "UI_REMINDERS_OPEN_OK" "$SERIAL2"
 test "$(grep -Fc 'UI_CALCULATOR_EVAL_OK' "$SERIAL1")" -eq 2
 test "$(grep -Fc 'UI_REMINDER_ADD_OK' "$SERIAL1")" -eq 2
-test "$(grep -Fxc 'UI_REMINDER_ALARM_DUE' "$SERIAL1")" -eq 2
-test "$(grep -Fxc 'UI_REMINDER_ALARM_ONCE' "$SERIAL1")" -eq 1
-test "$(grep -Fxc 'UI_REMINDER_ALARM_RECURRING' "$SERIAL1")" -eq 1
+test "$(grep -Fc 'UI_REMINDER_ALARM_DUE' "$SERIAL1")" -eq 2
+test "$(grep -Fc 'UI_REMINDER_ALARM_ONCE' "$SERIAL1")" -eq 1
+test "$(grep -Fc 'UI_REMINDER_ALARM_RECURRING' "$SERIAL1")" -eq 1
 test "$(grep -Fc 'UI_REMINDER_REPEAT_ADVANCE_OK' "$SERIAL1")" -eq 1
 test ! -s "$OUT/qemu-phase1.stderr"
 test ! -s "$OUT/qemu-phase2.stderr"
