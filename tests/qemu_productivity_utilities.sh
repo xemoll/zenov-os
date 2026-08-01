@@ -103,14 +103,14 @@ controller_phase1() {
   wait_for_marker_count "$SERIAL1" "UI_REMINDER_ADD_OK" 2 || { echo quit; return 1; }
   capture "$OUT" reminders-today
 
-  # No input is sent while this wait runs. The alarm must be emitted by the
-  # PIT-driven idle hook and is captured while its 12-second banner is active.
-  wait_for_marker_count "$SERIAL1" "UI_REMINDER_ALARM_DUE" 1 || { echo quit; return 1; }
+  # No input is sent while this wait runs. The first alarm must be emitted by
+  # the PIT-driven idle hook and remain visible until handled or timed out.
+  wait_for_serial_file "$SERIAL1" "UI_REMINDER_ALARM_ONCE" || { echo quit; return 1; }
   wait_for_serial_file "$SERIAL1" "UI_BACKGROUND_REMINDER_REFRESH_OK" || { echo quit; return 1; }
   capture "$OUT" reminders-alarm
   send_key ret
   wait_for_serial_file "$SERIAL1" "UI_REMINDER_TOGGLE_OK" || { echo quit; return 1; }
-  wait_for_marker_count "$SERIAL1" "UI_REMINDER_ALARM_DUE" 2 || { echo quit; return 1; }
+  wait_for_serial_file "$SERIAL1" "UI_REMINDER_ALARM_RECURRING" || { echo quit; return 1; }
   capture "$OUT" reminders-recurring-alarm
   send_key ret
   wait_for_serial_file "$SERIAL1" "UI_REMINDER_REPEAT_ADVANCE_OK" || { echo quit; return 1; }
@@ -194,7 +194,8 @@ for marker in \
   "UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+recurrence+quick-capture+background" \
   UI_PRODUCTIVITY_UTILITIES_STORAGE_OK UI_CALCULATOR_OPEN_OK UI_CALCULATOR_EVAL_OK \
   UI_CALCULATOR_STATE_SAVE_OK UI_REMINDERS_OPEN_OK UI_REMINDER_ADD_OK UI_REMINDER_ALARM_DUE \
-  UI_BACKGROUND_REMINDER_REFRESH_OK UI_REMINDER_TOGGLE_OK UI_REMINDER_REPEAT_ADVANCE_OK UI_REMINDERS_SAVE_OK; do
+  UI_REMINDER_ALARM_ONCE UI_REMINDER_ALARM_RECURRING UI_BACKGROUND_REMINDER_REFRESH_OK \
+  UI_REMINDER_TOGGLE_OK UI_REMINDER_REPEAT_ADVANCE_OK UI_REMINDERS_SAVE_OK; do
   grep -Fq "$marker" "$SERIAL1" || { echo "qemu-productivity-utilities: missing phase1 marker: $marker" >&2; exit 1; }
 done
 
@@ -203,9 +204,11 @@ grep -Fq "UI_REMINDERS_LOAD_OK" "$SERIAL2"
 grep -Fq "UI_REMINDERS_OPEN_OK" "$SERIAL2"
 test "$(grep -Fc 'UI_CALCULATOR_EVAL_OK' "$SERIAL1")" -eq 2
 test "$(grep -Fc 'UI_REMINDER_ADD_OK' "$SERIAL1")" -eq 2
-test "$(grep -Fc 'UI_REMINDER_ALARM_DUE' "$SERIAL1")" -eq 2
+test "$(grep -Fxc 'UI_REMINDER_ALARM_DUE' "$SERIAL1")" -eq 2
+test "$(grep -Fxc 'UI_REMINDER_ALARM_ONCE' "$SERIAL1")" -eq 1
+test "$(grep -Fxc 'UI_REMINDER_ALARM_RECURRING' "$SERIAL1")" -eq 1
 test "$(grep -Fc 'UI_REMINDER_REPEAT_ADVANCE_OK' "$SERIAL1")" -eq 1
 test ! -s "$OUT/qemu-phase1.stderr"
 test ! -s "$OUT/qemu-phase2.stderr"
 
-printf 'qemu-productivity-utilities: OK calculator=standard+programmer+date+units+history reminders=v2+quick-add+recurrence+background-alarm+reboot agenda=tasks+events+reminders+seven-day runtime=%s\n' "$RUNTIME_DATA"
+printf 'qemu-productivity-utilities: OK calculator=standard+programmer+date+units+history reminders=v2+quick-add+recurrence+queued-background-alarm+reboot agenda=tasks+events+reminders+seven-day runtime=%s\n' "$RUNTIME_DATA"
