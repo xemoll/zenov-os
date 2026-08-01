@@ -12,6 +12,7 @@ constexpr uint8_t productivity_reminder_capacity = 24U;
 constexpr uint8_t productivity_reminder_input_capacity = 65U;
 constexpr uint8_t productivity_agenda_capacity = 48U;
 constexpr uint8_t productivity_agenda_visible_rows = 8U;
+constexpr uint8_t productivity_reminder_no_source = 0xFFU;
 constexpr int32_t productivity_calc_int_max = 2147483647;
 constexpr int32_t productivity_calc_int_min = (-2147483647 - 1);
 
@@ -78,6 +79,7 @@ uint8_t productivity_reminder_input_size = 0U;
 ProductivityReminderRepeat productivity_reminder_add_repeat = ProductivityReminderRepeat::none;
 bool productivity_utilities_storage_ready = false;
 bool productivity_reminder_banner_active = false;
+uint8_t productivity_reminder_banner_source = productivity_reminder_no_source;
 char productivity_reminder_banner_title[41]{};
 ProductivityReminderRepeat productivity_reminder_banner_repeat = ProductivityReminderRepeat::none;
 uint32_t productivity_reminder_banner_started = 0U;
