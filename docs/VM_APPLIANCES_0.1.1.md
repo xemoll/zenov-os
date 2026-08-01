@@ -1,117 +1,130 @@
 # ZenovOS 0.1.1 VM appliances
 
-The verified appliance distribution is published as [`v0.1.1-vm2`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm2), pinned to source commit [`d60cf00f67bc07f00070a56b237843bc8387866f`](https://github.com/xemoll/zenov-os/commit/d60cf00f67bc07f00070a56b237843bc8387866f).
+The current verified appliance distribution is [`v0.1.1-vm3`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm3). It publishes the bootable ISO, writable RAW/QCOW2/VDI/VMDK disks, preparation helpers, the transactional lifecycle manager and provenance as 15 direct assets.
 
-ZenovOS 0.1.1 uses a read-only BIOS El Torito ISO for boot and a separate writable ZenovFS disk for persistent state. The VM appliance pipeline adds native convenience containers for QEMU/KVM, VirtualBox and VMware without changing the guest-visible filesystem bytes.
+Older [`v0.1.1-vm2`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm2) and [`v0.1.1-vm1`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm1) releases remain immutable historical snapshots.
+
+ZenovOS boots from a read-only BIOS El Torito ISO and stores persistent state on a separate writable ZenovFS disk. Convenience containers change the host-side disk format without changing the canonical guest-visible filesystem bytes.
 
 ## Distribution files
 
 | File | Purpose |
 | --- | --- |
 | `ZenovOS-0.1.1-x86.iso` | Read-only ISO 9660 / El Torito boot medium |
-| `ZenovOS-0.1.1-data.img` | Canonical raw 16 MiB ZenovFS disk |
-| `ZenovOS-0.1.1-data.qcow2` | QEMU/KVM writable convenience disk |
-| `ZenovOS-0.1.1-data.vdi` | VirtualBox writable convenience disk |
-| `ZenovOS-0.1.1-data.vmdk` | VMware writable convenience disk |
+| `ZenovOS-0.1.1-x86.img` | Raw FAT12 boot-image fallback |
+| `ZenovOS-0.1.1-data.img` | Canonical raw 16 MiB ZenovFS seed |
+| `ZenovOS-0.1.1-data.qcow2` | QEMU/KVM writable disk |
+| `ZenovOS-0.1.1-data.vdi` | VirtualBox writable disk |
+| `ZenovOS-0.1.1-data.vmdk` | VMware writable disk |
 | `ZenovOS-0.1.1.vmx` | VMware Workstation/Fusion configuration |
-| `prepare-vm.sh` | Linux/macOS preparation and launch helper |
-| `prepare-vm.ps1` | Windows PowerShell preparation and launch helper |
+| `prepare-vm.sh` | Linux/macOS preparation helper |
+| `prepare-vm.ps1` | Windows PowerShell preparation helper |
+| `manage-vm.sh` | Transactional lifecycle manager |
+| `VM-QUICKSTART.txt` | Setup, backup, reset and recovery guide |
+| `VM-APPLIANCE-MANIFEST.json` | Format and guest-content provenance |
+| `BUILD-MANIFEST.json` | Build provenance |
+| `SOURCE-REVISION.txt` | Exact release source commit |
+| `SHA256SUMS.txt` | Complete checksum manifest |
 
-The direct `dist-vm` package intentionally does not require ZIP extraction.
+The package deliberately requires no ZIP extraction.
 
-Primary published checksums:
+## Canonical content and format validation
 
-```text
-ISO:      99619eadce4b881652109366887ddb9bc7ee9b5ec5a99b986b78346ab41f6ddd
-Data IMG: 2d5d27155409c4284c071e0689a8184895840e541fd28ea78111b1b45e693c7b
-```
+`ZenovOS-0.1.1-data.img` is the content authority. Every QCOW2, VDI and VMDK image must satisfy:
 
-Use `SHA256SUMS.txt` from the release for the complete 14-file asset set.
+1. the declared format is confirmed with `qemu-img info`;
+2. virtual size is exactly 16,777,216 bytes;
+3. `qemu-img check` succeeds;
+4. the image converts back to raw;
+5. the round-trip raw bytes match the canonical ZenovFS seed exactly.
 
-## Verified architecture
+Container metadata can contain format-generated identifiers, so byte-identical QCOW2/VDI/VMDK files are not claimed across unrelated tool builds. Reproducibility is defined at the guest-visible raw-content boundary. The ISO, raw images, scripts and textual manifests are deterministic under the pinned build epoch.
 
-The raw ZenovFS image is the canonical content authority. `qemu-img` creates QCOW2, VDI and VMDK containers. Each generated image must pass all of the following checks:
+## Optical boot and persistence acceptance
 
-1. the declared container format is confirmed with `qemu-img info`;
-2. the virtual size is exactly 16,777,216 bytes;
-3. `qemu-img check` reports a consistent image;
-4. the container is converted back to raw;
-5. the round-trip raw bytes are compared byte-for-byte with the canonical ZenovFS image.
+`tests/qemu_iso_smoke.sh` boots the ISO as an IDE CD-ROM and requires the kernel, ZenovFS mount and graphical desktop readiness markers.
 
-Container metadata can contain format-specific identifiers, so byte-identical container files are not claimed across independent `qemu-img` builds. Reproducibility is defined at the guest-visible disk-content boundary. The canonical appliance manifest, launch scripts, quickstart and VMware configuration remain byte-identical across the semantic rebuild gate.
+`tests/qemu_iso_persistence.sh`:
 
-## Two-boot persistence gate
+1. creates a writable QCOW2 disk from the canonical seed;
+2. boots the ISO and writes a persistent payload;
+3. runs `sync` and shuts the guest down;
+4. boots the same ISO and disk again;
+5. reads the payload back;
+6. runs ZenovFS `fsck`;
+7. validates the mutated filesystem offline.
 
-`tests/qemu_iso_persistence.sh` performs a real optical-boot persistence test:
+The gate requires two independent boot markers and observes the persistence payload in both phases.
 
-1. converts the canonical data image to QCOW2;
-2. boots ZenovOS from the ISO with the QCOW2 disk attached as primary IDE storage;
-3. writes `ISO_VM_PERSISTENCE_OK` into ZenovFS;
-4. executes `sync` and shuts down QEMU through the monitor;
-5. boots the same ISO and writable QCOW2 disk again;
-6. reads the persisted payload;
-7. runs `fsck` and validates the converted-back ZenovFS image.
+## Transactional lifecycle acceptance
 
-The gate requires two independent `ZENOVOS_BOOT_OK` markers and observes the payload in both phases. The publication workflow repeats this gate from a clean checkout of the exact release source.
+`packaging/manage-vm.sh` provides `status`, `create`, `verify`, `backup`, `restore`, `reset` and `remove` for RAW, QCOW2, VDI and VMDK runtime disks.
 
-## Hypervisor boundary
+The lifecycle contract includes:
 
-QEMU is the automated execution target. VirtualBox and VMware artifacts are validated structurally and through content round-trips, but proprietary hypervisor binaries are not executed on GitHub-hosted runners. Therefore the project claims prepared configurations for those hypervisors, not automated runtime certification.
+- SHA-256 validation of the canonical seed;
+- exact virtual-size and format checks;
+- verified temporary images before atomic replacement;
+- backup-before-reset, restore and remove;
+- one SHA-256 sidecar per backup;
+- rejection of a tampered backup before runtime state changes;
+- fail-closed locking for concurrent mutations;
+- refusal of symlink targets and unsafe state directories.
+
+`tests/vm_lifecycle_test.sh` mutates guest-visible data, backs it up, resets to the seed, restores the exact changed bytes, rejects checksum tampering, rejects an active lock and exercises all four advertised runtime formats.
+
+## Publication contract
+
+The VM Image 3 workflow publishes only after `make all vm-check` succeeds. It then:
+
+- verifies exactly 15 local assets and all checksum entries;
+- creates a draft release at the exact source commit;
+- uploads and downloads every asset;
+- performs byte-for-byte comparison;
+- verifies the exact sorted asset-name set;
+- makes the release public and marks it latest;
+- downloads the ISO again through the public unauthenticated URL and compares it with the verified local file.
+
+This final public-download check prevents a green build from being mistaken for a user-accessible release.
 
 ## Required VM configuration
 
 - 32-bit x86 guest;
 - legacy BIOS firmware;
-- 64 MiB memory;
+- 64 MiB RAM;
 - one CPU;
-- ISO attached as an IDE CD/DVD drive;
-- writable ZenovFS image attached as primary IDE disk;
-- optical drive first in boot order;
-- networking disabled because ZenovOS 0.1.1 has no network stack.
+- ISO attached as IDE CD/DVD and first in boot order;
+- exactly one writable ZenovOS data disk attached as primary IDE storage;
+- networking disabled.
 
-Attach exactly one writable ZenovOS data disk. Shut down the VM before copying, replacing or resetting it.
+Attach only one ZenovOS data disk. Shut down the VM before copying, replacing or restoring the disk.
 
-## Commands
-
-Build and verify the complete VM distribution:
+## Build commands
 
 ```bash
 make clean
 make all vm-check
 ```
 
-The resulting direct files are placed in `dist-vm/`.
-
-Prepare or start a local VM:
+Focused stages:
 
 ```bash
-./prepare-vm.sh qemu
-./prepare-vm.sh virtualbox
-./prepare-vm.sh vmware
+make iso-check
+make vm-appliances-semantic
+make vm-lifecycle-check
+make vm-package
 ```
 
-Windows PowerShell equivalents:
+The resulting direct package is written to `dist-vm/`.
 
-```powershell
-.\prepare-vm.ps1 Qemu
-.\prepare-vm.ps1 VirtualBox
-.\prepare-vm.ps1 VMware
-```
+## Hypervisor boundary
 
-The helpers verify the release checksum entries for the ISO and canonical raw data seed before preparing the selected writable format. Use the documented reset option only after backing up the current writable disk.
+QEMU is executed in automated acceptance testing. VirtualBox and VMware artifacts are validated structurally and by canonical raw round-trip, but proprietary hypervisor binaries are not run in GitHub-hosted CI. The project therefore claims prepared and verified disk/configuration artifacts, not full automated certification of those products.
 
-## Publication evidence
+## Current limitations
 
-VM Image 2 was published by workflow run `30662768581`. All 14 assets were uploaded as a draft, downloaded back and compared byte-for-byte before the release was made public. See [the complete release notes](releases/v0.1.1-vm2.md).
-
-## Current non-goals
-
-This work does not claim:
-
-- UEFI boot;
-- installation of the bootloader onto a virtual hard disk;
-- installation on physical hardware;
-- VirtualBox Guest Additions or VMware Tools;
-- networking, audio or accelerated 3D graphics.
-
-Those features require new kernel, bootloader and installer contracts rather than packaging changes.
+- legacy BIOS only;
+- live optical boot rather than a bootloader installed onto the writable disk;
+- separate boot and data media;
+- no UEFI or physical-hardware installer;
+- no networking, audio, guest additions or accelerated 3D.
