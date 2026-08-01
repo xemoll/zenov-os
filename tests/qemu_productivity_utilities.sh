@@ -35,11 +35,17 @@ send_key() {
   sleep 0.04
 }
 
+send_input_key() {
+  local key="$1"
+  echo "sendkey $key 20"
+  # The software framebuffer redraws after each character. Pace text input so
+  # evidence never captures a partially drained PS/2 queue.
+  sleep 0.35
+}
+
 capture() {
   local out="$1" name="$2"
   local file="$(cd "$out" && pwd)/${name}.ppm"
-  # A full scene redraw is intentionally performed for every input key. Give the
-  # guest enough time to drain its bounded key queue before recording evidence.
   sleep 2.5
   echo "screendump $file"
   sleep 0.3
@@ -91,13 +97,13 @@ controller_phase1() {
   wait_for_serial_file "$SERIAL1" "UI_REMINDERS_OPEN_OK" || { echo quit; return 1; }
 
   send_key a
-  for key in d r i n k spc w a t e r spc shift-2 shift-equal 1 m; do send_key "$key"; done
+  for key in d r i n k spc w a t e r spc shift-2 shift-equal 1 m; do send_input_key "$key"; done
   capture "$OUT" reminders-quick-add
   send_key ret
   wait_for_marker_count "$SERIAL1" "UI_REMINDER_ADD_OK" 1 || { echo quit; return 1; }
 
   send_key a
-  for key in s t a n d spc u p spc shift-2 shift-equal 1 m spc shift-1 d a i l y; do send_key "$key"; done
+  for key in s t a n d spc u p spc shift-2 shift-equal 1 m spc shift-1 d a i l y; do send_input_key "$key"; done
   capture "$OUT" reminders-quick-add-recurring
   send_key ret
   wait_for_marker_count "$SERIAL1" "UI_REMINDER_ADD_OK" 2 || { echo quit; return 1; }
@@ -123,7 +129,7 @@ controller_phase1() {
 }
 
 set +e
-controller_phase1 | timeout 240s "$QEMU" \
+controller_phase1 | timeout 255s "$QEMU" \
   -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
   -drive "file=$RUNTIME_DATA,format=raw,if=ide,index=0,media=disk" \
   -boot a -m 32M -machine pc,vmport=off -vga std -display none \
