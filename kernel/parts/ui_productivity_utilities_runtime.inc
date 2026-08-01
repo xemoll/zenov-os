@@ -35,7 +35,7 @@ bool init() {
     productivity_calculator_load_state();
     productivity_reminders_load();
     productivity_agenda_rebuild();
-    serial::line("UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+alarms");
+    serial::line("UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+recurrence+quick-capture");
     return true;
 }
 
