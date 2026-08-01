@@ -38,9 +38,11 @@ send_key() {
 capture() {
   local out="$1" name="$2"
   local file="$(cd "$out" && pwd)/${name}.ppm"
-  sleep 0.8
+  # A full scene redraw is intentionally performed for every input key. Give the
+  # guest enough time to drain its bounded key queue before recording evidence.
+  sleep 2.5
   echo "screendump $file"
-  sleep 0.2
+  sleep 0.3
 }
 
 open_start_result() {
@@ -101,7 +103,8 @@ controller_phase1() {
   wait_for_marker_count "$SERIAL1" "UI_REMINDER_ADD_OK" 2 || { echo quit; return 1; }
   capture "$OUT" reminders-today
 
-  sleep 65
+  # No input is sent while this wait runs. The alarm must be emitted by the
+  # PIT-driven idle hook and is captured while its 12-second banner is active.
   wait_for_marker_count "$SERIAL1" "UI_REMINDER_ALARM_DUE" 1 || { echo quit; return 1; }
   wait_for_serial_file "$SERIAL1" "UI_BACKGROUND_REMINDER_REFRESH_OK" || { echo quit; return 1; }
   capture "$OUT" reminders-alarm
