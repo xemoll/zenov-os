@@ -1,0 +1,5 @@
+#include "ui_productivity_tasks_types.inc"
+#include "ui_productivity_tasks_index.inc"
+#include "ui_productivity_tasks_storage.inc"
+#include "ui_productivity_tasks_ui.inc"
+#include "ui_productivity_tasks_runtime.inc"

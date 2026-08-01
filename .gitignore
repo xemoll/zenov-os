@@ -1,6 +1,7 @@
 # ZenovOS build and release outputs
 /build/
 /dist/
+/dist-vm/
 /out/
 *.o
 *.obj
