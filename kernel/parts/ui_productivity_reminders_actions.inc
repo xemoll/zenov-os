@@ -112,11 +112,11 @@ bool productivity_reminders_cycle_selected_repeat() {
     const ProductivityAgendaItem item = productivity_agenda[productivity_agenda_focus];
     if (item.kind != ProductivityAgendaKind::reminder || item.source_index >= productivity_reminder_count) return false;
     ProductivityReminder& reminder = productivity_reminders[item.source_index];
-    const ProductivityReminderRepeat previous = reminder.repeat;
+    const ProductivityReminder previous = reminder;
     reminder.repeat = productivity_reminder_repeat_next(reminder.repeat);
     reminder.repeat_day = reminder.day;
     reminder.notified = false;
-    if (!productivity_reminders_save()) { reminder.repeat = previous; return false; }
+    if (!productivity_reminders_save()) { reminder = previous; return false; }
     productivity_agenda_rebuild();
     serial::line("UI_REMINDER_REPEAT_CHANGE_OK");
     return true;
