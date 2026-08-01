@@ -44,6 +44,12 @@ bool productivity_reminder_advance_repeat(ProductivityReminder& reminder) {
     return false;
 }
 
+void productivity_reminder_clear_banner_for(uint8_t source_index) {
+    if (!productivity_reminder_banner_active || productivity_reminder_banner_source != source_index) return;
+    productivity_reminder_banner_active = false;
+    productivity_reminder_banner_source = productivity_reminder_no_source;
+}
+
 bool productivity_reminders_add_quick() {
     if (productivity_reminder_count >= productivity_reminder_capacity) return false;
     ProductivityReminder reminder{};
@@ -100,6 +106,7 @@ bool productivity_reminders_toggle_selected() {
     } else reminder.done = !reminder.done;
     reminder.notified = false;
     if (!productivity_reminders_save()) { reminder = previous; return false; }
+    productivity_reminder_clear_banner_for(item.source_index);
     productivity_agenda_rebuild();
     if (exhausted) serial::line("UI_REMINDER_REPEAT_EXHAUSTED");
     else if (recurring_completion) serial::line("UI_REMINDER_REPEAT_ADVANCE_OK");
@@ -117,6 +124,7 @@ bool productivity_reminders_cycle_selected_repeat() {
     reminder.repeat_day = reminder.day;
     reminder.notified = false;
     if (!productivity_reminders_save()) { reminder = previous; return false; }
+    productivity_reminder_clear_banner_for(item.source_index);
     productivity_agenda_rebuild();
     serial::line("UI_REMINDER_REPEAT_CHANGE_OK");
     return true;
@@ -137,6 +145,14 @@ bool productivity_reminders_delete_selected() {
         ++productivity_reminder_count;
         return false;
     }
+    if (productivity_reminder_banner_active) {
+        if (productivity_reminder_banner_source == removed) {
+            productivity_reminder_banner_active = false;
+            productivity_reminder_banner_source = productivity_reminder_no_source;
+        } else if (productivity_reminder_banner_source != productivity_reminder_no_source && productivity_reminder_banner_source > removed) {
+            --productivity_reminder_banner_source;
+        }
+    }
     productivity_agenda_rebuild();
     serial::line("UI_REMINDER_DELETE_OK");
     return true;
@@ -152,13 +168,20 @@ bool productivity_reminders_snooze_selected() {
     reminder.done = false;
     reminder.notified = false;
     if (!productivity_reminders_save()) { reminder = previous; return false; }
+    productivity_reminder_clear_banner_for(item.source_index);
     productivity_agenda_rebuild();
     serial::line("UI_REMINDER_SNOOZE_OK");
     return true;
 }
 
 bool productivity_reminders_check_due() {
-    bool changed = false;
+    if (productivity_reminder_banner_active) {
+        if (timer_ticks - productivity_reminder_banner_started <= 1200U) return false;
+        productivity_reminder_banner_active = false;
+        productivity_reminder_banner_source = productivity_reminder_no_source;
+        return true;
+    }
+
     uint16_t year = 2026U; uint8_t month = 1U, day = 1U, hour = 0U, minute = 0U;
     if (!productivity_utility_now(year, month, day, hour, minute)) return false;
     for (uint8_t index = 0U; index < productivity_reminder_count; ++index) {
@@ -168,18 +191,16 @@ bool productivity_reminders_check_due() {
             year, month, day, hour, minute) > 0) continue;
         reminder.notified = true;
         productivity_reminder_banner_active = true;
+        productivity_reminder_banner_source = index;
         productivity_reminder_banner_started = timer_ticks;
         productivity_reminder_banner_repeat = reminder.repeat;
         string_copy(productivity_reminder_banner_title, reminder.title, sizeof(productivity_reminder_banner_title));
         serial::line("UI_REMINDER_ALARM_DUE");
-        changed = true;
-        break;
+        serial::line(reminder.repeat == ProductivityReminderRepeat::none ?
+            "UI_REMINDER_ALARM_ONCE" : "UI_REMINDER_ALARM_RECURRING");
+        return true;
     }
-    if (productivity_reminder_banner_active && timer_ticks - productivity_reminder_banner_started > 1200U) {
-        productivity_reminder_banner_active = false;
-        changed = true;
-    }
-    return changed;
+    return false;
 }
 
 void productivity_reminders_open_source() {
