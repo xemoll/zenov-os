@@ -57,6 +57,12 @@ Supported repeat modes are one-shot, daily, weekly and monthly. Completing a rec
 
 This is a deliberate local subset, not a claim of complete iCalendar RRULE support. There is no `COUNT`, `UNTIL`, `BYDAY`, exception-date or timezone rule engine.
 
+### Alarm delivery
+
+Reminder checks run from the PIT-driven idle wake path while the shell is waiting for input. This provides real idle desktop delivery within the current single-loop architecture; it is not presented as a preemptive daemon or a general background task scheduler.
+
+Only one banner may be active at a time. Simultaneous due reminders are serialized in source order so a later reminder cannot replace a visible one. The active banner remains for twelve seconds or until the corresponding reminder is completed, snoozed, changed or deleted. The next due reminder is then eligible for delivery. Banner state is tied to the reminder source index, including index correction after deletion.
+
 ### Agenda views and commands
 
 The application now uses a stable left navigation rail, central agenda list and persistent details pane. Views are:
@@ -73,7 +79,7 @@ Agenda continues to merge three canonical local sources without duplicating them
 - due-dated Markdown tasks from Notes;
 - Calendar events.
 
-Commands include complete/advance, repeat-mode cycling, ten-minute snooze, deletion and source navigation. Due reminders emit a local desktop banner with the repeat mode and a serial audit marker.
+Commands include complete/advance, repeat-mode cycling, ten-minute snooze, deletion and source navigation. Due reminders emit a local desktop banner with the repeat mode and serial audit markers distinguishing one-shot and recurring delivery.
 
 ## Verification boundary
 
@@ -83,8 +89,9 @@ The focused workflow validates:
 - strict native image build and existing system checks;
 - guarded ZenovFS reads and writes;
 - two-phase QEMU interaction with reboot persistence;
+- idle delivery without keyboard input, then ordered one-shot and recurring alarm handling;
 - an independent runtime-image verifier that checks one completed one-shot reminder and one advanced daily reminder;
-- framebuffer evidence for Quick Capture, active alarms, recurring state, the seven-day view and rebooted state;
+- framebuffer evidence for complete Quick Capture input, active one-shot and recurring banners, the seven-day view and rebooted state;
 - deterministic rebuild.
 
 Not implemented: shared lists, cloud synchronization, location triggers, background audio, timezone databases, natural-language scheduling, full RFC 5545 recurrence, arbitrary precision, scientific graphing or currency feeds.
