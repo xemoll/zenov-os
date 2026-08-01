@@ -157,9 +157,10 @@ bool productivity_reminders_snooze_selected() {
     return true;
 }
 
-void productivity_reminders_check_due() {
+bool productivity_reminders_check_due() {
+    bool changed = false;
     uint16_t year = 2026U; uint8_t month = 1U, day = 1U, hour = 0U, minute = 0U;
-    if (!productivity_utility_now(year, month, day, hour, minute)) return;
+    if (!productivity_utility_now(year, month, day, hour, minute)) return false;
     for (uint8_t index = 0U; index < productivity_reminder_count; ++index) {
         ProductivityReminder& reminder = productivity_reminders[index];
         if (reminder.done || reminder.notified) continue;
@@ -171,10 +172,14 @@ void productivity_reminders_check_due() {
         productivity_reminder_banner_repeat = reminder.repeat;
         string_copy(productivity_reminder_banner_title, reminder.title, sizeof(productivity_reminder_banner_title));
         serial::line("UI_REMINDER_ALARM_DUE");
+        changed = true;
         break;
     }
-    if (productivity_reminder_banner_active && timer_ticks - productivity_reminder_banner_started > 1200U)
+    if (productivity_reminder_banner_active && timer_ticks - productivity_reminder_banner_started > 1200U) {
         productivity_reminder_banner_active = false;
+        changed = true;
+    }
+    return changed;
 }
 
 void productivity_reminders_open_source() {
