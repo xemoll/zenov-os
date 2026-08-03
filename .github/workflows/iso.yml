@@ -80,8 +80,9 @@ jobs:
           test "$(stat -c%s build/KERNEL.BIN)" -le 524288
           grep -Fq 'live_image_pack_bytes =' build/generated/live_zenovfs.hpp
           grep -Fq 'live_image_compressed_bytes =' build/generated/live_zenovfs.hpp
-          raw="$(awk '/live_image_pack_bytes =/ {gsub(/[^0-9]/, "", $0); print $0}' build/generated/live_zenovfs.hpp)"
-          compressed="$(awk '/live_image_compressed_bytes =/ {gsub(/[^0-9]/, "", $0); print $0}' build/generated/live_zenovfs.hpp)"
+          raw="$(awk '/live_image_pack_bytes =/ {value=$5; gsub(/[^0-9]/, "", value); print value}' build/generated/live_zenovfs.hpp)"
+          compressed="$(awk '/live_image_compressed_bytes =/ {value=$5; gsub(/[^0-9]/, "", value); print value}' build/generated/live_zenovfs.hpp)"
+          [[ "$raw" =~ ^[0-9]+$ && "$compressed" =~ ^[0-9]+$ ]]
           test "$raw" -gt "$compressed"
           printf 'ZLIVE003_COMPRESSION_OK raw=%s compressed=%s\n' \
             "$raw" "$compressed" | tee build/live-compression.txt
