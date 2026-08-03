@@ -51,6 +51,8 @@ jobs:
           bash -n tools/build_iso.sh
           bash -n tests/qemu_iso_smoke.sh
           bash -n tests/qemu_iso_persistence.sh
+          grep -Fq ZLIVE002 tools/live_image_pack.cpp
+          grep -Fq 'format=ZLIVE002' kernel/parts/storage_live_image.inc
           grep -Fq 'ZENOVFS_LIVE_READY' kernel/parts/storage_ata_deadline_init.inc
           grep -Fq 'live_image_initialize' kernel/parts/storage_live_image.inc
           grep -Fq 'generated/live_zenovfs.hpp' kernel/parts/storage.inc
@@ -75,6 +77,13 @@ jobs:
           test -s build/ZenovOS-0.1.1-x86.iso
           test -s build/generated/live_zenovfs.hpp
           test "$(stat -c%s build/KERNEL.BIN)" -le 524288
+          grep -Fq 'live_image_pack_bytes =' build/generated/live_zenovfs.hpp
+          kernel_end="$(awk '/__kernel_end = \./ {print $1}' build/kernel.map | tail -1)"
+          [[ "$kernel_end" =~ ^0x[0-9a-fA-F]+$ ]]
+          headroom=$((0xA0000 - kernel_end))
+          test "$headroom" -ge 1024
+          printf 'LOW_MEMORY_HEADROOM_OK kernel_end=%s bytes=%s\n' \
+            "$kernel_end" "$headroom" | tee build/live-low-memory.txt
           test ! -e dist-vm
           sha256sum build/ZenovOS-0.1.1-x86.iso | tee build/live-iso.sha256
           xorriso -indev build/ZenovOS-0.1.1-x86.iso -report_el_torito plain \
@@ -88,7 +97,7 @@ jobs:
           set -euo pipefail
           for log in build/qemu/iso/serial.log build/qemu/iso-live/serial.log; do
             grep -Fq ZENOVOS_BOOT_OK "$log"
-            grep -Fq ZENOVFS_LIVE_IMAGE_OK "$log"
+            grep -Fq 'ZENOVFS_LIVE_IMAGE_OK source=embedded format=ZLIVE002' "$log"
             grep -Fq 'ZENOVFS_LIVE_READY mode=ram-overlay persistence=session' "$log"
             grep -Fq 'ZENOVFS_STORAGE_MODE live-iso' "$log"
             grep -Fq ZENOVFS_MOUNT_OK "$log"
@@ -110,6 +119,7 @@ jobs:
           path: |
             build/ZenovOS-0.1.1-x86.iso
             build/live-iso.sha256
+            build/live-low-memory.txt
             build/live-el-torito.txt
             build/generated/live_zenovfs.hpp
             build/qemu/iso/
