@@ -1,0 +1,149 @@
+name: Verify ZenovOS VM4 public AMD-V-safe files
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/verify-vm4-public.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zenov-os-vm4-public-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RELEASE_TAG: v0.1.1-vm4
+  EXPECTED_SOURCE: 21b34e1d5941e486e00bb07a913ce705a84ae398
+
+jobs:
+  verify-public-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Install public verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq xorriso qemu-utils
+
+      - name: Verify public release without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/vm4-public-verify"
+          rm -rf "$out"
+          mkdir -p "$out"
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"
+
+          env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --location \
+            --retry 5 --retry-delay 2 --retry-all-errors \
+            --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            "$api" -o "$out/release.json"
+
+          jq -e --arg tag "$RELEASE_TAG" --arg source "$EXPECTED_SOURCE" '
+            .tag_name == $tag and
+            .draft == false and
+            .prerelease == false and
+            .target_commitish == $source and
+            (.assets | length) == 15
+          ' "$out/release.json" >/dev/null
+
+          expected_names="$(printf '%s\n' \
+            BUILD-MANIFEST.json \
+            SHA256SUMS.txt \
+            SOURCE-REVISION.txt \
+            VM-APPLIANCE-MANIFEST.json \
+            VM-QUICKSTART.txt \
+            ZenovOS-0.1.1-data.img \
+            ZenovOS-0.1.1-data.qcow2 \
+            ZenovOS-0.1.1-data.vdi \
+            ZenovOS-0.1.1-data.vmdk \
+            ZenovOS-0.1.1-x86.img \
+            ZenovOS-0.1.1-x86.iso \
+            ZenovOS-0.1.1.vmx \
+            manage-vm.sh \
+            prepare-vm.ps1 \
+            prepare-vm.sh | sort)"
+          actual_names="$(jq -r '.assets[].name' "$out/release.json" | sort)"
+          test "$actual_names" = "$expected_names"
+
+          asset_url() {
+            local url
+            url="$(jq -r --arg name "$1" \
+              '.assets[] | select(.name == $name) | .browser_download_url' \
+              "$out/release.json")"
+            test -n "$url"
+            test "$url" != null
+            printf '%s\n' "$url"
+          }
+
+          for name in \
+            ZenovOS-0.1.1-x86.iso \
+            ZenovOS-0.1.1-data.vdi \
+            prepare-vm.sh \
+            SHA256SUMS.txt \
+            SOURCE-REVISION.txt; do
+            env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --location \
+              --retry 5 --retry-delay 2 --retry-all-errors \
+              --silent --show-error \
+              "$(asset_url "$name")" -o "$out/$name"
+            test -s "$out/$name"
+          done
+
+          source_revision="$(tr -d '\r\n' < "$out/SOURCE-REVISION.txt")"
+          test "$source_revision" = "$EXPECTED_SOURCE"
+
+          for name in ZenovOS-0.1.1-x86.iso ZenovOS-0.1.1-data.vdi prepare-vm.sh; do
+            grep -E "^[0-9a-f]{64}  ${name//./\\.}$" \
+              "$out/SHA256SUMS.txt" > "$out/$name.sha256"
+            (cd "$out" && sha256sum -c "$name.sha256")
+          done
+
+          bash -n "$out/prepare-vm.sh"
+          grep -Fq 'ZENOV_VM_NAME' "$out/prepare-vm.sh"
+          grep -Fq 'ZENOV_VM_REPAIR' "$out/prepare-vm.sh"
+          grep -Fq 'ZENOV_VM_SOFTWARE_FALLBACK' "$out/prepare-vm.sh"
+          grep -Fq 'ZENOV_QEMU_ACCEL' "$out/prepare-vm.sh"
+          grep -Fq 'VERR_(SVM_DISABLED|SVM_IN_USE' "$out/prepare-vm.sh"
+          grep -Fq "run_qemu_image \"\$VDI\" vdi" "$out/prepare-vm.sh"
+          grep -Fq -- "-accel 'tcg,thread=multi'" "$out/prepare-vm.sh"
+          grep -Fq "VM_NAME=\"\${ZENOV_VM_NAME:-ZenovOS \$VERSION}\"" "$out/prepare-vm.sh"
+
+          qemu-img info --output=json -f vdi "$out/ZenovOS-0.1.1-data.vdi" \
+            | tee "$out/vdi-info.json"
+          test "$(jq -r '.format' "$out/vdi-info.json")" = vdi
+          test "$(jq -r '."virtual-size"' "$out/vdi-info.json")" -eq 16777216
+          qemu-img check -q -f vdi "$out/ZenovOS-0.1.1-data.vdi"
+
+          xorriso -indev "$out/ZenovOS-0.1.1-x86.iso" \
+            -report_el_torito plain 2>&1 | tee "$out/el-torito.txt"
+          grep -Fq 'El Torito boot img' "$out/el-torito.txt"
+          grep -Fq '/BOOT/ZENOVOS.IMG' "$out/el-torito.txt"
+
+          iso_sha="$(awk '$2 == "ZenovOS-0.1.1-x86.iso" {print $1}' "$out/SHA256SUMS.txt")"
+          vdi_sha="$(awk '$2 == "ZenovOS-0.1.1-data.vdi" {print $1}' "$out/SHA256SUMS.txt")"
+          helper_sha="$(awk '$2 == "prepare-vm.sh" {print $1}' "$out/SHA256SUMS.txt")"
+          printf 'PUBLIC_VM4_OK source=%s assets=15 iso=%s vdi=%s helper=%s fallback=tcg vm=gergre\n' \
+            "$source_revision" "$iso_sha" "$vdi_sha" "$helper_sha" \
+            | tee "$out/result.txt"
+          printf 'EVIDENCE_DIR=%s\n' "$out" >> "$GITHUB_ENV"
+
+      - name: Upload public VM4 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-vm4-public-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            ${{ env.EVIDENCE_DIR }}/release.json
+            ${{ env.EVIDENCE_DIR }}/SOURCE-REVISION.txt
+            ${{ env.EVIDENCE_DIR }}/SHA256SUMS.txt
+            ${{ env.EVIDENCE_DIR }}/*.sha256
+            ${{ env.EVIDENCE_DIR }}/vdi-info.json
+            ${{ env.EVIDENCE_DIR }}/el-torito.txt
+            ${{ env.EVIDENCE_DIR }}/result.txt
