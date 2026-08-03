@@ -22,8 +22,8 @@ The virtual machine must provide:
 
 At boot, the El Torito loader starts the verified FAT12 image and kernel. When no persistent ATA disk is present, the kernel:
 
-1. decodes the deterministic embedded ZenovFS sparse image;
-2. exposes it as a 16 MiB logical block device;
+1. validates the deterministic embedded `ZLIVE002` ZenovFS sparse image;
+2. exposes it as a 16 MiB logical block device without a decoding buffer;
 3. creates a writable 512 KiB RAM copy-on-write overlay;
 4. mounts ZenovFS normally through the typed block-device API;
 5. initializes applications, signed policy, package state, security services and the graphical shell;
@@ -32,7 +32,7 @@ At boot, the El Torito loader starts the verified FAT12 image and kernel. When n
 Expected runtime evidence includes:
 
 ```text
-ZENOVFS_LIVE_IMAGE_OK source=embedded sparse=base64
+ZENOVFS_LIVE_IMAGE_OK source=embedded format=ZLIVE002
 RAM_BLOCK_DEVICE_READY sectors=32768 overlay=1024
 ZENOVFS_LIVE_READY mode=ram-overlay persistence=session
 ZENOVFS_STORAGE_MODE live-iso
@@ -49,12 +49,16 @@ Live-session changes are deliberately discarded after reboot or power-off. Persi
 
 If a valid ZenovFS ATA disk is attached, the existing persistent storage path remains available internally for development and regression testing. The public launch contract, however, requires only the ISO.
 
+## Compact low-memory representation
+
+The canonical 16 MiB image is converted into sorted non-zero byte ranges. `ZLIVE002` stores an 8-byte descriptor per range and concatenates the range data directly as a generated binary constant. The kernel reads that representation in place; it does not carry Base64 text and does not allocate a second decoded copy. This keeps the complete low-memory kernel below the VGA aperture used by the Legacy BIOS graphics path.
+
 ## Verification
 
 The release gate must prove all of the following from the exact source commit:
 
 - deterministic generation of the embedded sparse ZenovFS payload;
-- kernel size below the verified 512 KiB loader ceiling;
+- kernel size below the verified 512 KiB loader ceiling and low-memory end below `0xA0000`;
 - deterministic ISO rebuild;
 - BIOS El Torito metadata and `/BOOT/ZENOVOS.IMG` presence;
 - QEMU boot with no virtual hard disk attached;
