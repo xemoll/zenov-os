@@ -22,17 +22,18 @@ The virtual machine must provide:
 
 At boot, the El Torito loader starts the verified FAT12 image and kernel. When no persistent ATA disk is present, the kernel:
 
-1. validates the deterministic embedded `ZLIVE002` ZenovFS sparse image;
-2. exposes it as a 16 MiB logical block device without a decoding buffer;
-3. creates a writable 512 KiB RAM copy-on-write overlay;
-4. mounts ZenovFS normally through the typed block-device API;
-5. initializes applications, signed policy, package state, security services and the graphical shell;
-6. opens the desktop without a setup wizard or additional media.
+1. expands the deterministic embedded `ZLIVE003` container into the final package-seeded `ZLIVE002` sparse ZenovFS image;
+2. validates its checksum, geometry, sorted ranges and exact payload length;
+3. exposes it as a 16 MiB logical block device;
+4. creates a writable 512 KiB RAM copy-on-write overlay;
+5. mounts ZenovFS normally through the typed block-device API;
+6. initializes applications, signed repository metadata, package state, security services and the graphical shell;
+7. opens the desktop without a setup wizard or additional media.
 
 Expected runtime evidence includes:
 
 ```text
-ZENOVFS_LIVE_IMAGE_OK source=embedded format=ZLIVE002
+ZENOVFS_LIVE_IMAGE_OK source=embedded format=ZLIVE003
 RAM_BLOCK_DEVICE_READY sectors=32768 overlay=1024
 ZENOVFS_LIVE_READY mode=ram-overlay persistence=session
 ZENOVFS_STORAGE_MODE live-iso
@@ -51,14 +52,18 @@ If a valid ZenovFS ATA disk is attached, the existing persistent storage path re
 
 ## Compact low-memory representation
 
-The canonical 16 MiB image is converted into sorted non-zero byte ranges. `ZLIVE002` stores an 8-byte descriptor per range and concatenates the range data directly as a generated binary constant. The kernel reads that representation in place; it does not carry Base64 text and does not allocate a second decoded copy. This keeps the complete low-memory kernel below the VGA aperture used by the Legacy BIOS graphics path.
+The completed 16 MiB ZenovFS image is generated first, including native packages and signed ZenRepo metadata. It is converted into sorted non-zero byte ranges using the compact `ZLIVE002` sparse layout. That sparse payload is then compressed by the deterministic `ZLIVE003` LZSS transport.
+
+Only the compressed bytes reside in the low-memory kernel image. After physical-memory and heap initialization, the kernel expands the small sparse payload into normal RAM and validates an FNV-1a checksum before exposing any sector. This keeps the Legacy BIOS kernel below the VGA aperture while preserving the complete final filesystem contents.
 
 ## Verification
 
 The release gate must prove all of the following from the exact source commit:
 
-- deterministic generation of the embedded sparse ZenovFS payload;
-- kernel size below the verified 512 KiB loader ceiling and low-memory end below `0xA0000`;
+- the embedded image is generated only after package and repository seeding completes;
+- deterministic `ZLIVE003` compression and byte-identical regeneration;
+- compressed size is smaller than the final sparse payload;
+- kernel size below the verified 512 KiB loader ceiling and at least 1024 bytes of measured headroom below `0xA0000`;
 - deterministic ISO rebuild;
 - BIOS El Torito metadata and `/BOOT/ZENOVOS.IMG` presence;
 - QEMU boot with no virtual hard disk attached;
