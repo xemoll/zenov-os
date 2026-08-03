@@ -66,7 +66,7 @@ wait_for_marker() {
 wait_for_marker ZENOVOS_BOOT_OK
 wait_for_marker PMM_OK
 wait_for_marker PAGING_OK
-wait_for_marker ZENOVFS_LIVE_IMAGE_OK
+wait_for_marker 'ZENOVFS_LIVE_IMAGE_OK source=embedded format=ZLIVE003'
 wait_for_marker RAM_BLOCK_DEVICE_READY
 wait_for_marker 'ZENOVFS_LIVE_READY mode=ram-overlay persistence=session'
 wait_for_marker 'ZENOVFS_STORAGE_MODE live-iso'
@@ -78,5 +78,5 @@ wait_for_marker 'zenov> '
 
 cleanup
 trap - EXIT
-printf 'qemu-iso-smoke: OK iso=%s storage=embedded-live serial=%s\n' \
+printf 'qemu-iso-smoke: OK iso=%s storage=embedded-live format=ZLIVE003 serial=%s\n' \
   "$ISO_IMAGE" "$SERIAL"
