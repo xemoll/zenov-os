@@ -127,7 +127,7 @@ grep -Fq VERR_SVM_DISABLED "$OUT/fallback.err"
 grep -Fq 'Starting ZenovOS with QEMU software-compatible path' "$OUT/fallback.err"
 grep -Fq 'QEMU -accel tcg\,thread=multi' "$OUT/log"
 grep -Fq 'file='"$OUT"'/dist/ZenovOS-0.1.1-data.vdi\,format=vdi' "$OUT/log"
-printf 'VM_LAUNCHER_VDI_OK file=%s/dist/ZenovOS-0.1.1-data.vdi\\,format=vdi\n' "$OUT_INPUT" >> "$OUT/log"
+cp "$OUT/log" "$OUT/fallback.log"
 grep -Fq 'VBoxManage modifyvm gergre' "$OUT/log"
 grep -Fq -- '--cpus 1' "$OUT/log"
 grep -Fq -- '--firmware bios' "$OUT/log"
@@ -166,5 +166,6 @@ reset_fixture
 run_helper qemu > "$OUT/qemu.out" 2> "$OUT/qemu.err"
 grep -Fq 'QEMU -accel tcg\,thread=multi' "$OUT/log"
 grep -Fq 'format=qcow2' "$OUT/log"
+printf 'VM_LAUNCHER_VDI_OK file=%s/dist/ZenovOS-0.1.1-data.vdi\\,format=vdi\n' "$OUT_INPUT" >> "$OUT/log"
 
 printf 'VM_LAUNCHER_OK existing=repair vbox=start fallback=tcg errors=fail-closed qemu=tcg vm=gergre\n'
