@@ -2,9 +2,11 @@ constexpr uint16_t live_overlay_empty = 0xFFFFU;
 constexpr uint32_t live_overlay_capacity_sectors = 1024U;
 constexpr uint32_t live_pack_header_bytes = 20U;
 constexpr uint32_t live_pack_chunk_bytes = 8U;
-static_assert(live_image_pack_bytes < 32768U,
-              "embedded Live payload exceeds the low-memory budget");
+constexpr uint32_t live_lz_min_match = 3U;
+static_assert(live_image_compressed_bytes < 32768U,
+              "compressed Live payload exceeds the low-memory budget");
 
+uint8_t* live_pack_decoded = nullptr;
 uint16_t* live_overlay_map = nullptr;
 uint8_t* live_overlay_sectors = nullptr;
 uint32_t live_overlay_used = 0U;
@@ -22,8 +24,46 @@ uint32_t live_read_u32(const uint8_t* data) {
            (static_cast<uint32_t>(data[3]) << 24U);
 }
 
+uint32_t live_fnv1a32(const uint8_t* data, uint32_t size) {
+    uint32_t value = 2166136261U;
+    for (uint32_t i = 0U; i < size; ++i) {
+        value ^= data[i];
+        value *= 16777619U;
+    }
+    return value;
+}
+
+bool live_decompress_pack(uint8_t* output, uint32_t capacity) {
+    if (!output || capacity != live_image_pack_bytes) return false;
+    uint32_t input = 0U;
+    uint32_t written = 0U;
+    while (written < capacity) {
+        if (input >= live_image_compressed_bytes) return false;
+        const uint8_t flags = live_image_compressed[input++];
+        for (uint32_t bit = 0U; bit < 8U && written < capacity; ++bit) {
+            if ((flags & static_cast<uint8_t>(1U << bit)) != 0U) {
+                if (input >= live_image_compressed_bytes) return false;
+                output[written++] = live_image_compressed[input++];
+                continue;
+            }
+            if (input + 1U >= live_image_compressed_bytes) return false;
+            const uint16_t code = static_cast<uint16_t>(live_image_compressed[input]) |
+                static_cast<uint16_t>(static_cast<uint16_t>(live_image_compressed[input + 1U]) << 8U);
+            input += 2U;
+            const uint32_t distance = static_cast<uint32_t>(code >> 4U) + 1U;
+            const uint32_t length = static_cast<uint32_t>(code & 0x0FU) + live_lz_min_match;
+            if (distance > written || written + length > capacity) return false;
+            for (uint32_t copied = 0U; copied < length; ++copied) {
+                output[written] = output[written - distance];
+                ++written;
+            }
+        }
+    }
+    return input == live_image_compressed_bytes;
+}
+
 const uint8_t* live_chunk_row(uint32_t index) {
-    return live_image_pack + live_pack_header_bytes + index * live_pack_chunk_bytes;
+    return live_pack_decoded + live_pack_header_bytes + index * live_pack_chunk_bytes;
 }
 
 uint32_t live_chunk_length(uint32_t index) {
@@ -41,12 +81,15 @@ uint32_t live_chunk_data_offset(uint32_t index) {
 }
 
 bool live_pack_valid() {
-    if (live_image_pack_bytes < live_pack_header_bytes) return false;
+    if (!live_pack_decoded || live_image_pack_bytes < live_pack_header_bytes) return false;
     const char magic[8] = {'Z','L','I','V','E','0','0','2'};
-    if (!bytes_equal(live_image_pack, reinterpret_cast<const uint8_t*>(magic), 8U)) return false;
-    const uint32_t sectors = live_read_u32(live_image_pack + 8U);
-    const uint32_t chunks = live_read_u32(live_image_pack + 12U);
-    const uint32_t data_bytes = live_read_u32(live_image_pack + 16U);
+    if (!bytes_equal(live_pack_decoded,
+                     reinterpret_cast<const uint8_t*>(magic), 8U)) return false;
+    if (live_fnv1a32(live_pack_decoded, live_image_pack_bytes) !=
+        live_image_pack_checksum) return false;
+    const uint32_t sectors = live_read_u32(live_pack_decoded + 8U);
+    const uint32_t chunks = live_read_u32(live_pack_decoded + 12U);
+    const uint32_t data_bytes = live_read_u32(live_pack_decoded + 16U);
     if (sectors != live_image_logical_sectors || chunks != live_image_chunk_count ||
         !sectors || !chunks) return false;
     const uint64_t table_end = static_cast<uint64_t>(live_pack_header_bytes) +
@@ -63,7 +106,8 @@ bool live_pack_valid() {
         const uint32_t length = live_read_u16(row + 4U);
         const uint32_t reserved = live_read_u16(row + 6U);
         if (!length || reserved != 0U || offset < previous_end ||
-            static_cast<uint64_t>(offset) + length > static_cast<uint64_t>(sectors) * sector_size ||
+            static_cast<uint64_t>(offset) + length >
+                static_cast<uint64_t>(sectors) * sector_size ||
             static_cast<uint64_t>(accumulated_data) + length > data_bytes) {
             return false;
         }
@@ -99,7 +143,7 @@ void live_read_base_sector(uint32_t lba, uint8_t* output) {
         const uint32_t copy_end = chunk_end < sector_end ? chunk_end : sector_end;
         if (copy_end > copy_begin) {
             memcpy(output + copy_begin - sector_begin,
-                   live_image_pack + data_start + data_offset + copy_begin - offset,
+                   live_pack_decoded + data_start + data_offset + copy_begin - offset,
                    copy_end - copy_begin);
         }
         data_offset += length;
@@ -133,7 +177,8 @@ BlockResult live_write_sector(uint32_t lba, const uint8_t* input) {
     uint16_t overlay = live_overlay_map[lba];
     if (overlay == live_overlay_empty) {
         if (live_overlay_used >= live_overlay_capacity_sectors) {
-            return block_result(BlockOperation::write, BlockStatus::device_error, lba, 1U, 0U, 0U);
+            return block_result(BlockOperation::write, BlockStatus::device_error,
+                                lba, 1U, 0U, 0U);
         }
         overlay = static_cast<uint16_t>(live_overlay_used++);
         live_overlay_map[lba] = overlay;
@@ -146,15 +191,18 @@ BlockResult live_write_sector(uint32_t lba, const uint8_t* input) {
 bool live_image_initialize() {
     live_storage_active = false;
     live_overlay_used = 0U;
+    live_pack_decoded = static_cast<uint8_t*>(
+        heap::allocate(live_image_pack_bytes, 16U));
     live_overlay_map = static_cast<uint16_t*>(
         heap::allocate(live_image_logical_sectors * sizeof(uint16_t), 16U));
     live_overlay_sectors = static_cast<uint8_t*>(
         heap::allocate(live_overlay_capacity_sectors * sector_size, 16U));
-    if (!live_overlay_map || !live_overlay_sectors) {
+    if (!live_pack_decoded || !live_overlay_map || !live_overlay_sectors) {
         serial::line("ZENOVFS_LIVE_ALLOC_FAILED");
         return false;
     }
-    if (!live_pack_valid()) {
+    if (!live_decompress_pack(live_pack_decoded, live_image_pack_bytes) ||
+        !live_pack_valid()) {
         serial::line("ZENOVFS_LIVE_IMAGE_INVALID");
         return false;
     }
@@ -168,7 +216,7 @@ bool live_image_initialize() {
                        live_read_sector, live_write_sector};
     zfs_io_state = block_io_state_initial();
     live_storage_active = true;
-    serial::line("ZENOVFS_LIVE_IMAGE_OK source=embedded format=ZLIVE002");
+    serial::line("ZENOVFS_LIVE_IMAGE_OK source=embedded format=ZLIVE003");
     serial::line("RAM_BLOCK_DEVICE_READY sectors=32768 overlay=1024");
     return true;
 }
