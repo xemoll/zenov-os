@@ -104,7 +104,11 @@ jobs:
           grep -Fq VERR_SVM_DISABLED build/vm-launcher-test/fallback.err
           grep -Fq 'Starting ZenovOS with QEMU software-compatible path' \
             build/vm-launcher-test/fallback.err
-          grep -Fq 'QEMU -accel tcg\,thread=multi' build/vm-launcher-test/log
+          grep -Fq 'QEMU -accel tcg\,thread=multi' build/vm-launcher-test/fallback.log
+          grep -Fq 'ZenovOS-0.1.1-data.vdi\,format=vdi\,if=ide' \
+            build/vm-launcher-test/fallback.log
+          grep -Fq 'VM_LAUNCHER_VDI_OK file=build/vm-launcher-test/dist/ZenovOS-0.1.1-data.vdi\,format=vdi' \
+            build/vm-launcher-test/log
 
       - name: Verify direct no-ZIP VM distribution
         run: |
