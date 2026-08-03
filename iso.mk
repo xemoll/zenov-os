@@ -6,6 +6,7 @@ ISO_DETERMINISTIC_DIR ?= /tmp/zenov-os-iso-deterministic
 LIVE_IMAGE_PACKER ?= $(BUILD)/live-image-pack
 LIVE_IMAGE_HEADER ?= $(BUILD)/generated/live_zenovfs.hpp
 LIVE_IMAGE_REBUILD ?= /tmp/zenov-os-live-zenovfs.hpp
+LIVE_IMAGE_SOURCE_STAMP ?= $(if $(ZENPKG_DATA_STAMP),$(ZENPKG_DATA_STAMP),$(BUILD)/zenov-data.img)
 
 .PHONY: iso live-image-check iso-qemu iso-live-session iso-deterministic \
   iso-check vm-check
@@ -13,13 +14,15 @@ LIVE_IMAGE_REBUILD ?= /tmp/zenov-os-live-zenovfs.hpp
 $(LIVE_IMAGE_PACKER): tools/live_image_pack.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
-$(LIVE_IMAGE_HEADER): $(BUILD)/zenov-data.img $(LIVE_IMAGE_PACKER) | $(BUILD)
+# The public Live ISO must embed the final canonical ZenovFS state. In the full
+# GNUmakefile graph this is the package-seeded, signed-repository image guarded
+# by ZENPKG_DATA_STAMP; direct Makefile users fall back to the base image.
+$(LIVE_IMAGE_HEADER): $(LIVE_IMAGE_SOURCE_STAMP) $(LIVE_IMAGE_PACKER) | $(BUILD)
 	@mkdir -p $(dir $@)
 	$(LIVE_IMAGE_PACKER) $(BUILD)/zenov-data.img $@
 
-# Extend the existing kernel rule without duplicating its recipe. The canonical
-# ZenovFS image is generated first, packed deterministically, and compiled into
-# the boot kernel as the Live ISO base layer.
+# Extend the existing kernel rule without duplicating its recipe. The complete
+# ZenovFS image is packed deterministically and compiled into the boot kernel.
 $(BUILD)/kernel.o: $(LIVE_IMAGE_HEADER)
 
 $(ISO_IMAGE): $(BUILD)/zenov-os.img tools/build_iso.sh packaging/ISO-README.txt
@@ -27,12 +30,13 @@ $(ISO_IMAGE): $(BUILD)/zenov-os.img tools/build_iso.sh packaging/ISO-README.txt
 
 iso: $(ISO_IMAGE)
 
-live-image-check: $(LIVE_IMAGE_HEADER) $(BUILD)/zenov-data.img $(LIVE_IMAGE_PACKER)
+live-image-check: $(LIVE_IMAGE_HEADER) $(LIVE_IMAGE_SOURCE_STAMP) $(LIVE_IMAGE_PACKER)
 	@rm -f $(LIVE_IMAGE_REBUILD)
 	$(LIVE_IMAGE_PACKER) $(BUILD)/zenov-data.img $(LIVE_IMAGE_REBUILD)
 	cmp $(LIVE_IMAGE_HEADER) $(LIVE_IMAGE_REBUILD)
 	@grep -Fq 'live_image_logical_sectors = 32768U' $(LIVE_IMAGE_HEADER)
-	@echo 'Live ZenovFS packing: OK (16 MiB logical image, deterministic embedded sparse payload)'
+	@grep -Fq 'live_image_compressed_bytes =' $(LIVE_IMAGE_HEADER)
+	@echo 'Live ZenovFS packing: OK (final package-seeded 16 MiB image, deterministic ZLIVE003 payload)'
 
 iso-qemu: $(ISO_IMAGE) tests/qemu_iso_smoke.sh
 	@rm -rf $(ISO_QEMU_OUT)
