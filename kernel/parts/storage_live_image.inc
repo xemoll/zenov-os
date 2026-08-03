@@ -5,10 +5,21 @@ constexpr uint32_t live_pack_chunk_bytes = 8U;
 constexpr uint32_t live_lz_min_match = 3U;
 static_assert(live_image_compressed_bytes < 32768U,
               "compressed Live payload exceeds the low-memory budget");
+static_assert(live_image_pack_bytes <= supervisor_layout::live_image_workspace_bytes,
+              "decoded Live payload exceeds its supervisor workspace");
+static_assert(live_image_logical_sectors * sizeof(uint16_t) <=
+                  supervisor_layout::live_overlay_map_bytes,
+              "Live overlay map exceeds its supervisor workspace");
+static_assert(live_overlay_capacity_sectors * sector_size <=
+                  supervisor_layout::live_overlay_data_bytes,
+              "Live overlay data exceeds its supervisor workspace");
 
-uint8_t* live_pack_decoded = nullptr;
-uint16_t* live_overlay_map = nullptr;
-uint8_t* live_overlay_sectors = nullptr;
+uint8_t* live_pack_decoded =
+    reinterpret_cast<uint8_t*>(supervisor_layout::live_image_workspace);
+uint16_t* live_overlay_map =
+    reinterpret_cast<uint16_t*>(supervisor_layout::live_overlay_map);
+uint8_t* live_overlay_sectors =
+    reinterpret_cast<uint8_t*>(supervisor_layout::live_overlay_data);
 uint32_t live_overlay_used = 0U;
 bool live_storage_active = false;
 
@@ -48,10 +59,12 @@ bool live_decompress_pack(uint8_t* output, uint32_t capacity) {
             }
             if (input + 1U >= live_image_compressed_bytes) return false;
             const uint16_t code = static_cast<uint16_t>(live_image_compressed[input]) |
-                static_cast<uint16_t>(static_cast<uint16_t>(live_image_compressed[input + 1U]) << 8U);
+                static_cast<uint16_t>(
+                    static_cast<uint16_t>(live_image_compressed[input + 1U]) << 8U);
             input += 2U;
             const uint32_t distance = static_cast<uint32_t>(code >> 4U) + 1U;
-            const uint32_t length = static_cast<uint32_t>(code & 0x0FU) + live_lz_min_match;
+            const uint32_t length =
+                static_cast<uint32_t>(code & 0x0FU) + live_lz_min_match;
             if (distance > written || written + length > capacity) return false;
             for (uint32_t copied = 0U; copied < length; ++copied) {
                 output[written] = output[written - distance];
@@ -152,14 +165,17 @@ void live_read_base_sector(uint32_t lba, uint8_t* output) {
 
 BlockResult live_read_sector(uint32_t lba, uint8_t* output) {
     if (!live_storage_active || !output) {
-        return block_result(BlockOperation::read, BlockStatus::no_device, lba, 0U, 0U, 0U);
+        return block_result(BlockOperation::read, BlockStatus::no_device,
+                            lba, 0U, 0U, 0U);
     }
     if (lba >= live_image_logical_sectors) {
-        return block_result(BlockOperation::read, BlockStatus::out_of_range, lba, 0U, 0U, 0U);
+        return block_result(BlockOperation::read, BlockStatus::out_of_range,
+                            lba, 0U, 0U, 0U);
     }
     const uint16_t overlay = live_overlay_map[lba];
     if (overlay != live_overlay_empty) {
-        memcpy(output, live_overlay_sectors + static_cast<uint32_t>(overlay) * sector_size,
+        memcpy(output,
+               live_overlay_sectors + static_cast<uint32_t>(overlay) * sector_size,
                sector_size);
     } else {
         live_read_base_sector(lba, output);
@@ -169,10 +185,12 @@ BlockResult live_read_sector(uint32_t lba, uint8_t* output) {
 
 BlockResult live_write_sector(uint32_t lba, const uint8_t* input) {
     if (!live_storage_active || !input) {
-        return block_result(BlockOperation::write, BlockStatus::no_device, lba, 0U, 0U, 0U);
+        return block_result(BlockOperation::write, BlockStatus::no_device,
+                            lba, 0U, 0U, 0U);
     }
     if (lba >= live_image_logical_sectors) {
-        return block_result(BlockOperation::write, BlockStatus::out_of_range, lba, 0U, 0U, 0U);
+        return block_result(BlockOperation::write, BlockStatus::out_of_range,
+                            lba, 0U, 0U, 0U);
     }
     uint16_t overlay = live_overlay_map[lba];
     if (overlay == live_overlay_empty) {
@@ -191,16 +209,6 @@ BlockResult live_write_sector(uint32_t lba, const uint8_t* input) {
 bool live_image_initialize() {
     live_storage_active = false;
     live_overlay_used = 0U;
-    live_pack_decoded = static_cast<uint8_t*>(
-        heap::allocate(live_image_pack_bytes, 16U));
-    live_overlay_map = static_cast<uint16_t*>(
-        heap::allocate(live_image_logical_sectors * sizeof(uint16_t), 16U));
-    live_overlay_sectors = static_cast<uint8_t*>(
-        heap::allocate(live_overlay_capacity_sectors * sector_size, 16U));
-    if (!live_pack_decoded || !live_overlay_map || !live_overlay_sectors) {
-        serial::line("ZENOVFS_LIVE_ALLOC_FAILED");
-        return false;
-    }
     if (!live_decompress_pack(live_pack_decoded, live_image_pack_bytes) ||
         !live_pack_valid()) {
         serial::line("ZENOVFS_LIVE_IMAGE_INVALID");
@@ -208,8 +216,6 @@ bool live_image_initialize() {
     }
     memset(live_overlay_map, 0xFFU,
            live_image_logical_sectors * sizeof(uint16_t));
-    memset(live_overlay_sectors, 0,
-           live_overlay_capacity_sectors * sector_size);
     ata_present = false;
     ata_sector_total = live_image_logical_sectors;
     ata0 = BlockDevice{"live0", true, true, live_image_logical_sectors,
@@ -217,6 +223,7 @@ bool live_image_initialize() {
     zfs_io_state = block_io_state_initial();
     live_storage_active = true;
     serial::line("ZENOVFS_LIVE_IMAGE_OK source=embedded format=ZLIVE003");
+    serial::line("LIVE_STORAGE_WORKSPACE_OK pack=65536 map=65536 overlay=524288 heap=preserved");
     serial::line("RAM_BLOCK_DEVICE_READY sectors=32768 overlay=1024");
     return true;
 }
