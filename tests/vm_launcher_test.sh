@@ -2,7 +2,7 @@
 set -euo pipefail
 
 HELPER_SOURCE="${1:-packaging/prepare-vm.sh}"
-OUT="${2:-build/vm-launcher-test}"
+OUT_INPUT="${2:-build/vm-launcher-test}"
 
 fail() {
   printf 'vm-launcher-test: %s\n' "$*" >&2
@@ -10,6 +10,10 @@ fail() {
 }
 
 [[ -f "$HELPER_SOURCE" ]] || fail "missing helper: $HELPER_SOURCE"
+OUT_PARENT="$(dirname "$OUT_INPUT")"
+OUT_NAME="$(basename "$OUT_INPUT")"
+mkdir -p -- "$OUT_PARENT"
+OUT="$(cd "$OUT_PARENT" && pwd -P)/$OUT_NAME"
 rm -rf -- "$OUT"
 mkdir -p -- "$OUT/bin" "$OUT/dist" "$OUT/state"
 cp "$HELPER_SOURCE" "$OUT/dist/prepare-vm.sh"
