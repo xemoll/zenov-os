@@ -1,10 +1,6 @@
 # ZenovOS 0.1.1 VM appliances
 
-The current verified appliance distribution is [`v0.1.1-vm3`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm3). It publishes the bootable ISO, writable RAW/QCOW2/VDI/VMDK disks, preparation helpers, the transactional lifecycle manager and provenance as 15 direct assets.
-
-Older [`v0.1.1-vm2`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm2) and [`v0.1.1-vm1`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm1) releases remain immutable historical snapshots.
-
-ZenovOS boots from a read-only BIOS El Torito ISO and stores persistent state on a separate writable ZenovFS disk. Convenience containers change the host-side disk format without changing the canonical guest-visible filesystem bytes.
+The current virtual-machine distribution is VM Image 4. It is designed around a read-only BIOS El Torito ISO and a separate writable ZenovFS disk.
 
 ## Distribution files
 
@@ -17,8 +13,8 @@ ZenovOS boots from a read-only BIOS El Torito ISO and stores persistent state on
 | `ZenovOS-0.1.1-data.vdi` | VirtualBox writable disk |
 | `ZenovOS-0.1.1-data.vmdk` | VMware writable disk |
 | `ZenovOS-0.1.1.vmx` | VMware Workstation/Fusion configuration |
-| `prepare-vm.sh` | Linux/macOS preparation helper |
-| `prepare-vm.ps1` | Windows PowerShell preparation helper |
+| `prepare-vm.sh` | Linux/macOS preparation, repair and launch helper |
+| `prepare-vm.ps1` | Windows PowerShell preparation and launch helper |
 | `manage-vm.sh` | Transactional lifecycle manager |
 | `VM-QUICKSTART.txt` | Setup, backup, reset and recovery guide |
 | `VM-APPLIANCE-MANIFEST.json` | Format and guest-content provenance |
@@ -27,6 +23,20 @@ ZenovOS boots from a read-only BIOS El Torito ISO and stores persistent state on
 | `SHA256SUMS.txt` | Complete checksum manifest |
 
 The package deliberately requires no ZIP extraction.
+
+## VirtualBox AMD-V/VT-x recovery
+
+VirtualBox depends on host hardware virtualization. The ZenovOS ISO and VDI cannot enable AMD-V/VT-x in firmware or release it from another host hypervisor.
+
+VM Image 4 fixes the distributed Linux/macOS launcher instead. `prepare-vm.sh` repairs an existing powered-off VirtualBox VM, applies the verified ZenovOS settings and starts it normally. When VirtualBox returns a recognized hardware-virtualization error, the helper opens the same ISO and writable VDI with QEMU TCG software emulation.
+
+For an existing VM named `gergre`:
+
+```bash
+ZENOV_VM_NAME=gergre ./prepare-vm.sh virtualbox
+```
+
+The recognized failures include `VERR_SVM_DISABLED`, `VERR_SVM_IN_USE`, `VERR_VMX_NO_VMX`, `VERR_VMX_IN_VMX_ROOT_MODE`, `VERR_NEM_NOT_AVAILABLE` and the Hyper-V raw-mode error. Set `ZENOV_VM_SOFTWARE_FALLBACK=0` to disable fallback. Set `ZENOV_QEMU_ACCEL=tcg` to force software emulation.
 
 ## Canonical content and format validation
 
@@ -44,48 +54,31 @@ Container metadata can contain format-generated identifiers, so byte-identical Q
 
 `tests/qemu_iso_smoke.sh` boots the ISO as an IDE CD-ROM and requires the kernel, ZenovFS mount and graphical desktop readiness markers.
 
-`tests/qemu_iso_persistence.sh`:
+`tests/qemu_iso_persistence.sh` creates a writable disk from the canonical seed, boots the ISO twice, writes and replays a persistent payload, runs ZenovFS `fsck` and validates the mutated filesystem offline.
 
-1. creates a writable QCOW2 disk from the canonical seed;
-2. boots the ISO and writes a persistent payload;
-3. runs `sync` and shuts the guest down;
-4. boots the same ISO and disk again;
-5. reads the payload back;
-6. runs ZenovFS `fsck`;
-7. validates the mutated filesystem offline.
+## Launcher acceptance
 
-The gate requires two independent boot markers and observes the persistence payload in both phases.
+`tests/vm_launcher_test.sh` uses deterministic VirtualBox and QEMU shims. It verifies:
+
+- creation of a new VirtualBox VM;
+- repair of the existing powered-off `gergre` VM;
+- successful native VirtualBox start;
+- `VERR_SVM_DISABLED` fallback to the same VDI through QEMU TCG;
+- explicit fallback disablement;
+- refusal to modify a running VM;
+- direct QEMU TCG launch.
+
+The launcher test is part of `make vm-check`, the BIOS/VM workflow and the VM Image 4 publication gate.
 
 ## Transactional lifecycle acceptance
 
 `packaging/manage-vm.sh` provides `status`, `create`, `verify`, `backup`, `restore`, `reset` and `remove` for RAW, QCOW2, VDI and VMDK runtime disks.
 
-The lifecycle contract includes:
-
-- SHA-256 validation of the canonical seed;
-- exact virtual-size and format checks;
-- verified temporary images before atomic replacement;
-- backup-before-reset, restore and remove;
-- one SHA-256 sidecar per backup;
-- rejection of a tampered backup before runtime state changes;
-- fail-closed locking for concurrent mutations;
-- refusal of symlink targets and unsafe state directories.
-
-`tests/vm_lifecycle_test.sh` mutates guest-visible data, backs it up, resets to the seed, restores the exact changed bytes, rejects checksum tampering, rejects an active lock and exercises all four advertised runtime formats.
+The lifecycle contract includes checksum and virtual-size validation, verified temporary images before atomic replacement, backup-before-destructive-operation, checksummed backup sidecars, rejection of tampered backups, fail-closed locking and refusal of unsafe symlink targets.
 
 ## Publication contract
 
-The VM Image 3 workflow publishes only after `make all vm-check` succeeds. It then:
-
-- verifies exactly 15 local assets and all checksum entries;
-- creates a draft release at the exact source commit;
-- uploads and downloads every asset;
-- performs byte-for-byte comparison;
-- verifies the exact sorted asset-name set;
-- makes the release public and marks it latest;
-- downloads the ISO again through the public unauthenticated URL and compares it with the verified local file.
-
-This final public-download check prevents a green build from being mistaken for a user-accessible release.
+VM Image 4 publishes only after `make all vm-check` succeeds. The workflow then verifies exactly 15 assets, creates a draft release at the exact merge commit, re-downloads every asset for byte comparison, makes the release public, downloads the ISO and `prepare-vm.sh` without authentication, checks their published SHA-256 values and validates the ISO El Torito metadata.
 
 ## Required VM configuration
 
@@ -106,20 +99,13 @@ make clean
 make all vm-check
 ```
 
-Focused stages:
-
-```bash
-make iso-check
-make vm-appliances-semantic
-make vm-lifecycle-check
-make vm-package
-```
-
 The resulting direct package is written to `dist-vm/`.
 
 ## Hypervisor boundary
 
-QEMU is executed in automated acceptance testing. VirtualBox and VMware artifacts are validated structurally and by canonical raw round-trip, but proprietary hypervisor binaries are not run in GitHub-hosted CI. The project therefore claims prepared and verified disk/configuration artifacts, not full automated certification of those products.
+QEMU is executed in automated acceptance testing. VirtualBox and VMware artifacts are validated structurally and by command-contract shims, but proprietary hypervisor binaries are not run in GitHub-hosted CI.
+
+QEMU TCG does not require AMD-V/VT-x but is slower than AMD-V/KVM or native VirtualBox acceleration. Native VirtualBox startup still requires hardware virtualization to be enabled in firmware and available to VirtualBox.
 
 ## Current limitations
 
