@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -8,35 +9,23 @@
 namespace {
 constexpr std::size_t sector_size = 512U;
 constexpr std::size_t zero_gap = 8U;
+constexpr std::size_t max_chunk_bytes = 0xFFFFU;
 
 struct Chunk {
     std::uint32_t offset;
     std::vector<std::uint8_t> bytes;
 };
 
+void append_u16(std::vector<std::uint8_t>& output, std::uint16_t value) {
+    output.push_back(static_cast<std::uint8_t>(value));
+    output.push_back(static_cast<std::uint8_t>(value >> 8U));
+}
+
 void append_u32(std::vector<std::uint8_t>& output, std::uint32_t value) {
     output.push_back(static_cast<std::uint8_t>(value));
     output.push_back(static_cast<std::uint8_t>(value >> 8U));
     output.push_back(static_cast<std::uint8_t>(value >> 16U));
     output.push_back(static_cast<std::uint8_t>(value >> 24U));
-}
-
-std::string base64(const std::vector<std::uint8_t>& input) {
-    static constexpr char alphabet[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string output;
-    output.reserve(((input.size() + 2U) / 3U) * 4U);
-    for (std::size_t i = 0; i < input.size(); i += 3U) {
-        const std::uint32_t a = input[i];
-        const std::uint32_t b = i + 1U < input.size() ? input[i + 1U] : 0U;
-        const std::uint32_t c = i + 2U < input.size() ? input[i + 2U] : 0U;
-        const std::uint32_t word = (a << 16U) | (b << 8U) | c;
-        output.push_back(alphabet[(word >> 18U) & 63U]);
-        output.push_back(alphabet[(word >> 12U) & 63U]);
-        output.push_back(i + 1U < input.size() ? alphabet[(word >> 6U) & 63U] : '=');
-        output.push_back(i + 2U < input.size() ? alphabet[word & 63U] : '=');
-    }
-    return output;
 }
 
 std::vector<std::uint8_t> read_all(const char* path) {
@@ -50,6 +39,19 @@ std::vector<std::uint8_t> read_all(const char* path) {
     input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     if (!input) throw std::runtime_error("cannot read complete input image");
     return bytes;
+}
+
+void emit_byte_array(std::ofstream& output, const std::vector<std::uint8_t>& payload) {
+    output << "constexpr uint8_t live_image_pack[] = {\n";
+    output << std::hex << std::setfill('0');
+    for (std::size_t i = 0; i < payload.size(); ++i) {
+        if (i % 16U == 0U) output << "    ";
+        output << "0x" << std::setw(2) << static_cast<unsigned>(payload[i]);
+        if (i + 1U != payload.size()) output << ',';
+        if (i % 16U == 15U || i + 1U == payload.size()) output << '\n';
+        else output << ' ';
+    }
+    output << std::dec << "};\n";
 }
 } // namespace
 
@@ -77,6 +79,10 @@ int main(int argc, char** argv) {
                 ++i;
             }
             const std::size_t end = last_nonzero + 1U;
+            const std::size_t length = end - start;
+            if (length > max_chunk_bytes) {
+                throw std::runtime_error("sparse chunk exceeds ZLIVE002 uint16 length");
+            }
             chunks.push_back(Chunk{
                 static_cast<std::uint32_t>(start),
                 std::vector<std::uint8_t>(image.begin() + static_cast<std::ptrdiff_t>(start),
@@ -92,38 +98,33 @@ int main(int argc, char** argv) {
         if (data_bytes > 0xFFFFFFFFULL) throw std::runtime_error("packed data is too large");
 
         std::vector<std::uint8_t> payload;
-        payload.insert(payload.end(), {'Z','L','I','V','E','0','0','1'});
+        payload.reserve(20U + chunks.size() * 8U + data_bytes);
+        payload.insert(payload.end(), {'Z','L','I','V','E','0','0','2'});
         append_u32(payload, static_cast<std::uint32_t>(image.size() / sector_size));
         append_u32(payload, static_cast<std::uint32_t>(chunks.size()));
         append_u32(payload, static_cast<std::uint32_t>(data_bytes));
-        std::uint32_t data_offset = 0U;
         for (const Chunk& chunk : chunks) {
             append_u32(payload, chunk.offset);
-            append_u32(payload, static_cast<std::uint32_t>(chunk.bytes.size()));
-            append_u32(payload, data_offset);
-            data_offset += static_cast<std::uint32_t>(chunk.bytes.size());
+            append_u16(payload, static_cast<std::uint16_t>(chunk.bytes.size()));
+            append_u16(payload, 0U);
         }
         for (const Chunk& chunk : chunks) {
             payload.insert(payload.end(), chunk.bytes.begin(), chunk.bytes.end());
         }
 
-        const std::string encoded = base64(payload);
         std::ofstream output(argv[2], std::ios::binary | std::ios::trunc);
         if (!output) throw std::runtime_error(std::string("cannot open output: ") + argv[2]);
         output << "// Generated from the canonical ZenovFS image. Regenerate with tools/live_image_pack.cpp.\n";
-        output << "constexpr uint32_t live_image_pack_decoded_bytes = " << payload.size() << "U;\n";
+        output << "constexpr uint32_t live_image_pack_bytes = " << payload.size() << "U;\n";
         output << "constexpr uint32_t live_image_logical_sectors = " << image.size() / sector_size << "U;\n";
         output << "constexpr uint32_t live_image_chunk_count = " << chunks.size() << "U;\n";
-        output << "constexpr char live_image_pack_base64[] =\n";
-        for (std::size_t i = 0; i < encoded.size(); i += 96U) {
-            output << "    \"" << encoded.substr(i, 96U) << "\"\n";
-        }
-        output << "    ;\n";
+        emit_byte_array(output, payload);
+        output << "static_assert(sizeof(live_image_pack) == live_image_pack_bytes, \"ZLIVE002 size mismatch\");\n";
         if (!output) throw std::runtime_error("cannot write output file");
 
-        std::cout << "LIVE_IMAGE_PACK_OK sectors=" << image.size() / sector_size
-                  << " chunks=" << chunks.size() << " decoded=" << payload.size()
-                  << " base64=" << encoded.size() << '\n';
+        std::cout << "LIVE_IMAGE_PACK_OK format=ZLIVE002 sectors=" << image.size() / sector_size
+                  << " chunks=" << chunks.size() << " packed=" << payload.size()
+                  << " data=" << data_bytes << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "live-image-pack: " << error.what() << '\n';
