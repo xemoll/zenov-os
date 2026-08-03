@@ -1,108 +1,89 @@
 # ZenovOS
 
-**ZenovOS is an experimental 32-bit x86 operating system with its own BIOS loader, freestanding kernel, graphical desktop, persistent filesystem, application ABI, package manager and security model.**
+**ZenovOS is an experimental 32-bit x86 operating system with its own BIOS loader, freestanding kernel, graphical desktop, ZenovFS filesystem, application ABI, package manager and signed local security model.**
 
-ZenovOS is not a Linux distribution and does not reuse the Windows or macOS userland. The kernel is built from C++17 and x86 assembly with Zenov-generated configuration, boots through legacy BIOS and runs supported native applications in ring 3.
+ZenovOS is not a Linux distribution and does not reuse Windows or macOS userland. It boots through Legacy BIOS and runs supported native ZEX1 and static ELF32/i386 applications in ring 3.
 
 ![ZenovOS graphical desktop](docs/screenshots/zenov-os-0.1.1-graphical-desktop.png)
 
-> [!IMPORTANT]
-> The original [`v0.1.1`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1) release is immutable and does not contain the current ISO distribution. For virtual machines, use [`v0.1.1-vm3`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm3). VM Image 3 is built from the current integrated source and publishes the bootable ISO plus writable disks as direct release assets.
+## Download and start
 
-## Download the bootable ISO
+The current distribution is deliberately simple: **one ISO file**.
 
-No ZIP extraction is required.
+[**Download ZenovOS-0.1.1-x86.iso**](https://github.com/xemoll/zenov-os/releases/download/v0.1.1-live1/ZenovOS-0.1.1-x86.iso)
 
-- **Bootable ISO:** [`ZenovOS-0.1.1-x86.iso`](https://github.com/xemoll/zenov-os/releases/download/v0.1.1-vm3/ZenovOS-0.1.1-x86.iso)
-- **QEMU/KVM disk:** [`ZenovOS-0.1.1-data.qcow2`](https://github.com/xemoll/zenov-os/releases/download/v0.1.1-vm3/ZenovOS-0.1.1-data.qcow2)
-- **VirtualBox disk:** [`ZenovOS-0.1.1-data.vdi`](https://github.com/xemoll/zenov-os/releases/download/v0.1.1-vm3/ZenovOS-0.1.1-data.vdi)
-- **VMware disk:** [`ZenovOS-0.1.1-data.vmdk`](https://github.com/xemoll/zenov-os/releases/download/v0.1.1-vm3/ZenovOS-0.1.1-data.vmdk)
-- **Raw ZenovFS disk:** [`ZenovOS-0.1.1-data.img`](https://github.com/xemoll/zenov-os/releases/download/v0.1.1-vm3/ZenovOS-0.1.1-data.img)
-- **Checksums:** [`SHA256SUMS.txt`](https://github.com/xemoll/zenov-os/releases/download/v0.1.1-vm3/SHA256SUMS.txt)
+Release page: [`v0.1.1-live1`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-live1)
 
-The ISO is read-only. Files, settings, packages and security state are stored on the separate writable ZenovFS disk.
+No ZIP extraction, VDI, QCOW2, VMDK, raw data image, helper script, or second virtual disk is required.
 
-### VM configuration
+### VirtualBox
 
-| Setting | Required value |
-| --- | --- |
-| Architecture | 32-bit x86 / i686 |
-| Firmware | Legacy BIOS; EFI/UEFI disabled |
-| Memory | 64 MiB |
-| CPU | One virtual CPU |
-| Optical drive | `ZenovOS-0.1.1-x86.iso` as IDE CD/DVD |
-| Primary IDE disk | Exactly one writable ZenovOS data disk |
-| Boot order | Optical drive first |
-| Network | Disabled; ZenovOS 0.1.1 has no network stack |
+1. Create a new **Other/Unknown 32-bit** virtual machine.
+2. Use **64 MiB RAM or more** and **one CPU**.
+3. Keep **EFI disabled** so the VM uses Legacy BIOS.
+4. Attach `ZenovOS-0.1.1-x86.iso` to the virtual optical drive.
+5. Put the optical drive first in the boot order and start the VM.
 
-QEMU example:
+ZenovOS loads its embedded system image, mounts a writable Live session, initializes applications and security services, and opens the graphical desktop automatically.
+
+> VirtualBox still requires AMD-V/VT-x to be enabled and available on the host. A guest ISO cannot change BIOS or host-hypervisor settings. QEMU TCG can run ZenovOS without hardware virtualization.
+
+### QEMU
 
 ```bash
 qemu-system-i386 \
   -machine pc,vmport=off \
   -m 64M \
   -vga std \
-  -drive file=ZenovOS-0.1.1-data.qcow2,format=qcow2,if=ide,index=0,media=disk \
   -drive file=ZenovOS-0.1.1-x86.iso,format=raw,if=ide,index=2,media=cdrom,readonly=on \
   -boot order=d,strict=on
 ```
 
-Verify downloaded assets:
+Without AMD-V/VT-x:
 
 ```bash
-sha256sum -c SHA256SUMS.txt
+qemu-system-i386 \
+  -accel tcg,thread=multi \
+  -machine pc,vmport=off \
+  -m 64M \
+  -vga std \
+  -drive file=ZenovOS-0.1.1-x86.iso,format=raw,if=ide,index=2,media=cdrom,readonly=on \
+  -boot order=d,strict=on
 ```
 
-The release also contains `prepare-vm.sh`, `prepare-vm.ps1`, `manage-vm.sh`, `VM-QUICKSTART.txt`, a VMware `.vmx` file and provenance manifests.
+## How the Live ISO works
 
-## Transactional VM lifecycle manager
+The ISO contains both the boot system and the canonical ZenovFS system volume. At startup the kernel:
 
-`manage-vm.sh` creates and manages writable runtime disks without modifying the canonical release seed in place.
+1. boots the verified FAT12 loader through BIOS El Torito;
+2. decodes the embedded deterministic ZenovFS sparse image;
+3. exposes it as a 16 MiB logical block device;
+4. creates a writable RAM copy-on-write overlay;
+5. mounts ZenovFS through the normal typed block-device interface;
+6. initializes signed policy, applications, packages and the graphical shell.
 
-```bash
-chmod +x manage-vm.sh
-./manage-vm.sh status
-./manage-vm.sh create
-./manage-vm.sh verify
-./manage-vm.sh backup
-./manage-vm.sh reset
-./manage-vm.sh restore /path/to/backup.qcow2
-./manage-vm.sh remove
-```
-
-Supported runtime formats are `raw`, `qcow2`, `vdi` and `vmdk`:
-
-```bash
-ZENOV_VM_FORMAT=qcow2 ./manage-vm.sh create
-ZENOV_VM_FORMAT=vdi ./manage-vm.sh create
-```
-
-The manager validates the canonical seed checksum and exact 16 MiB virtual size, checks container structure through `qemu-img`, verifies temporary images before atomic replacement, creates checksummed backups before destructive operations and rejects tampered backups, symlink targets, unsafe directories and concurrent lifecycle mutations.
+Files and settings work during the running session. Changes reset after reboot or power-off because the ISO itself is read-only. Persistent installation to a hard disk is a separate future feature.
 
 ## Current capabilities
 
 | Area | Current implementation |
 | --- | --- |
-| Platform | BIOS-bootable i686 system tested primarily in QEMU |
+| Platform | BIOS-bootable 32-bit x86/i686 system |
+| Distribution | One deterministic self-contained Live ISO |
 | Desktop | Native graphical shell with Start, taskbar, Terminal, Files, Settings, Applications and System Center |
-| Productivity | Persistent Notes, Tasks, Calendar, Clock, Calculator, Reminders and Agenda |
-| Graphics | QEMU Standard VGA / Bochs VBE, 32-bit framebuffer and 22 verified modes from 640×480 to 1600×1200 |
+| Applications | Notes, Tasks, Calendar, Clock, Calculator, Reminders and Agenda |
+| Graphics | Standard VGA / Bochs VBE framebuffer with verified display modes |
 | Input | IRQ-driven PS/2 keyboard and mouse |
 | Memory | E820 discovery, 4 KiB paging, kernel heap and isolated ring-3 process window |
-| Storage | ATA PIO/LBA28 and persistent ZenovFS1 with copy-on-write replacement and typed error propagation |
-| Applications | Native ZEX1 and validated static little-endian ELF32/i386 applications |
-| ABI | `INT 0x80` syscalls, guarded userspace pointers and signed per-application capability profiles |
+| Storage | Embedded ZenovFS base plus writable RAM overlay; optional ATA path retained for development |
+| Applications | Native ZEX1 and validated static little-endian ELF32/i386 binaries |
+| ABI | `INT 0x80` syscalls, guarded userspace pointers and signed capability profiles |
 | Packages | ZenPkg lifecycle, signed ZenRepo metadata, verified cache and deterministic launch plans |
-| Security | Signed trust, capabilities, malware intelligence, controlled-folder policy, authenticated reads, quarantine and persistent audit |
-| Hardware trust | Supervisor-only TPM 2.0 TIS FIFO transport with an explicitly provisioned NV counter |
-| Distribution | Deterministic El Torito ISO plus RAW, QCOW2, VDI and VMDK writable disks |
-| Verification | Exact-head host tests, deterministic rebuilds and QEMU-backed acceptance evidence |
+| Security | Signed trust, capability policy, malware intelligence, controlled folders, authenticated reads, quarantine and audit |
+| Hardware trust | TPM 2.0 TIS FIFO transport with explicitly provisioned NV counter |
+| Verification | Exact-head host tests, deterministic rebuild and QEMU no-disk boot evidence |
 
-## Desktop and system applications
-
-ZenovOS boots into a kernel-rendered graphical shell rather than an external Linux compositor. The UI uses a logical `800×600` software backbuffer and maps it into the selected framebuffer while preserving aspect ratio.
-
-Main controls:
+## Desktop controls
 
 ```text
 Super / Windows key  Open Start
@@ -115,61 +96,54 @@ F10                  Quick Settings
 Escape               Close the active shell surface
 ```
 
-Persistent native applications include:
-
-- **Notes / Notepad** — local Markdown vault, search, daily notes, scratchpad, lightweight properties and `[[wikilink]]` backlinks;
-- **Tasks** — Markdown checkbox aggregation, priorities, due dates, waiting state, filters and source-file mutation;
-- **Calendar** — Gregorian month navigation, RTC-backed Today action and persistent local events;
-- **Clock** — CMOS time/date, PIT stopwatch and bounded countdown timer;
-- **Calculator** — bounded expression parsing and deterministic arithmetic behavior;
-- **Reminders / Agenda** — persistent local reminder records and integrated daily agenda.
-
-The current application layer is local-only. It does not claim network synchronization, CalDAV, cloud accounts, plugins, background agents or rich Markdown rendering.
+The current desktop is kernel-rendered and uses a logical `800×600` software backbuffer mapped into the selected framebuffer.
 
 ## Application model
 
-ZenovOS supports two native executable families:
+ZenovOS supports:
 
-- **ZEX1 version 1** — the compact Zenov executable format;
-- **static ELF32/i386** — little-endian binaries with bounded validated `PT_LOAD` segments.
+- **ZEX1 version 1**, the compact Zenov executable format;
+- **static ELF32/i386**, with bounded validated `PT_LOAD` segments.
 
-Applications run in a page-granular ring-3 window with a separate stack. Kernel and framebuffer pages remain supervisor-only. Malformed images and writable-plus-executable ELF segments are rejected. A userspace fault terminates the foreground application and returns control to the shell.
+Applications run in a page-granular ring-3 window with a separate stack. Kernel and framebuffer pages remain supervisor-only. Malformed binaries and writable-plus-executable ELF segments are rejected.
 
-The system remains single-foreground-process and single-threaded. It does not provide POSIX, a dynamic linker, `fork`/`exec`, Linux binary compatibility or general Windows/macOS execution.
+The system remains single-foreground-process and single-threaded. It does not provide POSIX, a dynamic linker, `fork`/`exec`, Linux binary compatibility, Wine, Proton, or macOS runtime compatibility.
 
-## Storage and ZenovFS
+## ZenovFS and Live storage
 
-ZenovFS1 stores configuration, applications, package state, security policy, audit data and user files. The current storage path includes:
+The canonical ZenovFS image contains configuration, applications, package state and signed security policy. For the Live ISO it is packed deterministically into sparse chunks and compiled into the boot kernel. Reads come from the immutable embedded base; changed sectors are copied into RAM on first write.
 
-- copy-on-write file replacement and interrupted-write recovery;
-- checksum validation and offline filesystem verification;
-- typed ATA and filesystem result propagation;
-- bounded ATA deadlines, reset, IDENTIFY revalidation and retry behavior;
-- fail-closed handling for unrecoverable transport or metadata corruption;
-- deterministic crash and sector-fault matrices for filesystem, audit and package transactions.
+The storage layer retains:
 
-The production device path is synchronous ATA PIO/LBA28. AHCI, NVMe, DMA, NCQ, asynchronous queues and multi-device mounting are not implemented.
+- copy-on-write file replacement;
+- checksums and filesystem verification;
+- typed block and filesystem results;
+- interrupted-write recovery;
+- guarded security and package paths;
+- bounded fail-closed handling.
+
+Live-session storage is temporary. The public release does not require or publish a companion hard-disk image.
 
 ## ZenPkg and compatibility boundary
 
-ZenPkg provides signed repository metadata, dependency/conflict planning, verification, installation, upgrade, repair, rollback, removal, protected cache state and reboot recovery.
+ZenPkg provides signed repository metadata, dependency and conflict planning, verification, installation, upgrade, repair, rollback, removal and protected cache state.
 
-ZenPkg can classify selected Windows, Linux, macOS, Xbox and PlayStation formats. Classification is not execution. Wine, Proton, Darling, Linux ABI layers and console emulators are not implemented because the required process, graphics, audio and runtime substrates do not yet exist.
+It can classify selected Windows, Linux, macOS, Xbox and PlayStation artifact families. Classification is not execution. General foreign-binary compatibility requires runtime providers that are not implemented in ZenovOS 0.1.1.
 
 ## Security model
 
-ZenovGuard is a bounded local integrity and prevention layer, not a claim of complete protection against arbitrary modern malware. The integrated stack includes:
+The integrated local security stack includes:
 
 - `ZGDB2` signed executable trust and revocation records;
 - `ZCAP1` signed syscall masks and exact file scopes;
 - `ZMID1` signed bounded hash and byte-pattern intelligence;
 - `ZRWP1` controlled-folder writers and mutation budgets;
 - `ZVRT1` signed path, size and Merkle commitments;
-- `ZGAL1` persistent hash-chained audit records;
+- `ZGAL1` hash-chained audit records;
 - protected quarantine and rollback-safe policy transactions;
-- TPM 2.0 TIS transport with a persistent monotonic NV counter.
+- TPM 2.0 TIS transport with a monotonic NV counter.
 
-The TPM counter is not yet bound to every signed-policy generation and transaction. Complete offline disk replacement therefore remains outside the proven freshness boundary.
+ZenovGuard is a bounded experimental integrity and prevention layer, not a claim of complete protection against arbitrary modern malware.
 
 ## Build from source
 
@@ -181,73 +155,60 @@ sudo apt-get install -y \
   build-essential \
   binutils \
   qemu-system-x86 \
-  qemu-utils \
   xorriso \
-  openssl \
-  zip \
-  unzip \
-  python3
+  openssl
 ```
 
-Build and boot:
+Build and verify the complete ISO-only path:
 
 ```bash
 git clone https://github.com/xemoll/zenov-os.git
 cd zenov-os
-make
-make qemu
-```
-
-Build and verify the complete VM distribution:
-
-```bash
 make clean
-make all vm-check
+make all iso-check
 ```
 
-This creates the bootable ISO, performs normal optical boot and two-boot persistence checks, builds RAW/QCOW2/VDI/VMDK disks, runs the VM lifecycle acceptance matrix and creates the 15-file direct distribution under `dist-vm/`.
+The verification target:
 
-Full repository verification:
+- builds the canonical ZenovFS image;
+- deterministically packs it into the kernel;
+- builds the El Torito ISO;
+- boots the ISO in QEMU with **no hard disk attached**;
+- waits for ZenovFS mount, desktop and UI readiness;
+- writes and reads a Live-session file;
+- runs filesystem check and sync;
+- rebuilds the ISO byte-identically.
 
-```bash
-make clean check
-make deterministic
-make all vm-check
+The resulting launch artifact is:
+
+```text
+build/ZenovOS-0.1.1-x86.iso
 ```
 
 ## Current boundaries
 
-ZenovOS remains an experimental operating system. Current limitations include:
+ZenovOS remains experimental. Current limitations include:
 
 - 32-bit i686 only;
-- legacy BIOS rather than UEFI;
-- live optical boot rather than installation of a bootloader onto a hard disk;
-- QEMU Standard VGA / Bochs VBE as the primary verified graphics target;
+- Legacy BIOS rather than UEFI;
+- Live optical boot rather than hard-disk installation;
+- session-only writes in the public ISO;
+- Standard VGA / Bochs VBE as the primary graphics target;
 - one foreground userspace process and one thread;
 - no networking, audio, Bluetooth, battery service or multi-monitor stack;
-- no guest additions/tools or accelerated 3D;
-- no dynamic linking, POSIX layer or general Linux userspace;
-- no Windows PE, macOS Mach-O or console binary execution;
-- no physical-hardware installer;
-- VirtualBox and VMware runtime execution are not part of hosted CI, although their disk formats are structurally and semantically verified.
+- no guest additions or accelerated 3D;
+- no dynamic linking or POSIX layer;
+- no physical-hardware installer.
 
 ## Documentation
 
-Start with [the documentation index](docs/INDEX.md). Key references:
-
-- [VM Image 3 release and download guide](docs/releases/v0.1.1-vm3.md)
-- [VM appliance architecture](docs/VM_APPLIANCES_0.1.1.md)
+- [Self-contained Live ISO architecture](docs/LIVE_ISO_0.1.1.md)
+- [Live ISO 1 download and startup guide](docs/releases/v0.1.1-live1.md)
 - [Desktop and controls](docs/DESKTOP_0.1.1.md)
 - [System applications](docs/SYSTEM_APPS_0.1.1.md)
-- [Productivity utilities](docs/PRODUCTIVITY_UTILITIES_0.1.1.md)
 - [Application ABI](docs/ABI_0.1.1.md)
 - [Security model](docs/SECURITY_MODEL_0.1.1.md)
 - [Native package manager](docs/NATIVE_PACKAGE_MANAGER_0.1.1.md)
-- [Runtime Provider ABI](docs/RUNTIME_PROVIDER_ABI_0.1.1.md)
-- [Roadmap](docs/ROADMAP_0.1.1.md)
+- [Documentation index](docs/INDEX.md)
 
-Historical images remain available as [`v0.1.1-vm2`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm2) and [`v0.1.1-vm1`](https://github.com/xemoll/zenov-os/releases/tag/v0.1.1-vm1), but they are pinned to older source snapshots.
-
-## Development status
-
-CI evidence is valid only for the exact tested commit. Draft pull requests are not treated as shipped functionality. Changes intended for distribution must pass exact-head build, deterministic image, QEMU boot, persistence, packaging and checksum gates before publication.
+Older VM1–VM4 releases remain immutable historical snapshots. `v0.1.1-live1` is the current one-file distribution.

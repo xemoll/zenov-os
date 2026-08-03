@@ -1,33 +1,54 @@
-ZenovOS 0.1.1 BIOS VM ISO
-==========================
+ZenovOS 0.1.1 Self-Contained Live ISO
+=====================================
 
-This disc is a bootable ISO 9660 image for legacy x86 BIOS virtual machines.
-It uses El Torito 1.44 MiB floppy emulation and boots the same verified FAT12
-ZenovOS loader as the raw .img build.
+This is the only current ZenovOS launch image. Attach
+ZenovOS-0.1.1-x86.iso to a virtual CD/DVD drive, select Legacy BIOS, and boot.
+No VDI, QCOW2, VMDK, raw data image, preparation script, or second virtual disk
+is required.
 
-Virtual-machine settings
-------------------------
+Automatic startup
+-----------------
 
-Architecture:   32-bit x86 / i686
-Firmware:       Legacy BIOS (UEFI is not supported yet)
-Memory:         32 MiB minimum; 64 MiB recommended
-Boot medium:    ZenovOS-0.1.1-x86.iso as a virtual CD/DVD
-Persistent disk: ZenovOS-0.1.1-data.img as an IDE hard disk
-Boot order:     Optical drive first
+The ISO boots the verified FAT12 ZenovOS loader through BIOS El Torito, loads
+the kernel, expands the embedded ZenovFS system image, creates a writable
+RAM-backed overlay, initializes security policies and applications, and opens
+the graphical desktop automatically.
 
-The ISO is read-only. ZenovFS applications, settings, package state, audit
-records and user files are stored on the separate writable data image. Keep a
-backup of that image before destructive testing.
+Recommended virtual-machine settings
+------------------------------------
+
+Architecture:  32-bit x86 / i686
+Firmware:      Legacy BIOS
+Memory:        64 MiB or more
+Processors:    1
+Display:       Standard VGA / VBoxVGA-compatible
+Boot medium:   ZenovOS-0.1.1-x86.iso as virtual CD/DVD
+Boot order:    Optical drive first
+Networking:    Optional; not required for startup
+Hard disk:     Not required
 
 QEMU example
 ------------
 
 qemu-system-i386 \
+  -machine pc,vmport=off \
   -m 64M \
-  -drive file=ZenovOS-0.1.1-data.img,format=raw,if=ide,index=0,media=disk \
-  -drive file=ZenovOS-0.1.1-x86.iso,format=raw,media=cdrom,if=ide,index=2,readonly=on \
+  -vga std \
+  -drive file=ZenovOS-0.1.1-x86.iso,format=raw,if=ide,index=2,media=cdrom,readonly=on \
   -boot order=d,strict=on
 
-The ISO is intended for QEMU, VirtualBox, VMware and other hypervisors that
-support legacy BIOS El Torito booting. Physical hardware and UEFI boot remain
-unsupported in this build.
+Live-session storage
+--------------------
+
+Files and settings are writable during the running session. They are held in a
+RAM overlay and reset after power-off or reboot. Persistent installation is a
+separate future feature; the current release intentionally ships only one ISO.
+
+Compatibility boundary
+----------------------
+
+The guest supports Legacy BIOS El Torito boot. UEFI and physical-hardware
+installation are not implemented yet. VirtualBox still requires AMD-V/VT-x to
+be enabled and available to VirtualBox; that host-side requirement cannot be
+changed by any guest ISO. QEMU TCG can run the ISO without hardware
+virtualization.
