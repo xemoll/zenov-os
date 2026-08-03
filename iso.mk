@@ -7,10 +7,12 @@ VM_APPLIANCE_DIR ?= $(BUILD)/vm-appliances
 VM_APPLIANCE_REBUILD_DIR ?= /tmp/zenov-os-vm-appliances-rebuild
 VM_APPLIANCE_STAMP ?= $(VM_APPLIANCE_DIR)/.verified
 VM_LIFECYCLE_OUT ?= $(BUILD)/vm-lifecycle-test
+VM_LAUNCHER_OUT ?= $(BUILD)/vm-launcher-test
 VM_DIST ?= dist-vm
 
 .PHONY: iso iso-qemu iso-persistence iso-deterministic iso-check \
-  vm-appliances vm-appliances-semantic vm-lifecycle-check vm-package vm-check
+  vm-appliances vm-appliances-semantic vm-lifecycle-check vm-launcher-check \
+  vm-package vm-check
 
 $(ISO_IMAGE): $(BUILD)/zenov-os.img tools/build_iso.sh packaging/ISO-README.txt
 	bash tools/build_iso.sh $(BUILD)/zenov-os.img $(ISO_IMAGE) $(ISO_ROOT)
@@ -70,6 +72,9 @@ vm-appliances-semantic: $(VM_APPLIANCE_STAMP)
 vm-lifecycle-check: $(BUILD)/zenov-data.img packaging/manage-vm.sh tests/vm_lifecycle_test.sh
 	bash tests/vm_lifecycle_test.sh $(BUILD)/zenov-data.img $(VM_LIFECYCLE_OUT)
 
+vm-launcher-check: packaging/prepare-vm.sh tests/vm_launcher_test.sh
+	bash tests/vm_launcher_test.sh packaging/prepare-vm.sh $(VM_LAUNCHER_OUT)
+
 vm-package: $(VM_APPLIANCE_STAMP) tools/package_vm_appliances.sh packaging/manage-vm.sh $(BUILD)/build-manifest.json
 	bash tools/package_vm_appliances.sh \
 	  $(BUILD)/zenov-os.img \
@@ -83,5 +88,5 @@ vm-package: $(VM_APPLIANCE_STAMP) tools/package_vm_appliances.sh packaging/manag
 	@test "$$(find $(VM_DIST) -maxdepth 1 -type f | wc -l)" -eq 15
 	@echo 'VM lifecycle manager packaged: OK assets=15'
 
-vm-check: iso-check vm-appliances-semantic vm-lifecycle-check vm-package
-	@echo 'ZenovOS VM verification: OK (optical boot, persistence, appliance roundtrip, transactional lifecycle and direct packaging)'
+vm-check: iso-check vm-appliances-semantic vm-lifecycle-check vm-launcher-check vm-package
+	@echo 'ZenovOS VM verification: OK (optical boot, persistence, appliance roundtrip, transactional lifecycle, AMD-V-safe launcher and direct packaging)'
