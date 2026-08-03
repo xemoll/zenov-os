@@ -2,6 +2,8 @@ constexpr uint16_t live_overlay_empty = 0xFFFFU;
 constexpr uint32_t live_overlay_capacity_sectors = 1024U;
 constexpr uint32_t live_pack_header_bytes = 20U;
 constexpr uint32_t live_pack_chunk_bytes = 8U;
+static_assert(live_image_pack_bytes < 32768U,
+              "embedded Live payload exceeds the low-memory budget");
 
 uint16_t* live_overlay_map = nullptr;
 uint8_t* live_overlay_sectors = nullptr;
