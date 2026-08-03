@@ -1,0 +1,333 @@
+name: Publish ZenovOS v0.1.1 VM Image 4
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-vm4.yml'
+      - '.github/workflows/iso.yml'
+      - 'iso.mk'
+      - 'packaging/prepare-vm.sh'
+      - 'packaging/VM-QUICKSTART.txt'
+      - 'tests/vm_launcher_test.sh'
+      - 'tools/build_vm_appliances.sh'
+      - 'tools/verify_vm_appliances.sh'
+      - 'tools/package_vm_appliances.sh'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-vm4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zenov-os-v0.1.1-vm4-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: v0.1.1-vm4
+  SOURCE_DATE_EPOCH: 1784160000
+  ZENOV_REQUIRE_ISO: 1
+
+jobs:
+  validate-vm4:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source and launcher syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
+          bash -n packaging/prepare-vm.sh
+          bash -n tests/vm_launcher_test.sh
+          grep -Fq 'ZENOV_VM_SOFTWARE_FALLBACK' packaging/prepare-vm.sh
+          grep -Fq 'VERR_(SVM_DISABLED|SVM_IN_USE' packaging/prepare-vm.sh
+
+      - name: Install native toolchain, QEMU and ISO tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            binutils \
+            qemu-system-x86 \
+            qemu-utils \
+            xorriso \
+            zip \
+            unzip \
+            python3 \
+            curl \
+            jq
+
+      - name: Build and verify AMD-V-safe distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make all vm-check
+          test -s dist-vm/ZenovOS-0.1.1-x86.iso
+          test -x dist-vm/prepare-vm.sh
+          test "$(find dist-vm -maxdepth 1 -type f | wc -l)" -eq 15
+          (cd dist-vm && sha256sum -c SHA256SUMS.txt)
+          grep -qx "$ZENOV_SOURCE_REVISION" dist-vm/SOURCE-REVISION.txt
+          grep -Fq VERR_SVM_DISABLED build/vm-launcher-test/fallback.err
+          grep -Fq 'Starting ZenovOS with QEMU software-compatible path' \
+            build/vm-launcher-test/fallback.err
+          grep -Fq 'QEMU -accel tcg\,thread=multi' build/vm-launcher-test/log
+          grep -Fq 'file=build/vm-launcher-test/dist/ZenovOS-0.1.1-data.vdi\,format=vdi' \
+            build/vm-launcher-test/log
+          xorriso -indev dist-vm/ZenovOS-0.1.1-x86.iso -report_el_torito plain \
+            2>&1 | tee build/vm4-el-torito.txt
+          grep -Fq 'El Torito boot img' build/vm4-el-torito.txt
+
+      - name: Upload VM4 validation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-v0.1.1-vm4-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist-vm/
+            build/vm-launcher-test/
+            build/vm4-el-torito.txt
+            build/qemu/iso/
+            build/qemu/iso-persistence/
+            build/vm-lifecycle-test/
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/build-manifest.json
+
+  publish-vm4:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$ZENOV_SOURCE_REVISION" origin/main
+          test -z "$(git status --porcelain)"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "tag already exists without a release transaction: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Install native toolchain, QEMU and ISO tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            binutils \
+            qemu-system-x86 \
+            qemu-utils \
+            xorriso \
+            zip \
+            unzip \
+            python3 \
+            curl \
+            jq
+
+      - name: Build exact release payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make all vm-check
+          test "$(find dist-vm -maxdepth 1 -type f | wc -l)" -eq 15
+          test -x dist-vm/prepare-vm.sh
+          test -x dist-vm/manage-vm.sh
+          (cd dist-vm && sha256sum -c SHA256SUMS.txt)
+          grep -qx "$ZENOV_SOURCE_REVISION" dist-vm/SOURCE-REVISION.txt
+          grep -Fq VERR_SVM_DISABLED build/vm-launcher-test/fallback.err
+          grep -Fq 'QEMU -accel tcg\,thread=multi' build/vm-launcher-test/log
+          xorriso -indev dist-vm/ZenovOS-0.1.1-x86.iso -report_el_torito plain \
+            2>&1 | tee build/vm4-el-torito.txt
+          grep -Fq 'El Torito boot img' build/vm4-el-torito.txt
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          iso_sha="$(awk '$2 == "ZenovOS-0.1.1-x86.iso" {print $1}' dist-vm/SHA256SUMS.txt)"
+          helper_sha="$(awk '$2 == "prepare-vm.sh" {print $1}' dist-vm/SHA256SUMS.txt)"
+          test "${#iso_sha}" -eq 64
+          test "${#helper_sha}" -eq 64
+          cat > build/vm4-release-notes.md <<NOTES
+          # ZenovOS 0.1.1 VM Image 4
+
+          **Source commit:** \`$ZENOV_SOURCE_REVISION\`  
+          **Assets:** 15 direct files; no ZIP extraction required
+
+          VM Image 4 fixes the VirtualBox startup path for hosts where AMD-V/VT-x
+          is disabled or occupied by the host OS. The updated \`prepare-vm.sh\`:
+
+          - repairs and reuses an existing powered-off VirtualBox VM;
+          - applies one CPU, 64 MiB RAM, legacy BIOS, IDE boot and no networking;
+          - recognizes \`VERR_SVM_DISABLED\`, \`VERR_SVM_IN_USE\`,
+            \`VERR_VMX_NO_VMX\` and \`VERR_VMX_IN_VMX_ROOT_MODE\`;
+          - starts the same ISO and writable VDI with QEMU TCG when VirtualBox
+            cannot access hardware virtualization;
+          - preserves a fail-closed switch to disable the fallback.
+
+          For a VM named \`gergre\` on Linux:
+
+          \`ZENOV_VM_NAME=gergre ./prepare-vm.sh virtualbox\`
+
+          QEMU TCG does not require AMD-V/VT-x, but is slower. Install
+          \`qemu-system-x86\` and \`qemu-img\` on the host.
+
+          **ISO SHA-256:** \`$iso_sha\`  
+          **prepare-vm.sh SHA-256:** \`$helper_sha\`
+
+          The release pipeline rebuilt the exact source, executed the launcher
+          acceptance matrix, booted the BIOS ISO, verified two-boot persistence,
+          checked all disk formats and validated all 15 release checksums.
+          NOTES
+          printf 'ISO_SHA256=%s\nHELPER_SHA256=%s\n' "$iso_sha" "$helper_sha" >> "$GITHUB_ENV"
+
+      - name: Publish immutable release transaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          created=false
+          cleanup() {
+            rc=$?
+            if [[ $rc -ne 0 && "$created" == true ]]; then
+              row="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+                --jq '[.draft, .target_commitish] | @tsv' 2>/dev/null || true)"
+              if [[ "$row" == $'true\t'"$ZENOV_SOURCE_REVISION" ]]; then
+                gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+                  --yes --cleanup-tag >/dev/null || true
+              else
+                echo 'cleanup refused: release is public or target changed' >&2
+              fi
+            fi
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          gh release create "$RELEASE_TAG" dist-vm/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$ZENOV_SOURCE_REVISION" \
+            --title 'ZenovOS 0.1.1 VM Image 4' \
+            --notes-file build/vm4-release-notes.md \
+            --draft
+          created=true
+
+          download_dir="$RUNNER_TEMP/vm4-release-download"
+          rm -rf "$download_dir"
+          mkdir -p "$download_dir"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir "$download_dir"
+          test "$(find "$download_dir" -maxdepth 1 -type f | wc -l)" -eq 15
+          for local_asset in dist-vm/*; do
+            cmp "$local_asset" "$download_dir/$(basename "$local_asset")"
+          done
+
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --latest
+          created=false
+          trap - EXIT
+
+      - name: Verify public unauthenticated VM4 files
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/vm4-public"
+          mkdir -p "$out"
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"
+          for attempt in 1 2 3 4 5; do
+            if env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --location \
+              --silent --show-error -H 'Accept: application/vnd.github+json' \
+              "$api" -o "$out/release.json"; then
+              break
+            fi
+            sleep 3
+          done
+          jq -e --arg sha "$ZENOV_SOURCE_REVISION" '
+            .tag_name == "v0.1.1-vm4" and
+            .draft == false and
+            .prerelease == false and
+            .target_commitish == $sha and
+            (.assets | length) == 15
+          ' "$out/release.json" >/dev/null
+
+          expected="$(find dist-vm -maxdepth 1 -type f -printf '%f\n' | sort)"
+          actual="$(jq -r '.assets[].name' "$out/release.json" | sort)"
+          test "$actual" = "$expected"
+
+          asset_url() {
+            jq -r --arg name "$1" \
+              '.assets[] | select(.name == $name) | .browser_download_url' \
+              "$out/release.json"
+          }
+          env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --location \
+            --retry 3 --retry-all-errors --silent --show-error \
+            "$(asset_url ZenovOS-0.1.1-x86.iso)" \
+            -o "$out/ZenovOS-0.1.1-x86.iso"
+          env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --location \
+            --retry 3 --retry-all-errors --silent --show-error \
+            "$(asset_url prepare-vm.sh)" -o "$out/prepare-vm.sh"
+          env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --location \
+            --retry 3 --retry-all-errors --silent --show-error \
+            "$(asset_url SHA256SUMS.txt)" -o "$out/SHA256SUMS.txt"
+
+          test "$(sha256sum "$out/ZenovOS-0.1.1-x86.iso" | cut -d' ' -f1)" = "$ISO_SHA256"
+          test "$(sha256sum "$out/prepare-vm.sh" | cut -d' ' -f1)" = "$HELPER_SHA256"
+          grep -Fq 'ZENOV_VM_SOFTWARE_FALLBACK' "$out/prepare-vm.sh"
+          grep -Fq 'VERR_(SVM_DISABLED|SVM_IN_USE' "$out/prepare-vm.sh"
+          xorriso -indev "$out/ZenovOS-0.1.1-x86.iso" -report_el_torito plain \
+            2>&1 | tee "$out/el-torito.txt"
+          grep -Fq 'El Torito boot img' "$out/el-torito.txt"
+          printf 'PUBLIC_VM4_OK source=%s assets=15 iso=%s helper=%s\n' \
+            "$ZENOV_SOURCE_REVISION" "$ISO_SHA256" "$HELPER_SHA256" \
+            | tee "$out/result.txt"
+
+      - name: Upload VM4 publication evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-v0.1.1-vm4-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            dist-vm/
+            build/vm-launcher-test/
+            build/vm4-el-torito.txt
+            build/vm4-release-notes.md
+            ${{ runner.temp }}/vm4-public/
