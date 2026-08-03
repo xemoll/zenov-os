@@ -1,0 +1,303 @@
+name: Publish ZenovOS v0.1.1 Live ISO 1
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-live1.yml'
+      - '.github/workflows/iso.yml'
+      - 'Makefile'
+      - 'GNUmakefile'
+      - 'fs_surface.mk'
+      - 'iso.mk'
+      - 'boot/**'
+      - 'kernel/**'
+      - 'user/**'
+      - 'packaging/ISO-README.txt'
+      - 'tools/build_iso.sh'
+      - 'tools/live_image_pack.cpp'
+      - 'tests/qemu_iso_smoke.sh'
+      - 'tests/qemu_iso_persistence.sh'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-live1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zenov-os-v0.1.1-live1-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: v0.1.1-live1
+  ISO_NAME: ZenovOS-0.1.1-x86.iso
+  SOURCE_DATE_EPOCH: 1784160000
+
+jobs:
+  validate-live1:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact source and one-file release contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
+          bash -n tests/qemu_iso_smoke.sh
+          bash -n tests/qemu_iso_persistence.sh
+          grep -Fq 'ZENOVFS_LIVE_READY' kernel/parts/storage_ata_deadline_init.inc
+          grep -Fq 'assets | length) == 1' .github/workflows/publish-live1.yml
+          grep -Fq 'external-disks=0' tests/qemu_iso_persistence.sh
+          test ! -e .github/workflows/publish-vm3.yml
+          test ! -e .github/workflows/publish-vm4.yml
+
+      - name: Install native toolchain, QEMU and ISO tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            binutils \
+            qemu-system-x86 \
+            xorriso \
+            curl \
+            jq
+
+      - name: Build and validate exact ISO-only payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make all iso-check
+          test -s "build/$ISO_NAME"
+          test ! -e dist-vm
+          mkdir -p build/release-live1
+          cp "build/$ISO_NAME" "build/release-live1/$ISO_NAME"
+          test "$(find build/release-live1 -maxdepth 1 -type f | wc -l)" -eq 1
+          sha256sum "build/release-live1/$ISO_NAME" | tee build/live1.sha256
+          grep -Fq ZENOVFS_LIVE_IMAGE_OK build/qemu/iso/serial.log
+          grep -Fq 'ZENOVFS_STORAGE_MODE live-iso' build/qemu/iso/serial.log
+          grep -Fq GRAPHICAL_DESKTOP_READY build/qemu/iso/serial.log
+          grep -Fq ISO_LIVE_SESSION_OK build/qemu/iso-live/serial.log
+          grep -Fq ZENOVFS_FSCK_OK build/qemu/iso-live/serial.log
+          xorriso -indev "build/release-live1/$ISO_NAME" -report_el_torito plain \
+            2>&1 | tee build/live1-el-torito.txt
+          grep -Fq '/BOOT/ZENOVOS.IMG' build/live1-el-torito.txt
+
+      - name: Upload Live ISO validation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-v0.1.1-live1-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            build/release-live1/
+            build/live1.sha256
+            build/live1-el-torito.txt
+            build/qemu/iso/
+            build/qemu/iso-live/
+            build/generated/live_zenovfs.hpp
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/build-manifest.json
+
+  publish-live1:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact main source and immutable tag boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$ZENOV_SOURCE_REVISION" origin/main
+          test -z "$(git status --porcelain)"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "tag already exists without a release transaction: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Install native toolchain, QEMU and ISO tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            binutils \
+            qemu-system-x86 \
+            xorriso \
+            curl \
+            jq
+
+      - name: Rebuild and boot exact release payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make all iso-check
+          test -s "build/$ISO_NAME"
+          test ! -e dist-vm
+          rm -rf build/release-live1
+          mkdir -p build/release-live1
+          cp "build/$ISO_NAME" "build/release-live1/$ISO_NAME"
+          test "$(find build/release-live1 -maxdepth 1 -type f | wc -l)" -eq 1
+          ISO_SHA256="$(sha256sum "build/release-live1/$ISO_NAME" | cut -d' ' -f1)"
+          test "${#ISO_SHA256}" -eq 64
+          printf 'ISO_SHA256=%s\n' "$ISO_SHA256" >> "$GITHUB_ENV"
+          grep -Fq 'ZENOVFS_LIVE_READY mode=ram-overlay persistence=session' \
+            build/qemu/iso/serial.log
+          grep -Fq GRAPHICAL_DESKTOP_READY build/qemu/iso/serial.log
+          grep -Fq ZENOVOS_UI_READY build/qemu/iso/serial.log
+          grep -Fq ISO_LIVE_SESSION_OK build/qemu/iso-live/serial.log
+          xorriso -indev "build/release-live1/$ISO_NAME" -report_el_torito plain \
+            2>&1 | tee build/live1-el-torito.txt
+          grep -Fq '/BOOT/ZENOVOS.IMG' build/live1-el-torito.txt
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > build/live1-release-notes.md <<NOTES
+          # ZenovOS 0.1.1 Self-Contained Live ISO
+
+          **Source commit:** \`$ZENOV_SOURCE_REVISION\`  
+          **Download:** one file only — \`$ISO_NAME\`  
+          **ISO SHA-256:** \`$ISO_SHA256\`
+
+          Attach the ISO to a virtual CD/DVD drive and boot with Legacy BIOS.
+          No VDI, QCOW2, VMDK, raw data image, installer helper, or second disk
+          is required. The ISO expands its embedded ZenovFS system image into a
+          writable RAM overlay, initializes applications and security services,
+          and opens the graphical desktop automatically.
+
+          Recommended VM profile: 32-bit x86, Legacy BIOS, one CPU, 64 MiB RAM,
+          standard VGA, optical drive first. Files written during the Live
+          session are reset after reboot because the ISO is read-only.
+
+          The exact release source passed no-disk QEMU boot, writable-session
+          write/read/fsck/sync checks, graphical desktop readiness, El Torito
+          validation and deterministic ISO rebuild.
+          NOTES
+
+      - name: Publish one-asset immutable release transaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          created=false
+          cleanup() {
+            rc=$?
+            if [[ $rc -ne 0 && "$created" == true ]]; then
+              row="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+                --jq '[.draft, .target_commitish] | @tsv' 2>/dev/null || true)"
+              if [[ "$row" == $'true\t'"$ZENOV_SOURCE_REVISION" ]]; then
+                gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+                  --yes --cleanup-tag >/dev/null || true
+              else
+                echo 'cleanup refused: release is public or target changed' >&2
+              fi
+            fi
+            exit "$rc"
+          }
+          trap cleanup EXIT
+
+          gh release create "$RELEASE_TAG" "build/release-live1/$ISO_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$ZENOV_SOURCE_REVISION" \
+            --title 'ZenovOS 0.1.1 Self-Contained Live ISO' \
+            --notes-file build/live1-release-notes.md \
+            --draft
+          created=true
+
+          verify_dir="$RUNNER_TEMP/live1-draft-download"
+          rm -rf "$verify_dir"
+          mkdir -p "$verify_dir"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir "$verify_dir"
+          test "$(find "$verify_dir" -maxdepth 1 -type f | wc -l)" -eq 1
+          cmp "build/release-live1/$ISO_NAME" "$verify_dir/$ISO_NAME"
+
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --prerelease=false --latest
+          created=false
+          trap - EXIT
+
+      - name: Verify public ISO without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/live1-public"
+          rm -rf "$out"
+          mkdir -p "$out"
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"
+          env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --location \
+            --retry 5 --retry-delay 2 --retry-all-errors \
+            --silent --show-error -H 'Accept: application/vnd.github+json' \
+            "$api" -o "$out/release.json"
+          jq -e --arg tag "$RELEASE_TAG" --arg source "$ZENOV_SOURCE_REVISION" \
+            --arg name "$ISO_NAME" '
+              .tag_name == $tag and
+              .draft == false and
+              .prerelease == false and
+              .target_commitish == $source and
+              (.assets | length) == 1 and
+              .assets[0].name == $name
+            ' "$out/release.json" >/dev/null
+          url="$(jq -r '.assets[0].browser_download_url' "$out/release.json")"
+          env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --location \
+            --retry 5 --retry-delay 2 --retry-all-errors \
+            --silent --show-error "$url" -o "$out/$ISO_NAME"
+          test "$(sha256sum "$out/$ISO_NAME" | cut -d' ' -f1)" = "$ISO_SHA256"
+          cmp "build/release-live1/$ISO_NAME" "$out/$ISO_NAME"
+          xorriso -indev "$out/$ISO_NAME" -report_el_torito plain \
+            2>&1 | tee "$out/el-torito.txt"
+          grep -Fq '/BOOT/ZENOVOS.IMG' "$out/el-torito.txt"
+          printf 'PUBLIC_LIVE1_OK source=%s assets=1 iso=%s boot=el-torito storage=embedded-live\n' \
+            "$ZENOV_SOURCE_REVISION" "$ISO_SHA256" | tee "$out/result.txt"
+
+      - name: Upload Live ISO publication evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-v0.1.1-live1-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            build/release-live1/
+            build/live1-release-notes.md
+            build/live1-el-torito.txt
+            build/qemu/iso/
+            build/qemu/iso-live/
+            ${{ runner.temp }}/live1-public/
