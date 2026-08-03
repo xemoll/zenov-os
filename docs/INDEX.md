@@ -3,7 +3,7 @@
 - [`DESKTOP_0.1.1.md`](DESKTOP_0.1.1.md) — adaptive native desktop, 22 verified VBE modes, hybrid scaling, Settings controls and framebuffer evidence.
 - [`SYSTEM_APPS_0.1.1.md`](SYSTEM_APPS_0.1.1.md) — functional Notes, Tasks, Calendar and Clock applications, persistent ZenovFS state, controls, verification and explicit boundaries.
 - [`PRODUCTIVITY_UTILITIES_0.1.1.md`](PRODUCTIVITY_UTILITIES_0.1.1.md) — bounded Calculator, persistent Reminders, integrated Agenda, local alarms and verification boundary.
-- [`VM_APPLIANCES_0.1.1.md`](VM_APPLIANCES_0.1.1.md) — current VM Image 3 distribution, public ISO, RAW/QCOW2/VDI/VMDK disks, lifecycle manager and publication guarantees.
+- [`VM_APPLIANCES_0.1.1.md`](VM_APPLIANCES_0.1.1.md) — current VM distribution, public ISO, RAW/QCOW2/VDI/VMDK disks, lifecycle manager and publication guarantees.
 - [`ROADMAP_0.1.1.md`](ROADMAP_0.1.1.md) — completed P0 contracts and remaining release-freeze work.
 - [`ABI_0.1.1.md`](ABI_0.1.1.md) — application memory, stack, syscall and executable-format contract.
 - [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md) — signed per-application syscall masks, exact file scopes, denial audit and authority-lifetime contract.
@@ -26,7 +26,8 @@
 - [`RUNTIME_PROVIDER_ABI_0.1.1.md`](RUNTIME_PROVIDER_ABI_0.1.1.md) — verified host profiles, runtime architecture/capability gating, accepted artifact families and user-supplied firmware requirements.
 - [`ZENOVFS1_TRANSACTIONS.md`](ZENOVFS1_TRANSACTIONS.md) — interrupted-write ordering and recovery.
 - [`POST_MERGE_HARDENING.md`](POST_MERGE_HARDENING.md) — process-window scrub and W^X audit delta.
-- [`releases/v0.1.1-vm3.md`](releases/v0.1.1-vm3.md) — current integrated VM Image 3, direct public ISO links, 15-asset contract, lifecycle manager and unauthenticated-download verification.
+- [`releases/v0.1.1-vm4.md`](releases/v0.1.1-vm4.md) — VirtualBox AMD-V/VT-x failure recovery, existing-VM repair and QEMU TCG software fallback.
+- [`releases/v0.1.1-vm3.md`](releases/v0.1.1-vm3.md) — integrated VM Image 3, direct public ISO links, 15-asset contract, lifecycle manager and unauthenticated-download verification.
 - [`releases/v0.1.1-vm2.md`](releases/v0.1.1-vm2.md) — historical persistent VM Image 2, direct hypervisor downloads, checksums and publication evidence.
 - [`releases/v0.1.1-vm1.md`](releases/v0.1.1-vm1.md) — earlier verified BIOS ISO release, raw writable disk, checksums and limitations.
 - [`releases/v0.1.1.md`](releases/v0.1.1.md) — immutable original tagged release notes, downloads, changes since 0.1.0 and known limitations.
