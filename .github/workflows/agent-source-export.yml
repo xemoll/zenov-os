@@ -27,13 +27,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Validate and apply exact scheduler patch
+      - name: Validate and stage non-workflow scheduler patch
+        id: apply
         shell: bash
         env:
           BASE_SHA: 9d18cc34fb41ebced5a3011e1b37bc55672dbafa
           PATCH_SHA256: 5b53eaa476a1aa47b1e35c07731a9a23259129f76cca8ca39fe8d3a3dccfc91f
         run: |
           set -euo pipefail
+          if ! compgen -G '.github/agent-scheduler.patch.gz.b64.*' >/dev/null; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'Scheduler patch payload already consumed.'
+            exit 0
+          fi
+
           test "$(git merge-base HEAD "$BASE_SHA")" = "$BASE_SHA"
           git diff --quiet "$BASE_SHA" -- . \
             ':(exclude).github/workflows/agent-source-export.yml' \
@@ -44,19 +51,22 @@ jobs:
             | gzip --decompress > /tmp/scheduler.patch
           printf '%s  %s\n' "$PATCH_SHA256" /tmp/scheduler.patch | sha256sum --check --strict
 
-          # The patch intentionally deletes this temporary workflow. Restore
-          # its exact base revision so the deletion hunk remains atomic.
           git checkout "$BASE_SHA" -- .github/workflows/agent-source-export.yml
           git apply --check /tmp/scheduler.patch
           git apply --index /tmp/scheduler.patch
           git rm -f .github/agent-scheduler.patch.gz.b64.*
 
-          test ! -e .github/workflows/agent-source-export.yml
+          # GitHub Apps cannot update workflow files without the separate
+          # workflows permission. Keep them for connector-authorized writes.
+          git restore --source=HEAD --staged --worktree -- .github/workflows
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
           test ! -e .github/agent-scheduler.patch.gz.b64.00
           git diff --cached --check
           git status --short
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
 
-      - name: Publish one atomic kernel commit
+      - name: Publish non-workflow kernel commit
+        if: steps.apply.outputs.changed == 'true'
         shell: bash
         run: |
           set -euo pipefail
