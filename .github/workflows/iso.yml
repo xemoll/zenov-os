@@ -11,6 +11,7 @@ on:
       - 'GNUmakefile'
       - 'fs_surface.mk'
       - 'iso.mk'
+      - 'run-zenovos.sh'
       - 'boot/**'
       - 'kernel/**'
       - 'user/**'
@@ -51,6 +52,7 @@ jobs:
           bash -n tools/build_iso.sh
           bash -n tests/qemu_iso_smoke.sh
           bash -n tests/qemu_iso_persistence.sh
+          bash -n run-zenovos.sh
           grep -Fq ZLIVE003 tools/live_image_pack.cpp
           grep -Fq 'format=ZLIVE003' kernel/parts/storage_live_image.inc
           grep -Fq 'ZENOVFS_LIVE_READY' kernel/parts/storage_ata_deadline_init.inc
@@ -58,6 +60,9 @@ jobs:
           grep -Fq 'generated/live_zenovfs.hpp' kernel/parts/storage.inc
           grep -Fq 'ZENPKG_DATA_STAMP' iso.mk
           grep -Fq 'external-disks=0' tests/qemu_iso_persistence.sh
+          grep -Fq 'SELECTED_ACCEL=tcg' run-zenovos.sh
+          grep -Fq 'kernel_static_start = live_storage_end' kernel/parts/supervisor_layout.inc
+          grep -Fq 'ASSERT(__kernel_static_end <= 0x00400000' kernel/linker.ld
           ! grep -Fq 'vm-appliances' iso.mk
 
       - name: Install native toolchain, QEMU and ISO tooling
@@ -86,12 +91,34 @@ jobs:
           test "$raw" -gt "$compressed"
           printf 'ZLIVE003_COMPRESSION_OK raw=%s compressed=%s\n' \
             "$raw" "$compressed" | tee build/live-compression.txt
-          kernel_end="$(awk '/__kernel_end = \./ {print $1}' build/kernel.map | tail -1)"
-          [[ "$kernel_end" =~ ^0x[0-9a-fA-F]+$ ]]
-          headroom=$((0xA0000 - kernel_end))
-          test "$headroom" -ge 1024
-          printf 'LOW_MEMORY_HEADROOM_OK kernel_end=%s bytes=%s\n' \
-            "$kernel_end" "$headroom" | tee build/live-low-memory.txt
+
+          kernel_low_end="$(awk '/__kernel_low_end = \./ {print $1}' build/kernel.map | tail -1)"
+          kernel_static_start="$(awk '/__kernel_static_start = \./ {print $1}' build/kernel.map | tail -1)"
+          kernel_static_end="$(awk '/__kernel_static_end = \./ {print $1}' build/kernel.map | tail -1)"
+          [[ "$kernel_low_end" =~ ^0x[0-9a-fA-F]+$ ]]
+          [[ "$kernel_static_start" =~ ^0x[0-9a-fA-F]+$ ]]
+          [[ "$kernel_static_end" =~ ^0x[0-9a-fA-F]+$ ]]
+          low_headroom=$((0xA0000 - kernel_low_end))
+          static_headroom=$((0x400000 - kernel_static_end))
+          test "$kernel_static_start" = '0x00000000003b6000' -o \
+               "$kernel_static_start" = '0x003b6000' -o \
+               "$kernel_static_start" = '0x3b6000'
+          test "$low_headroom" -ge 65536
+          test "$static_headroom" -ge 1024
+          printf 'KERNEL_LAYOUT_OK low_end=%s low_headroom=%s static_start=%s static_end=%s static_headroom=%s\n' \
+            "$kernel_low_end" "$low_headroom" "$kernel_static_start" "$kernel_static_end" "$static_headroom" \
+            | tee build/live-low-memory.txt
+
+          QEMU=qemu-system-i386 bash run-zenovos.sh \
+            --iso build/ZenovOS-0.1.1-x86.iso \
+            --memory 128 \
+            --accel tcg \
+            --serial-log build/qemu/launcher-serial.log \
+            --dry-run | tee build/qemu-launcher.txt
+          grep -Fq 'accel=tcg' build/qemu-launcher.txt
+          grep -Fq -- '-boot order=d,strict=on' build/qemu-launcher.txt
+          grep -Fq -- '-drive file=' build/qemu-launcher.txt
+
           test ! -e dist-vm
           sha256sum build/ZenovOS-0.1.1-x86.iso | tee build/live-iso.sha256
           xorriso -indev build/ZenovOS-0.1.1-x86.iso -report_el_torito plain \
@@ -129,6 +156,7 @@ jobs:
             build/live-iso.sha256
             build/live-compression.txt
             build/live-low-memory.txt
+            build/qemu-launcher.txt
             build/live-el-torito.txt
             build/generated/live_zenovfs.hpp
             build/qemu/iso/
