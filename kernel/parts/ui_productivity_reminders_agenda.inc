@@ -1,29 +1,3 @@
-void productivity_agenda_add(ProductivityAgendaKind kind, uint8_t source_index, uint16_t year, uint8_t month, uint8_t day,
-                             uint8_t hour, uint8_t minute, bool done, bool overdue, const char* title) {
-    if (productivity_agenda_count >= productivity_agenda_capacity || !title || !*title) return;
-    ProductivityAgendaItem& item = productivity_agenda[productivity_agenda_count++];
-    item.kind = kind;
-    item.source_index = source_index;
-    item.year = year;
-    item.month = month;
-    item.day = day;
-    item.hour = hour;
-    item.minute = minute;
-    item.done = done;
-    item.overdue = overdue;
-    string_copy(item.title, title, sizeof(item.title));
-}
-
-bool productivity_agenda_filter_match(bool done, int32_t comparison, bool same_day, uint32_t item_ordinal, uint32_t now_ordinal) {
-    if (productivity_reminder_filter == ProductivityReminderFilter::done) return done;
-    if (done) return false;
-    if (productivity_reminder_filter == ProductivityReminderFilter::today) return same_day;
-    if (productivity_reminder_filter == ProductivityReminderFilter::overdue) return comparison < 0;
-    if (productivity_reminder_filter == ProductivityReminderFilter::week)
-        return item_ordinal >= now_ordinal && item_ordinal <= now_ordinal + 6U;
-    return comparison >= 0;
-}
-
 int32_t productivity_agenda_title_compare(const char* left, const char* right) {
     uint32_t index = 0U;
     while (left[index] && right[index]) {
@@ -41,6 +15,42 @@ bool productivity_agenda_before(const ProductivityAgendaItem& left, const Produc
     if (left_stamp != right_stamp) return left_stamp < right_stamp;
     if (left.kind != right.kind) return static_cast<uint8_t>(left.kind) < static_cast<uint8_t>(right.kind);
     return productivity_agenda_title_compare(left.title, right.title) < 0;
+}
+
+void productivity_agenda_add(ProductivityAgendaKind kind, uint8_t source_index, uint16_t year, uint8_t month, uint8_t day,
+                             uint8_t hour, uint8_t minute, bool done, bool overdue, const char* title) {
+    if (!title || !*title) return;
+    ProductivityAgendaItem candidate{};
+    candidate.kind = kind;
+    candidate.source_index = source_index;
+    candidate.year = year;
+    candidate.month = month;
+    candidate.day = day;
+    candidate.hour = hour;
+    candidate.minute = minute;
+    candidate.done = done;
+    candidate.overdue = overdue;
+    string_copy(candidate.title, title, sizeof(candidate.title));
+
+    if (productivity_agenda_count < productivity_agenda_capacity) {
+        productivity_agenda[productivity_agenda_count++] = candidate;
+        return;
+    }
+
+    uint8_t latest = 0U;
+    for (uint8_t index = 1U; index < productivity_agenda_count; ++index)
+        if (productivity_agenda_before(productivity_agenda[latest], productivity_agenda[index])) latest = index;
+    if (productivity_agenda_before(candidate, productivity_agenda[latest])) productivity_agenda[latest] = candidate;
+}
+
+bool productivity_agenda_filter_match(bool done, int32_t comparison, bool same_day, uint32_t item_ordinal, uint32_t now_ordinal) {
+    if (productivity_reminder_filter == ProductivityReminderFilter::done) return done;
+    if (done) return false;
+    if (productivity_reminder_filter == ProductivityReminderFilter::today) return same_day;
+    if (productivity_reminder_filter == ProductivityReminderFilter::overdue) return comparison < 0;
+    if (productivity_reminder_filter == ProductivityReminderFilter::week)
+        return item_ordinal >= now_ordinal && item_ordinal <= now_ordinal + 6U;
+    return comparison >= 0;
 }
 
 void productivity_agenda_sort() {
