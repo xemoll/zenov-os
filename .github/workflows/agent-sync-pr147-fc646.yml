@@ -1,0 +1,249 @@
+name: Sync PR147 With Security Main
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/agent-sync-pr147-fc646.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-pr147-main-fc646
+  cancel-in-progress: false
+
+jobs:
+  merge-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: agent/kernel-preemptive-scheduler-0.1.1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Merge exact main and resolve supervisor memory ownership
+        shell: bash
+        env:
+          EXPECTED_SCHEDULER: 2755d438ce41e0c3d430a02e7ab8e1c00543f684
+          EXPECTED_MAIN: fc646e39d011c034500d7149b61b4b7511cb65e1
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SCHEDULER"
+          scheduler_head="$(git rev-parse HEAD)"
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+
+          set +e
+          git merge --no-ff --no-commit "$EXPECTED_MAIN"
+          merge_rc=$?
+          set -e
+          if ((merge_rc != 0)); then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            printf 'merge-conflicts=%s\n' "${conflicts[*]}"
+            test "${#conflicts[@]}" -eq 1
+            test "${conflicts[0]}" = 'kernel/parts/supervisor_layout.inc'
+          fi
+
+          cat > kernel/parts/supervisor_layout.inc <<'EOF'
+          namespace supervisor_layout {
+          constexpr uintptr_t heap_start = 0x00100000U;
+          constexpr uintptr_t heap_end = 0x00300000U;
+          constexpr uintptr_t scan_workspace = 0x00300000U;
+          constexpr uint32_t scan_workspace_bytes = 0x00010000U;
+          constexpr uintptr_t zvrt_records = 0x00310000U;
+          constexpr uint32_t zvrt_records_bytes = 0x00001000U;
+          constexpr uintptr_t pmm_bitmap = 0x00311000U;
+          constexpr uint32_t pmm_bitmap_bytes = 0x00001000U;
+          constexpr uintptr_t policy_transaction = 0x00312000U;
+          constexpr uint32_t policy_transaction_bytes = 0x00004000U;
+          constexpr uintptr_t live_image_workspace = 0x00316000U;
+          constexpr uint32_t live_image_workspace_bytes = 0x00010000U;
+          constexpr uintptr_t live_overlay_map = 0x00326000U;
+          constexpr uint32_t live_overlay_map_bytes = 0x00010000U;
+          constexpr uintptr_t live_overlay_data = 0x00336000U;
+          constexpr uint32_t live_overlay_data_bytes = 0x00080000U;
+          constexpr uintptr_t live_storage_end = live_overlay_data + live_overlay_data_bytes;
+
+          constexpr uintptr_t kernel_static_start = live_storage_end;
+          constexpr uintptr_t kernel_static_limit = 0x00480000U;
+
+          constexpr uint32_t task_stack_count = 8U;
+          constexpr uint32_t task_stack_guard_bytes = 0x00001000U;
+          constexpr uint32_t task_stack_bytes = 0x00004000U;
+          constexpr uint32_t task_stack_stride = task_stack_guard_bytes + task_stack_bytes;
+          constexpr uintptr_t task_stack_region_start = 0x00500000U;
+          constexpr uintptr_t task_stack_region_end = task_stack_region_start + task_stack_count * task_stack_stride;
+
+          constexpr uintptr_t legacy_user_physical_start = 0x00600000U;
+          constexpr uintptr_t legacy_user_physical_end = 0x00700000U;
+          constexpr uintptr_t user_physical_end = legacy_user_physical_end;
+          constexpr uintptr_t user_base = 0x40000000U;
+          constexpr uint32_t user_window_bytes = 0x00100000U;
+
+          constexpr uintptr_t zmid_workspace_physical_a = 0x00800000U;
+          constexpr uintptr_t zmid_workspace_physical_b = 0x00810000U;
+          constexpr uintptr_t zmid_workspace_virtual_a = 0x00800000U;
+          constexpr uintptr_t zmid_workspace_virtual_b = 0x00810000U;
+          constexpr uint32_t zmid_workspace_bytes = 0x00010000U;
+          constexpr uintptr_t zmid_workspace_virtual_end = 0x00820000U;
+          constexpr uintptr_t pmm_reserved_end = 0x00820000U;
+
+          /* PDE 2 remains absent from the permanent identity map so the ZMID
+           * workspace can own it transactionally. PMM retains the remaining
+           * frames in this 4 MiB span instead of allocating inaccessible RAM. */
+          constexpr uintptr_t kernel_identity_hole_start = 0x00800000U;
+          constexpr uintptr_t kernel_identity_hole_end = 0x00C00000U;
+
+          static_assert(heap_start < heap_end);
+          static_assert(heap_end == scan_workspace);
+          static_assert(scan_workspace + scan_workspace_bytes == zvrt_records);
+          static_assert(zvrt_records + zvrt_records_bytes == pmm_bitmap);
+          static_assert(pmm_bitmap + pmm_bitmap_bytes == policy_transaction);
+          static_assert(policy_transaction + policy_transaction_bytes == live_image_workspace);
+          static_assert(live_image_workspace + live_image_workspace_bytes == live_overlay_map);
+          static_assert(live_overlay_map + live_overlay_map_bytes == live_overlay_data);
+          static_assert(live_storage_end == kernel_static_start);
+          static_assert(kernel_static_start < kernel_static_limit);
+          static_assert(kernel_static_limit <= task_stack_region_start);
+          static_assert(task_stack_region_end <= legacy_user_physical_start);
+          static_assert(legacy_user_physical_start < legacy_user_physical_end);
+          static_assert(user_physical_end <= zmid_workspace_physical_a);
+          static_assert(zmid_workspace_physical_a + zmid_workspace_bytes == zmid_workspace_physical_b);
+          static_assert(zmid_workspace_physical_b + zmid_workspace_bytes == pmm_reserved_end);
+          static_assert(zmid_workspace_virtual_a == kernel_identity_hole_start);
+          static_assert(zmid_workspace_virtual_a + zmid_workspace_bytes == zmid_workspace_virtual_b);
+          static_assert(zmid_workspace_virtual_b + zmid_workspace_bytes == zmid_workspace_virtual_end);
+          static_assert(zmid_workspace_virtual_end <= kernel_identity_hole_end);
+          static_assert(kernel_identity_hole_end - kernel_identity_hole_start == 0x00400000U);
+          } // namespace supervisor_layout
+          EOF
+          sed -i 's/^          //' kernel/parts/supervisor_layout.inc
+          git add kernel/parts/supervisor_layout.inc
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('kernel/parts/memory.inc')
+          text = path.read_text()
+          replacements = [
+              (
+                  'constexpr uintptr_t reserved_end = supervisor_layout::pmm_reserved_end;\nconstexpr uint32_t self_test_frames = 16U;',
+                  'constexpr uintptr_t reserved_end = supervisor_layout::pmm_reserved_end;\n'
+                  'constexpr uintptr_t identity_hole_start = supervisor_layout::kernel_identity_hole_start;\n'
+                  'constexpr uintptr_t identity_hole_end = supervisor_layout::kernel_identity_hole_end;\n'
+                  'constexpr uint32_t self_test_frames = 16U;'
+              ),
+              (
+                  '    for (uint32_t address = start; address < end; address += page_size) {\n'
+                  '        const uint32_t frame = address / page_size;',
+                  '    for (uint32_t address = start; address < end; address += page_size) {\n'
+                  '        if (address >= identity_hole_start && address < identity_hole_end) continue;\n'
+                  '        const uint32_t frame = address / page_size;'
+              ),
+              (
+                  'bool free_frame(uintptr_t address) {\n'
+                  '    if (!initialized || address < reserved_end || address >= managed_limit || (address & (page_size - 1U))) return false;',
+                  'bool free_frame(uintptr_t address) {\n'
+                  '    if (!initialized || address < reserved_end || address >= managed_limit ||\n'
+                  '        (address >= identity_hole_start && address < identity_hole_end) ||\n'
+                  '        (address & (page_size - 1U))) return false;'
+              ),
+              (
+                  'constexpr uint32_t kernel_table_count = pmm::managed_limit / table_span;\n'
+                  'constexpr uint32_t user_virtual_base = 0x40000000U;',
+                  'constexpr uint32_t kernel_table_count = pmm::managed_limit / table_span;\n'
+                  'constexpr uint32_t supervisor_hole_directory_index =\n'
+                  '    supervisor_layout::kernel_identity_hole_start / table_span;\n'
+                  'constexpr uint32_t user_virtual_base = 0x40000000U;'
+              ),
+              (
+                  'static_assert(kernel_table_count == 32U);\n'
+                  'static_assert(user_directory_index >= kernel_table_count && user_directory_index < 1024U);',
+                  'static_assert(kernel_table_count == 32U);\n'
+                  'static_assert(supervisor_layout::kernel_identity_hole_start % table_span == 0U);\n'
+                  'static_assert(supervisor_layout::kernel_identity_hole_end -\n'
+                  '              supervisor_layout::kernel_identity_hole_start == table_span);\n'
+                  'static_assert(supervisor_hole_directory_index == 2U);\n'
+                  'static_assert(user_directory_index >= kernel_table_count && user_directory_index < 1024U);'
+              ),
+              (
+                  '        page_directory[table] = reinterpret_cast<uintptr_t>(kernel_tables[table]) | present | writable;',
+                  '        if (table != supervisor_hole_directory_index) {\n'
+                  '            page_directory[table] = reinterpret_cast<uintptr_t>(kernel_tables[table]) | present | writable;\n'
+                  '        }'
+              ),
+              (
+                  '    serial::line("KERNEL_IDENTITY_MAP_OK bytes=134217728 supervisor-only=yes");',
+                  '    serial::line("KERNEL_IDENTITY_MAP_OK bytes=134217728 supervisor-only=yes excluded=0x00800000-0x00c00000");\n'
+                  '    serial::line("PMM_IDENTITY_HOLE_RESERVED_OK bytes=4194304 reason=zmid-supervisor-pde");'
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'missing memory merge anchor: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          git add kernel/parts/memory.inc
+
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git restore --source="$scheduler_head" --staged --worktree -- .github/workflows
+          git diff --cached --check
+
+          test -f kernel/parts/zmid_content_workspace.inc
+          test -f tests/zmid_content_workspace_mapping_test.cpp
+          test -f tools/zenovfs_antimalware_benchmark_fixture.cpp
+          grep -Fq 'constexpr uintptr_t pmm_reserved_end = 0x00820000U;' kernel/parts/supervisor_layout.inc
+          grep -Fq 'constexpr uintptr_t kernel_identity_hole_end = 0x00C00000U;' kernel/parts/supervisor_layout.inc
+          grep -Fq 'supervisor_hole_directory_index == 2U' kernel/parts/memory.inc
+          grep -Fq 'PMM_IDENTITY_HOLE_RESERVED_OK bytes=4194304' kernel/parts/memory.inc
+          grep -Fq 'SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata' kernel/parts/scheduler.inc
+
+      - name: Run strict combined host contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils clang
+          make clean
+          make -j2 all check | tee sync-host-check.log
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tests/zmid_content_workspace_mapping_test.cpp -o /tmp/zmid-workspace-test
+          /tmp/zmid-workspace-test | tee zmid-workspace-test.log
+          grep -Fq 'ZMID_WORKSPACE_MAPPING_TEST_OK' zmid-workspace-test.log
+          grep -Fq 'SCHEDULER_POLICY_TEST_OK priority-levels=4 rr=equal aging=50 quantum=3-6' sync-host-check.log
+          echo '2b7ba0114d5228825b30aca30e0e978f2faf9b798cf7f5494742d7a1d330956a  build/HELLO.ZEX' | sha256sum -c -
+          static_end="$(awk '/__kernel_static_end = \./ {print $1}' build/kernel.map | tail -1)"
+          [[ "$static_end" =~ ^0x[0-9a-fA-F]+$ ]]
+          test $((static_end)) -le $((0x480000))
+
+      - name: Publish two-parent non-workflow merge
+        shell: bash
+        env:
+          EXPECTED_MAIN: fc646e39d011c034500d7149b61b4b7511cb65e1
+        run: |
+          set -euo pipefail
+          git config user.name 'ZenovOS Kernel Agent'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'merge: integrate isolated ZMID workspaces with scheduler memory map'
+          merge_sha="$(git rev-parse HEAD)"
+          tree_sha="$(git rev-parse HEAD^{tree})"
+          test "$(git rev-parse HEAD^2)" = "$EXPECTED_MAIN"
+          git push origin HEAD:refs/heads/agent/kernel-preemptive-scheduler-0.1.1
+          printf 'PR147_SECURITY_SYNC_OK merge=%s tree=%s main=%s\n' "$merge_sha" "$tree_sha" "$EXPECTED_MAIN"
+
+      - name: Upload synchronization evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pr147-security-sync-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            sync-host-check.log
+            zmid-workspace-test.log
+            build/KERNEL.BIN
+            build/kernel.map
