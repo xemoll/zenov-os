@@ -5,100 +5,30 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/ci.yml'
-  workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: visible-scheduler-main-sync
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  sync-scheduler-main:
+  export-exact-scheduler-source:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: agent/kernel-preemptive-scheduler-0.1.1
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Merge exact current main
-        shell: bash
-        env:
-          MAIN_SHA: 08ad8e6caec8f4818147b7961c809afdc9911558
-        run: |
-          set -euo pipefail
-          git config user.name 'ZenovOS Kernel Agent'
-          git config user.email 'actions@users.noreply.github.com'
-          git fetch origin main
-          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
-          scheduler_head="$(git rev-parse HEAD)"
-
-          set +e
-          git merge --no-ff --no-commit "$MAIN_SHA"
-          merge_rc=$?
-          set -e
-          if ((merge_rc != 0)); then
-            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
-            printf 'conflicts=%s\n' "${conflicts[*]}"
-            test "${#conflicts[@]}" -eq 1
-            test "${conflicts[0]}" = 'kernel/parts/hardware.inc'
-            git checkout --ours kernel/parts/hardware.inc
-            python3 - <<'PY'
-from pathlib import Path
-path = Path('kernel/parts/hardware.inc')
-text = path.read_text()
-old_namespace = 'namespace graphics { void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons); }'
-new_namespace = '''namespace graphics {
-void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons);
-void background_tick();
-}'''
-old_wait = '''uint16_t key_pop_blocking() {
-    for (;;) { disable_interrupts(); if (key_tail != key_head) { const uint16_t key = key_queue[key_tail]; key_tail = (key_tail + 1) % key_queue_capacity; enable_interrupts(); return key; } asm volatile("sti; hlt; cli"); }
-}'''
-new_wait = '''uint16_t key_pop_blocking() {
-    for (;;) {
-        disable_interrupts();
-        if (key_tail != key_head) {
-            const uint16_t key = key_queue[key_tail];
-            key_tail = (key_tail + 1) % key_queue_capacity;
-            enable_interrupts();
-            return key;
-        }
-        asm volatile("sti; hlt; cli");
-        enable_interrupts();
-        graphics::background_tick();
-    }
-}'''
-if old_namespace not in text or old_wait not in text:
-    raise SystemExit('expected hardware merge anchors are missing')
-path.write_text(text.replace(old_namespace, new_namespace).replace(old_wait, new_wait))
-PY
-            git add kernel/parts/hardware.inc
-          fi
-
-          test -z "$(git diff --name-only --diff-filter=U)"
-          grep -Fq 'uint32_t timer_interrupt(InterruptFrame* frame);' kernel/parts/hardware.inc
-          grep -Fq 'return process::timer_interrupt(frame);' kernel/parts/hardware.inc
-          grep -Fq 'return process::user_exception(frame);' kernel/parts/hardware.inc
-          grep -Fq 'graphics::background_tick();' kernel/parts/hardware.inc
-
-          # Keep scheduler-branch workflows unchanged in this token-authored
-          # merge; connector-authorized writes synchronize workflows next.
-          git restore --source="$scheduler_head" --staged --worktree -- .github/workflows
-          git diff --cached --check
-          git status --short
-          git commit -m 'merge: synchronize preemptive scheduler with current main'
-          git push origin HEAD:refs/heads/agent/kernel-preemptive-scheduler-0.1.1
-
-      - name: Verify published branch ancestry
+          ref: bfde85b923674098e67c3c9c350a90739905b04e
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Archive exact scheduler head
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin agent/kernel-preemptive-scheduler-0.1.1
-          merged="$(git rev-parse origin/agent/kernel-preemptive-scheduler-0.1.1)"
-          test "$(git rev-parse "$merged^2")" = '08ad8e6caec8f4818147b7961c809afdc9911558'
-          printf 'SCHEDULER_MAIN_SYNC_OK head=%s main=%s\n' \
-            "$merged" '08ad8e6caec8f4818147b7961c809afdc9911558'
+          test "$(git rev-parse HEAD)" = 'bfde85b923674098e67c3c9c350a90739905b04e'
+          test -z "$(git status --porcelain)"
+          git archive --format=tar.gz --output=scheduler-source-bfde85b.tar.gz HEAD
+          test -s scheduler-source-bfde85b.tar.gz
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: scheduler-source-bfde85b
+          if-no-files-found: error
+          retention-days: 1
+          path: scheduler-source-bfde85b.tar.gz
