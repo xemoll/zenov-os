@@ -73,7 +73,7 @@ void productivity_tasks_scan() {
                 task.payload_offset = static_cast<uint16_t>(payload_start);
                 task.state_offset = static_cast<uint16_t>(marker + 3U);
                 task.line_number = line_number;
-                task.line_hash = productivity_task_line_hash(data, line_start, line_end);
+                (void)productivity_task_capture_snapshot(task, data, line_start, line_end);
                 task.done = data[marker + 3U] != ' ';
                 task.waiting = productivity_task_line_has_token_ci(data, payload_start, line_end, "#W");
                 task.priority = productivity_task_line_has_token_ci(data, payload_start, line_end, "#P1") ? 1U :
