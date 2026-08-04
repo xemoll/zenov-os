@@ -156,7 +156,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force build/runtime-data, build/screenshots | Out-Null
-          $env:QT_QPA_PLATFORM = 'offscreen'
+          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
           $env:QT_PLUGIN_PATH = "$env:QT_PREFIX\plugins"
           $data = "$env:GITHUB_WORKSPACE\build\runtime-data"
           foreach ($app in @('notes','tasks','calendar','clock','calculator','reminders')) {
