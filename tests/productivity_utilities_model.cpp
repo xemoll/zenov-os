@@ -61,6 +61,14 @@ int main() {
     assert(parse_quick("Default repeat", now, Repeat::monthly, quick) && quick.repeat == Repeat::monthly);
     assert(!parse_quick("Broken @+0m", now, Repeat::none, quick));
     assert(!parse_quick("Broken @2026-02-30 09:30", now, Repeat::none, quick));
+    assert(parse_quick("Minute boundary @+525600m", now, Repeat::none, quick));
+    assert(parse_quick("Hour boundary @+8760h", now, Repeat::none, quick));
+    assert(parse_quick("Day boundary @+365d", now, Repeat::none, quick));
+    assert(!parse_quick("Minute excess @+525601m", now, Repeat::none, quick));
+    assert(!parse_quick("Hour excess @+8761h", now, Repeat::none, quick));
+    assert(!parse_quick("Day excess @+366d", now, Repeat::none, quick));
+    assert(!parse_quick("Unsigned overflow @+42949672960m", now, Repeat::none, quick));
+    std::puts("PRODUCTIVITY_REMINDER_QUICK_BOUNDS_OK max-minutes=525600 units=m,h,d overflow=fail-closed");
 
     Reminder daily{false, 2026, 7, 29, 12, 0, "Daily", Repeat::daily, 29};
     assert(advance_repeat(daily, now));
