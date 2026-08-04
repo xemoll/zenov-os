@@ -16,14 +16,15 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
       - name: Export exact source
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          git archive --format=tar.gz --output=main-source.tar.gz 08ad8e6caec8f4818147b7961c809afdc9911558
+          test "$(git rev-parse origin/main)" = '08ad8e6caec8f4818147b7961c809afdc9911558'
+          git archive --format=tar.gz --output=main-source.tar.gz origin/main
           test -s main-source.tar.gz
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
