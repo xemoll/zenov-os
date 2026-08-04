@@ -154,11 +154,12 @@ grep -Fq 'ZENOVOS_UI_READY' "$recovered"
 [[ "$(grep -Fc 'ATA_RECOVERY_RETRY_EXHAUSTED op=read attempts=2 status=command-aborted' "$exhausted")" -eq 1 ]]
 ! grep -Fq 'ATA_RECOVERY_RETRY_OK op=read' "$exhausted"
 grep -Fq 'Storage: attached ZenovFS mount failed status=io-error' "$exhausted"
-grep -Fq 'ZENOVFS_EXTERNAL_FAIL_CLOSED' "$exhausted"
-grep -Fq 'ZENOVOS KERNEL PANIC' "$exhausted"
-grep -Fq 'Persistent signed policy transaction recovery failed.' "$exhausted"
+[[ "$(grep -Fc 'ZENOVFS_EXTERNAL_FAIL_CLOSED' "$exhausted")" -eq 1 ]]
+[[ "$(grep -Fc 'ZENOVOS KERNEL PANIC' "$exhausted")" -eq 1 ]]
+[[ "$(grep -Fc 'Persistent signed policy transaction recovery failed.' "$exhausted")" -eq 1 ]]
 ! grep -Fq 'ZENOVFS_MOUNT_OK' "$exhausted"
 ! grep -Fq 'ZENOVOS_UI_READY' "$exhausted"
+! grep -Fq 'ZENOVFS_LIVE_READY' "$exhausted"
 
-printf 'ATA_READ_FAULT_MATRIX_OK sector=8 recovered_attempts=2 exhausted_attempts=2 resets_each=1 ui_after_recovery=1 ui_after_exhaustion=0\n' \
+printf 'ATA_READ_FAULT_MATRIX_OK sector=8 recovered_attempts=2 exhausted_attempts=2 resets_each=1 ui_after_recovery=1 ui_after_exhaustion=0 fail_closed=typed security_panic=1\n' \
   | tee "$OUT/summary.log"

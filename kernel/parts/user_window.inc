@@ -1,13 +1,11 @@
 namespace paging {
-constexpr uint32_t process_window_bytes = 1U * 1024U * 1024U;
-static_assert(process_window_bytes <= table_span);
 uint32_t process_window_scrub_count = 0;
 
 bool scrub_process_window(bool verify) {
     clear_user();
     if (!map_user(0, process_window_bytes, true)) return false;
 
-    auto* const window = reinterpret_cast<uint8_t*>(table_span);
+    auto* const window = reinterpret_cast<uint8_t*>(user_virtual_base);
     if (verify) {
         window[0] = 0xA5U;
         window[page_size - 1U] = 0x5AU;
@@ -22,9 +20,3 @@ bool scrub_process_window(bool verify) {
     return clean;
 }
 } // namespace paging
-
-extern "C" void user_window_cleanup() {
-    if (!paging::scrub_process_window(false)) panic("User process window scrub failed.");
-    ++paging::process_window_scrub_count;
-    serial::line("USER_WINDOW_RUNTIME_SCRUB_OK");
-}

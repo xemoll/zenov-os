@@ -45,7 +45,7 @@ SECTIONS
   /* Static zero-initialized state no longer consumes the scarce 0x10000-
    * 0x9ffff region.  This range is already permanently reserved by the PMM:
    * it starts exactly after the Live ISO COW workspace and ends immediately
-   * before the existing ring-3 physical window.  entry.S clears this range
+   * before the reserved task-stack and legacy-user regions.  entry.S clears this range
    * after A20 and protected mode are active, before paging is enabled.
    */
   . = 0x003B6000;
@@ -57,8 +57,8 @@ SECTIONS
     __bss_end = .;
   } :data
   __kernel_static_end = .;
-  ASSERT(__kernel_static_end <= 0x00400000,
-         "kernel static state overlaps the ring-3 user window")
+  ASSERT(__kernel_static_end <= 0x00480000,
+         "kernel static state overlaps reserved task-stack space")
 
   /DISCARD/ : {
     *(.comment*)

@@ -3,11 +3,11 @@
 ## Enforced boundaries
 
 - Low linear memory is supervisor-only.
-- Ring-3 applications are limited to a 1 MiB segment-relative window based at `0x00400000`.
+- Ring-3 applications are limited to a 1 MiB segment-relative window based at `0x40000000`.
 - Only current image and stack pages are present.
 - `CR0.WP` makes kernel writes respect read-only application mappings.
 - ELF W+X load segments and page-level permission conflicts are rejected.
-- The reused physical user window is zeroed before first use and after every normal exit or recoverable fault.
+- Scheduled applications own distinct PMM-backed page tables and zeroed physical frames; released frames are wiped before PMM reuse.
 - Syscall buffers are checked for containment, page presence and write permission when required.
 - Every trusted application receives a syscall capability mask from the independently signed ZCAP1 policy; file access additionally requires an exact normalized path scope.
 - Capability authority is installed only after final-read ZGDB2, path-plus-SHA-256 appraisal and signature-valid ZCAP1 lookup, and is cleared at both launch boundaries.
@@ -20,15 +20,15 @@
 - Independently signed ZRWP1 policy protects selected files/directories with exact writer path-plus-SHA-256 identities and bounded write, rename, remove and byte budgets.
 - ZRWP1 supports signed audit and block modes. A violation is allowed or denied only after its persistent ZGAL1 record succeeds; block mode locks the actor for the current window.
 - ZRWP policy updates require sequential versioning, final-storage read-back, persistent audit, explicit metadata synchronization and rollback to the prior policy on failure. A cryptographically invalid active ZRWP stops boot before UI readiness.
-- Ring-3 faults terminate the application and return through the common scrub-and-authority-clear path; ring-0 faults panic.
+- Ring-3 faults terminate only the faulting task and transfer execution to another ready address space; ring-0 faults panic.
 - ZenovFS1 verifies metadata structure and payload checksums and uses a copy-on-write replacement protocol.
 
 The i686 paging mode used by 0.1.1 has no general per-page NX bit. W^X is therefore an admission policy plus code-write protection, not complete hardware non-execution of writable data pages.
 
-The syscall capability layer reduces the authority of already trusted code. It does not turn a pathname into a general object capability: `0.1.1` uses signed masks and exact file scopes for one foreground process. See [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md).
+The syscall capability layer reduces the authority of already trusted code. It does not turn a pathname into a general object capability: `0.1.1` uses signed masks and exact file scopes saved separately in each scheduled task. See [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md).
 
 ## Explicit non-goals
 
-Version 0.1.1 does not claim concurrent-process isolation, per-process page directories, ASLR, secure boot, DMA protection, speculative-execution mitigations, transparent whole-volume or per-page authenticated storage, dynamic-linker hardening, transferable capabilities, handle-based delegation, in-process capability revocation or a user-space policy service.
+Version 0.1.1 now provides bounded concurrent-process isolation and per-task user page tables, but does not claim ASLR, secure boot, DMA protection, speculative-execution mitigations, transparent whole-volume or per-page authenticated storage, dynamic-linker hardening, transferable capabilities, handle-based delegation, in-process capability revocation or a user-space policy service.
 
 Executable authenticity is limited to the current bundled path-and-SHA-256 trust baseline plus RSA-PSS-signed ZGDB2 trust/revocation policy. Syscall profiles are held in a separate RSA-PSS-signed ZCAP1 policy constrained to that same path set. Malware hash/pattern rules are held in a third RSA-PSS-signed ZMID1 domain. Controlled-folder paths, exact writer identities and mutation budgets are held in a fourth RSA-PSS-signed ZRWP1 domain. Selected persistent-file commitments are held in a fifth RSA-PSS-signed ZVRT1 domain. Each can be updated sequentially without rebuilding the kernel, but root rotation and a stronger offline rollback boundary still require a verified OS build or external monotonic state. ZMID1 and ZRWP1 provide bounded write and on-access read prevention. ZVRT1 provides bounded complete-file authenticated reads for a signed path set, not transparent whole-volume/per-page verity, cloud antivirus, full EDR, archive analysis or machine-learning classification.

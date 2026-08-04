@@ -264,12 +264,15 @@ $(BUILD)/interrupts.o: kernel/interrupts.S | $(BUILD)
 $(BUILD)/user-runtime.o: kernel/user.S | $(BUILD)
 	$(AS) --32 $< -o $@
 
+$(BUILD)/scheduler-probe.o: kernel/scheduler_probe.S | $(BUILD)
+	$(AS) --32 $< -o $@
+
 $(BUILD)/kernel.o: kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp security/zvrt_crypto_material.hpp $(BUILD)/generated/zenov_config.hpp | $(BUILD)
 	$(HOST_CXX) $(KERNEL_FLAGS) -c $< -o $@
 
-$(BUILD)/kernel.elf: $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/kernel.o kernel/linker.ld
+$(BUILD)/kernel.elf: $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/scheduler-probe.o $(BUILD)/kernel.o kernel/linker.ld
 	$(LD) -m elf_i386 -T kernel/linker.ld -Map=$(BUILD)/kernel.map \
-	  -o $@ $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/kernel.o
+	  -o $@ $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/scheduler-probe.o $(BUILD)/kernel.o
 	@test -z "$$(nm -u $@)"
 
 $(BUILD)/KERNEL.BIN: $(BUILD)/kernel.elf
