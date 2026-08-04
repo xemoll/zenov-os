@@ -177,7 +177,9 @@ bool parse_quick(std::string input, const Reminder& now, Repeat default_repeat, 
             std::size_t position = 1U;
             std::uint32_t value = 0U;
             while (position < schedule.size() && schedule[position] >= '0' && schedule[position] <= '9') {
-                value = value * 10U + static_cast<std::uint32_t>(schedule[position] - '0');
+                const std::uint32_t digit = static_cast<std::uint32_t>(schedule[position] - '0');
+                if (value > (525600U - digit) / 10U) return false;
+                value = value * 10U + digit;
                 ++position;
             }
             if (position == 1U || position + 1U != schedule.size() || value == 0U) return false;
