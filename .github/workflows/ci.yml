@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/ci.yml'
-      - '.agent/pr147-internal-probe.patch.b64'
+      - '.agent/pr147-internal-probe.patch'
   workflow_dispatch:
 
 permissions:
@@ -35,7 +35,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$expected_head"
           test -z "$(git status --porcelain)"
           git fetch --no-tags --depth=1 origin agent/main-08ad-source-export
-          git show FETCH_HEAD:.agent/pr147-internal-probe.patch.b64 | base64 -d > /tmp/pr147.patch
+          git show FETCH_HEAD:.agent/pr147-internal-probe.patch > /tmp/pr147.patch
           echo "$expected_patch  /tmp/pr147.patch" | sha256sum -c -
           git apply --check /tmp/pr147.patch
           git apply /tmp/pr147.patch
