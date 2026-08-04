@@ -36,10 +36,10 @@ jobs:
           from pathlib import Path
           path = Path('/tmp/merge-pr147.sh')
           text = path.read_text()
-          needle = '''git add kernel/kernel.cpp
+          init_needle = '''git add kernel/kernel.cpp
 
           # Scheduler process ABI plus dynamic user segment rebasing.'''
-          replacement = '''git add kernel/kernel.cpp
+          init_replacement = '''git add kernel/kernel.cpp
           python3 - <<'PYBOOT'
           from pathlib import Path
           p = Path('kernel/kernel.cpp')
@@ -53,9 +53,14 @@ jobs:
           git add kernel/kernel.cpp
 
           # Scheduler process ABI plus dynamic user segment rebasing.'''
-          if text.count(needle) != 1:
-              raise SystemExit(f'resolver insertion anchor mismatch count={text.count(needle)}')
-          path.write_text(text.replace(needle, replacement, 1))
+          if text.count(init_needle) != 1:
+              raise SystemExit(f'resolver init insertion anchor mismatch count={text.count(init_needle)}')
+          text = text.replace(init_needle, init_replacement, 1)
+          exit_needle = "grep -Fq 'LINUX_I386_COMPAT_EXIT code=37' build/qemu/foreign-sync/serial.log"
+          exit_replacement = "grep -Fq 'LINUX_I386_COMPAT_EXIT code=0' build/qemu/foreign-sync/serial.log\ngrep -Fq 'ZENPKG_FOREIGN_QEMU_OK formats=1 preflight=linux-i386 linux-i386=write+exit+enosys+sandbox probe=zenpkg install=1 run=1 fsck=1' build/qemu/foreign-sync/summary.log"
+          if text.count(exit_needle) != 1:
+              raise SystemExit(f'Linux fixture exit anchor mismatch count={text.count(exit_needle)}')
+          path.write_text(text.replace(exit_needle, exit_replacement, 1))
           PY
           bash -n /tmp/merge-pr147.sh
           bash /tmp/merge-pr147.sh
