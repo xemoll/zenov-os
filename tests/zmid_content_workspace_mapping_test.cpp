@@ -22,6 +22,8 @@ void reload() { ++reload_count; }
 
 namespace {
 using zmid_content_workspace_allocator::directory_index;
+using zmid_content_workspace_allocator::hardware_accessed;
+using zmid_content_workspace_allocator::hardware_dirty;
 using zmid_content_workspace_allocator::supervisor_table;
 using zmid_content_workspace_allocator::workspace_pages;
 
@@ -79,6 +81,7 @@ void reset_state() {
     zmid_content_workspace_allocator::allocations = 0U;
     zmid_content_workspace_allocator::mapping_active = false;
     zmid_content_workspace_allocator::mapping_fault = false;
+    zmid_content_workspace_allocator::clear_failure();
     std::memset(reinterpret_cast<void*>(
                     supervisor_layout::zmid_workspace_virtual_a),
                 0xA5, supervisor_layout::zmid_workspace_bytes * 2U);
@@ -98,36 +101,45 @@ int run() {
             supervisor_layout::zmid_workspace_physical_b) ||
         paging::reload_count != 1U) return 12;
 
-    if (!zmid_content_workspace_allocator::acquire_mapping() ||
-        paging::reload_count != 1U) return 13;
     const auto a_first = first_index(
         supervisor_layout::zmid_workspace_virtual_a);
-    supervisor_table[a_first + 3U] |= paging::user;
-    if (zmid_content_workspace_allocator::acquire_mapping()) return 14;
-    supervisor_table[a_first + 3U] &= ~paging::user;
-
+    const auto b_first = first_index(
+        supervisor_layout::zmid_workspace_virtual_b);
+    paging::page_directory[directory_index] |= hardware_accessed;
+    supervisor_table[a_first + 3U] |= hardware_accessed;
+    supervisor_table[b_first + 7U] |= hardware_accessed | hardware_dirty;
+    if (!zmid_content_workspace_allocator::acquire_mapping() ||
+        paging::reload_count != 1U ||
+        zmid_content_workspace_allocator::mapping_fault) return 13;
     zmid_content_workspace_allocator::release_mapping();
     if (!range_is_zero(supervisor_layout::zmid_workspace_virtual_a) ||
         !range_is_zero(supervisor_layout::zmid_workspace_virtual_b) ||
         paging::page_directory[directory_index] != 0U ||
-        paging::reload_count != 2U) return 15;
+        paging::reload_count != 2U ||
+        zmid_content_workspace_allocator::mapping_fault) return 14;
+
+    reset_state();
+    if (!zmid_content_workspace_allocator::acquire_mapping()) return 15;
+    supervisor_table[a_first + 3U] |= paging::user;
+    if (zmid_content_workspace_allocator::acquire_mapping() ||
+        !zmid_content_workspace_allocator::mapping_fault) return 16;
 
     reset_state();
     paging::page_directory[directory_index] = 0x00123007U;
-    if (zmid_content_workspace_allocator::acquire_mapping()) return 16;
+    if (zmid_content_workspace_allocator::acquire_mapping()) return 17;
     if (!range_is_zero(supervisor_layout::zmid_workspace_virtual_a) ||
         !range_is_zero(supervisor_layout::zmid_workspace_virtual_b) ||
         paging::reload_count != 0U ||
-        paging::page_directory[directory_index] != 0x00123007U) return 17;
+        paging::page_directory[directory_index] != 0x00123007U ||
+        !zmid_content_workspace_allocator::mapping_fault) return 18;
 
     reset_state();
-    const auto b_first = first_index(
-        supervisor_layout::zmid_workspace_virtual_b);
     supervisor_table[b_first + 7U] = 0x00123007U;
-    if (zmid_content_workspace_allocator::acquire_mapping()) return 18;
+    if (zmid_content_workspace_allocator::acquire_mapping()) return 19;
     if (paging::page_directory[directory_index] != 0U ||
         supervisor_table[b_first + 7U] != 0x00123007U ||
-        paging::reload_count != 0U) return 19;
+        paging::reload_count != 0U ||
+        !zmid_content_workspace_allocator::mapping_fault) return 20;
 
     reset_state();
     void* a = zmid_content_workspace_allocator::allocate(
@@ -137,39 +149,43 @@ int run() {
     if (a != reinterpret_cast<void*>(
                  supervisor_layout::zmid_workspace_virtual_a) ||
         b != reinterpret_cast<void*>(
-                 supervisor_layout::zmid_workspace_virtual_b)) return 20;
+                 supervisor_layout::zmid_workspace_virtual_b)) return 21;
     if (zmid_content_workspace_allocator::allocate(
             supervisor_layout::zmid_workspace_bytes, 16U) != nullptr ||
         zmid_content_workspace_allocator::allocate(4096U, 16U) != nullptr ||
         zmid_content_workspace_allocator::allocate(
-            supervisor_layout::zmid_workspace_bytes, 3U) != nullptr) return 21;
+            supervisor_layout::zmid_workspace_bytes, 3U) != nullptr) return 22;
     const auto* a_bytes = static_cast<const std::uint8_t*>(a);
     const auto* b_bytes = static_cast<const std::uint8_t*>(b);
     for (std::uint32_t i = 0;
          i < supervisor_layout::zmid_workspace_bytes; ++i) {
-        if (a_bytes[i] != 0U || b_bytes[i] != 0U) return 22;
+        if (a_bytes[i] != 0U || b_bytes[i] != 0U) return 23;
     }
+    paging::page_directory[directory_index] |= hardware_accessed;
+    supervisor_table[a_first] |= hardware_accessed | hardware_dirty;
+    supervisor_table[b_first] |= hardware_accessed | hardware_dirty;
     zmid_content_workspace_allocator::release_mapping();
     if (!range_is_zero(supervisor_layout::zmid_workspace_virtual_a) ||
         !range_is_zero(supervisor_layout::zmid_workspace_virtual_b) ||
-        paging::page_directory[directory_index] != 0U) return 23;
+        paging::page_directory[directory_index] != 0U ||
+        zmid_content_workspace_allocator::mapping_fault) return 24;
 
     reset_state();
     paging::enabled = false;
     if (zmid_content_workspace_allocator::allocate(
             supervisor_layout::zmid_workspace_bytes, 4096U) != nullptr ||
         paging::reload_count != 0U ||
-        paging::page_directory[directory_index] != 0U) return 24;
+        paging::page_directory[directory_index] != 0U) return 25;
 
     reset_state();
-    if (!zmid_content_workspace_allocator::acquire_mapping()) return 25;
+    if (!zmid_content_workspace_allocator::acquire_mapping()) return 26;
     paging::page_directory[directory_index] |= paging::user;
     zmid_content_workspace_allocator::release_mapping();
     if (!zmid_content_workspace_allocator::mapping_fault ||
         !zmid_content_workspace_allocator::mapping_active ||
-        zmid_content_workspace_allocator::acquire_mapping()) return 26;
+        zmid_content_workspace_allocator::acquire_mapping()) return 27;
 
-    std::printf("ZMID_WORKSPACE_MAPPING_TEST_OK pages=%u pde=isolated supervisor-only=yes conflict=blocked active=verified release=cleared fault=latched allocations=bounded\n",
+    std::printf("ZMID_WORKSPACE_MAPPING_TEST_OK pages=%u pde=isolated supervisor-only=yes ad=accepted conflict=blocked active=verified release=cleared fault=latched allocations=bounded\n",
                 workspace_pages * 2U);
     return 0;
 }
