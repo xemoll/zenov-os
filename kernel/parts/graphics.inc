@@ -32,6 +32,7 @@ const char* configured_terminal_cursor = terminal_cursor;
 #include "ui_scaler.inc"
 
 void render_scene();
+void render_scene_top();
 
 #define init init_base
 #define handle_navigation_key handle_navigation_key_base
@@ -79,7 +80,17 @@ void render_scene();
 #undef init
 #undef render_scene
 
+#define render_scene render_scene_utilities_base
+#define init init_utilities_base
+#define handle_navigation_key handle_navigation_key_utilities_base
+#define on_mouse_packet on_mouse_packet_utilities_base
 #include "ui_productivity_utilities.inc"
+#undef on_mouse_packet
+#undef handle_navigation_key
+#undef init
+#undef render_scene
+
+#include "ui_productivity_notes_v2.inc"
 
 #undef terminal_cursor
 #undef desktop_theme

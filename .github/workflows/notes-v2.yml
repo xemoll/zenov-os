@@ -1,0 +1,152 @@
+name: ZenovOS 0.1.1 Notes V2
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  notes-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact tested revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          git cat-file -e "$ZENOV_SOURCE_REVISION^{commit}"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl qemu-system-x86
+
+      - name: Validate Notes v2 model with GCC
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/notes-v2-model
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tests/productivity_notes_v2_model.cpp -o build/notes-v2-model/model-gcc
+          build/notes-v2-model/model-gcc | tee build/notes-v2-model/model-gcc.log
+          grep -Fqx 'PRODUCTIVITY_NOTES_V2_MODEL_OK cursor=insert+backspace+delete navigation=vertical+home+end history=undo8+redo8+oplog bounds=2048 static=compact' \
+            build/notes-v2-model/model-gcc.log
+
+      - name: Validate Notes v2 model with Clang sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sanitizer=(-std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change
+            -fno-sanitize-recover=all -fno-omit-frame-pointer)
+          clang++ "${sanitizer[@]}" tests/productivity_notes_v2_model.cpp -o build/notes-v2-model/model-clang
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            build/notes-v2-model/model-clang | tee build/notes-v2-model/model-clang.log
+          grep -Fqx 'PRODUCTIVITY_NOTES_V2_MODEL_OK cursor=insert+backspace+delete navigation=vertical+home+end history=undo8+redo8+oplog bounds=2048 static=compact' \
+            build/notes-v2-model/model-clang.log
+
+      - name: Build strict native image
+        run: make clean check
+
+      - name: Compile runtime image verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tools/zenovfs_notes_v2_verify.cpp -o build/zenovfs-notes-v2-verify
+
+      - name: Verify Notes v2 source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '#define render_scene render_scene_utilities_base' kernel/parts/graphics.inc
+          grep -Fq 'void render_scene_top();' kernel/parts/graphics.inc
+          grep -Fq '#include "ui_productivity_notes_v2.inc"' kernel/parts/graphics.inc
+          grep -Fq 'constexpr uint8_t productivity_notes_v2_history_capacity = 8U;' kernel/parts/ui_productivity_notes_v2_types.inc
+          grep -Fq 'enum class ProductivityNotesV2EditKind' kernel/parts/ui_productivity_notes_v2_types.inc
+          grep -Fq 'static_assert(sizeof(ProductivityNotesV2Edit) <= 16U' kernel/parts/ui_productivity_notes_v2_types.inc
+          ! grep -Fq 'char text[productivity_note_buffer_capacity]' kernel/parts/ui_productivity_notes_v2_types.inc
+          grep -Fq 'productivity_notes_v2_apply_insert' kernel/parts/ui_productivity_notes_v2_editor.inc
+          grep -Fq 'productivity_notes_v2_apply_erase' kernel/parts/ui_productivity_notes_v2_editor.inc
+          grep -Fq 'productivity_notes_v2_delete_forward' kernel/parts/ui_productivity_notes_v2_editor.inc
+          grep -Fq 'productivity_notes_v2_move_vertical' kernel/parts/ui_productivity_notes_v2_editor.inc
+          grep -Fq 'productivity_notes_v2_undo_once' kernel/parts/ui_productivity_notes_v2_editor.inc
+          grep -Fq 'productivity_notes_v2_redo_once' kernel/parts/ui_productivity_notes_v2_editor.inc
+          grep -Fq 'UI_NOTES_V2_HISTORY_REJECTED' kernel/parts/ui_productivity_notes_v2_editor.inc
+          grep -Fq 'render_scene_top();' kernel/parts/ui_productivity_utilities_runtime.inc
+          grep -Fq 'UI_NOTES_V2_READY cursor=insert+delete navigation=arrows+home+end history=undo8+redo8 viewport=logical-lines' kernel/parts/ui_productivity_notes_v2_runtime.inc
+          echo 'NOTES_V2_SOURCE_CONTRACT_OK editor=cursor+insert+delete navigation=logical-lines history=oplog8+fail-closed static=compact layering=isolated+background-safe'
+
+      - name: Exercise Notes v2 in two QEMU phases
+        run: bash tests/qemu_productivity_notes_v2.sh build/zenov-os.img build/zenov-data.img build/qemu-notes-v2
+
+      - name: Verify persistent Notes v2 state
+        shell: bash
+        run: |
+          set -euo pipefail
+          build/zenovfs-verify build/qemu-notes-v2/zenov-data-notes-v2.img | tee build/qemu-notes-v2/zenovfs-verify.log
+          build/zenovfs-notes-v2-verify build/qemu-notes-v2/zenov-data-notes-v2.img | tee build/qemu-notes-v2/notes-v2-verify.log
+          grep -Fq 'ZENOV_NOTES_V2_RUNTIME_IMAGE_OK scratch=cursor-edit+undo+redo persistence=reboot checksum=valid geometry=bounded' \
+            build/qemu-notes-v2/notes-v2-verify.log
+          grep -Fq 'UI_NOTES_V2_UNDO_OK' build/qemu-notes-v2/serial-phase1.log
+          grep -Fq 'UI_NOTES_V2_REDO_OK' build/qemu-notes-v2/serial-phase1.log
+          grep -Fq 'UI_NOTES_V2_SAVE_OK' build/qemu-notes-v2/serial-phase1.log
+          grep -Fq 'UI_NOTES_V2_OPEN_OK' build/qemu-notes-v2/serial-phase2.log
+          ! grep -Fq 'UI_NOTES_V2_HISTORY_REJECTED' build/qemu-notes-v2/serial-phase1.log
+          test -s build/qemu-notes-v2/notes-v2-undo.ppm
+          test -s build/qemu-notes-v2/notes-v2-redo.ppm
+          test -s build/qemu-notes-v2/notes-v2-saved.ppm
+          test -s build/qemu-notes-v2/notes-v2-persisted.ppm
+          test ! -s build/qemu-notes-v2/qemu-phase1.stderr
+          test ! -s build/qemu-notes-v2/qemu-phase2.stderr
+
+      - name: Verify deterministic rebuild
+        run: make deterministic
+
+      - name: Upload Notes v2 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-0.1.1-notes-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            build/zenov-os.img
+            build/zenov-data.img
+            build/KERNEL.BIN
+            build/zenovfs-notes-v2-verify
+            build/notes-v2-model/*
+            build/qemu-notes-v2/*.img
+            build/qemu-notes-v2/*.log
+            build/qemu-notes-v2/*.stderr
+            build/qemu-notes-v2/*.ppm
+            build/kernel.map
+            kernel/parts/graphics.inc
+            kernel/parts/ui_productivity_utilities_runtime.inc
+            kernel/parts/ui_productivity_notes_v2*.inc
+            tests/productivity_notes_v2_model.cpp
+            tests/qemu_productivity_notes_v2.sh
+            tools/zenovfs_notes_v2_verify.cpp
