@@ -20,7 +20,17 @@ void list(const char* input) {
 
 void stat(const char* input) { char path[48]; if (!normalize_path(input, path)) { console::warning("Invalid path."); return; } if (string_equal(path, "/")) { console::line("  Path          /data"); console::line("  Type          directory"); return; } const int32_t index = find_entry(path); if (index < 0) { console::warning("Path not found."); return; } console::write("  Path          /data"); console::line(path); console::write("  Type          "); console::line(zfs_entries[index].type == zfs_type_directory ? "directory" : "file"); if (zfs_entries[index].type == zfs_type_file) { console::write("  Size          "); console::unsigned_dec(zfs_entries[index].size); console::line(" bytes"); console::write("  Checksum      "); console::hex(zfs_entries[index].checksum); console::put('\n'); } }
 void print_working_directory() { console::write("/data"); if (!string_equal(current_directory, "/")) console::write(current_directory); console::put('\n'); }
-void print_mounts() { console::line("  SOURCE        TARGET   FILESYSTEM  ACCESS"); console::line("  kernel.zv     /system  initramfs   read-only"); console::line(zfs_mounted ? "  /dev/ata0     /data    ZenovFS1    transactional" : "  /dev/ata0     /data    unavailable -"); }
-void print_df() { if (!zfs_mounted) { console::warning("Persistent volume is not mounted."); return; } uint32_t files = 0, directories = 0, bytes = 0; for (uint32_t i = 0; i < zfs_super.entry_count; ++i) { if (!zfs_entries[i].used || zfs_entries[i].type == zfs_type_transaction) continue; if (zfs_entries[i].type == zfs_type_directory) ++directories; else { ++files; bytes += zfs_entries[i].size; } } console::write("  Files         "); console::unsigned_dec(files); console::put('\n'); console::write("  Directories   "); console::unsigned_dec(directories); console::put('\n'); console::write("  Payload       "); console::unsigned_dec(bytes); console::line(" bytes"); }
+void print_mounts() {
+    console::line("  SOURCE        TARGET   FILESYSTEM  ACCESS");
+    console::line("  kernel.zv     /system  initramfs   read-only");
+    if (!zfs_mounted) {
+        console::line("  -             /data    unavailable -");
+    } else if (live_storage_active) {
+        console::line("  /dev/live0    /data    ZenovFS1    session-cow");
+    } else {
+        console::line("  /dev/ata0     /data    ZenovFS1    transactional");
+    }
+}
+void print_df() { if (!zfs_mounted) { console::warning("ZenovFS volume is not mounted."); return; } uint32_t files = 0, directories = 0, bytes = 0; for (uint32_t i = 0; i < zfs_super.entry_count; ++i) { if (!zfs_entries[i].used || zfs_entries[i].type == zfs_type_transaction) continue; if (zfs_entries[i].type == zfs_type_directory) ++directories; else { ++files; bytes += zfs_entries[i].size; } } console::write("  Storage       "); console::line(live_storage_active ? "Live ISO RAM overlay" : "Persistent ATA ZenovFS"); console::write("  Files         "); console::unsigned_dec(files); console::put('\n'); console::write("  Directories   "); console::unsigned_dec(directories); console::put('\n'); console::write("  Payload       "); console::unsigned_dec(bytes); console::line(" bytes"); if (live_storage_active) { console::write("  Overlay used  "); console::unsigned_dec(live_overlay_used); console::write(" / "); console::unsigned_dec(live_overlay_capacity_sectors); console::line(" sectors"); } }
 bool ready() { return zfs_mounted; }
 uint32_t file_capacity() { return zfs_mounted ? max_file_bytes() : 0; }

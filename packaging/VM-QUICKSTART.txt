@@ -9,10 +9,11 @@ ZenovOS-0.1.1-data.qcow2      QEMU/KVM convenience disk.
 ZenovOS-0.1.1-data.vdi        VirtualBox convenience disk.
 ZenovOS-0.1.1-data.vmdk       VMware convenience disk.
 ZenovOS-0.1.1.vmx             VMware Workstation/Fusion configuration.
-prepare-vm.sh                 Linux/macOS preparation and launch helper.
+prepare-vm.sh                 Linux/macOS preparation, repair and launch helper.
 prepare-vm.ps1                Windows PowerShell preparation and launch helper.
+manage-vm.sh                  Transactional writable-disk lifecycle manager.
 VM-APPLIANCE-MANIFEST.json    Canonical guest-content provenance.
-VM-SHA256SUMS.txt              Checksums for this appliance build.
+SHA256SUMS.txt                 Checksums for the complete direct distribution.
 
 Recommended settings
 --------------------
@@ -38,6 +39,38 @@ ZENOV_VM_START=0 ./prepare-vm.sh qemu
 Reset the selected writable disk from the canonical data image:
 ZENOV_VM_RESET=1 ./prepare-vm.sh qemu
 
+Existing VirtualBox VM and AMD-V/VT-x errors
+---------------------------------------------
+VirtualBox hardware virtualization is controlled by the host firmware and host
+OS. An ISO or VDI cannot enable AMD-V/VT-x by itself. The Linux/macOS helper now
+repairs an existing powered-off VM and provides a software-emulation fallback.
+
+For a VM named gergre:
+
+ZENOV_VM_NAME=gergre ./prepare-vm.sh virtualbox
+
+The helper applies the verified ZenovOS settings, reuses the existing VM and
+starts it normally when VirtualBox can access AMD-V/VT-x. If VirtualBox returns
+VERR_SVM_DISABLED, VERR_SVM_IN_USE, VERR_VMX_NO_VMX or
+VERR_VMX_IN_VMX_ROOT_MODE, the helper starts the same ISO and writable VDI with
+QEMU TCG. This path does not require AMD-V/VT-x, but it is slower.
+
+QEMU must be installed for the software fallback. On Arch/CachyOS:
+
+sudo pacman -S --needed qemu-system-x86 qemu-img
+
+Force the software path even when KVM is present:
+
+ZENOV_VM_NAME=gergre ZENOV_QEMU_ACCEL=tcg ./prepare-vm.sh virtualbox
+
+Disable automatic fallback and return the original VirtualBox error:
+
+ZENOV_VM_NAME=gergre ZENOV_VM_SOFTWARE_FALLBACK=0 ./prepare-vm.sh virtualbox
+
+Set ZENOV_VM_REPAIR=0 to refuse modification of an existing VM. A VM must be
+fully powered off before repair; saved state is discarded because it can retain
+an incompatible virtual-hardware configuration.
+
 Windows PowerShell
 ------------------
 .\prepare-vm.ps1 Qemu
@@ -61,12 +94,16 @@ Verification boundary
 ---------------------
 QEMU optical boot and two-boot persistence are automated acceptance tests.
 QCOW2, VDI and VMDK containers are checked with qemu-img and converted back to
-raw for byte-for-byte comparison with the canonical ZenovFS image. VirtualBox
-and VMware configuration generation is validated in CI, but those proprietary
-hypervisors are not executed on GitHub-hosted runners.
+raw for byte-for-byte comparison with the canonical ZenovFS image. The launcher
+acceptance test covers creation, repair of the existing gergre VM, successful
+VirtualBox start, VERR_SVM_DISABLED fallback to QEMU TCG, fallback disablement,
+running-VM refusal and direct TCG launch. VirtualBox and VMware binaries are not
+executed on GitHub-hosted runners; their command contracts are tested with
+fail-closed deterministic shims.
 
 Current limitations
 -------------------
 This remains a live BIOS boot system rather than a hard-disk installer. UEFI,
 physical-hardware installation, networking, audio and guest additions/tools are
-not implemented in ZenovOS 0.1.1.
+not implemented in ZenovOS 0.1.1. QEMU TCG is software emulation and is expected
+to be slower than AMD-V/KVM or native VirtualBox hardware virtualization.

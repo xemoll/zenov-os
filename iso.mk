@@ -1,31 +1,52 @@
 ISO_IMAGE ?= $(BUILD)/ZenovOS-0.1.1-x86.iso
 ISO_ROOT ?= $(BUILD)/iso-root
 ISO_QEMU_OUT ?= $(BUILD)/qemu/iso
-ISO_PERSISTENCE_OUT ?= $(BUILD)/qemu/iso-persistence
+ISO_LIVE_OUT ?= $(BUILD)/qemu/iso-live
 ISO_DETERMINISTIC_DIR ?= /tmp/zenov-os-iso-deterministic
-VM_APPLIANCE_DIR ?= $(BUILD)/vm-appliances
-VM_APPLIANCE_REBUILD_DIR ?= /tmp/zenov-os-vm-appliances-rebuild
-VM_APPLIANCE_STAMP ?= $(VM_APPLIANCE_DIR)/.verified
-VM_LIFECYCLE_OUT ?= $(BUILD)/vm-lifecycle-test
-VM_DIST ?= dist-vm
+LIVE_IMAGE_PACKER ?= $(BUILD)/live-image-pack
+LIVE_IMAGE_HEADER ?= $(BUILD)/generated/live_zenovfs.hpp
+LIVE_IMAGE_REBUILD ?= /tmp/zenov-os-live-zenovfs.hpp
+LIVE_IMAGE_SOURCE_STAMP ?= $(if $(ZENPKG_DATA_STAMP),$(ZENPKG_DATA_STAMP),$(BUILD)/zenov-data.img)
 
-.PHONY: iso iso-qemu iso-persistence iso-deterministic iso-check \
-  vm-appliances vm-appliances-semantic vm-lifecycle-check vm-package vm-check
+.PHONY: iso live-image-check iso-qemu iso-live-session iso-deterministic \
+  iso-check vm-check
+
+$(LIVE_IMAGE_PACKER): tools/live_image_pack.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+# The public Live ISO must embed the final canonical ZenovFS state. In the full
+# GNUmakefile graph this is the package-seeded, signed-repository image guarded
+# by ZENPKG_DATA_STAMP; direct Makefile users fall back to the base image.
+$(LIVE_IMAGE_HEADER): $(LIVE_IMAGE_SOURCE_STAMP) $(LIVE_IMAGE_PACKER) | $(BUILD)
+	@mkdir -p $(dir $@)
+	$(LIVE_IMAGE_PACKER) $(BUILD)/zenov-data.img $@
+
+# Extend the existing kernel rule without duplicating its recipe. The complete
+# ZenovFS image is packed deterministically and compiled into the boot kernel.
+$(BUILD)/kernel.o: $(LIVE_IMAGE_HEADER)
 
 $(ISO_IMAGE): $(BUILD)/zenov-os.img tools/build_iso.sh packaging/ISO-README.txt
 	bash tools/build_iso.sh $(BUILD)/zenov-os.img $(ISO_IMAGE) $(ISO_ROOT)
 
 iso: $(ISO_IMAGE)
 
-iso-qemu: $(ISO_IMAGE) $(BUILD)/zenov-data.img tests/qemu_iso_smoke.sh
+live-image-check: $(LIVE_IMAGE_HEADER) $(LIVE_IMAGE_SOURCE_STAMP) $(LIVE_IMAGE_PACKER)
+	@rm -f $(LIVE_IMAGE_REBUILD)
+	$(LIVE_IMAGE_PACKER) $(BUILD)/zenov-data.img $(LIVE_IMAGE_REBUILD)
+	cmp $(LIVE_IMAGE_HEADER) $(LIVE_IMAGE_REBUILD)
+	@grep -Fq 'live_image_logical_sectors = 32768U' $(LIVE_IMAGE_HEADER)
+	@grep -Fq 'live_image_compressed_bytes =' $(LIVE_IMAGE_HEADER)
+	@echo 'Live ZenovFS packing: OK (final package-seeded 16 MiB image, deterministic ZLIVE003 payload)'
+
+iso-qemu: $(ISO_IMAGE) tests/qemu_iso_smoke.sh
 	@rm -rf $(ISO_QEMU_OUT)
 	@mkdir -p $(ISO_QEMU_OUT)
-	bash tests/qemu_iso_smoke.sh $(ISO_IMAGE) $(BUILD)/zenov-data.img $(ISO_QEMU_OUT)
+	bash tests/qemu_iso_smoke.sh $(ISO_IMAGE) $(ISO_QEMU_OUT)
 
-iso-persistence: $(ISO_IMAGE) $(BUILD)/zenov-data.img $(BUILD)/zenovfs-verify tests/qemu_iso_persistence.sh
-	@rm -rf $(ISO_PERSISTENCE_OUT)
-	@mkdir -p $(ISO_PERSISTENCE_OUT)
-	bash tests/qemu_iso_persistence.sh $(ISO_IMAGE) $(BUILD)/zenov-data.img $(ISO_PERSISTENCE_OUT)
+iso-live-session: $(ISO_IMAGE) tests/qemu_iso_persistence.sh
+	@rm -rf $(ISO_LIVE_OUT)
+	@mkdir -p $(ISO_LIVE_OUT)
+	bash tests/qemu_iso_persistence.sh $(ISO_IMAGE) $(ISO_LIVE_OUT)
 
 iso-deterministic: $(ISO_IMAGE)
 	@rm -rf $(ISO_DETERMINISTIC_DIR)
@@ -35,53 +56,12 @@ iso-deterministic: $(ISO_IMAGE)
 	  $(ISO_DETERMINISTIC_DIR)/ZenovOS-0.1.1-x86.iso \
 	  $(ISO_DETERMINISTIC_DIR)/root
 	cmp $(ISO_IMAGE) $(ISO_DETERMINISTIC_DIR)/ZenovOS-0.1.1-x86.iso
-	@echo 'deterministic ISO rebuild: OK (El Torito catalog and embedded FAT12 image are byte-identical)'
+	@echo 'deterministic Live ISO rebuild: OK (embedded system, El Torito catalog and FAT12 image are byte-identical)'
 
-iso-check: iso iso-qemu iso-persistence iso-deterministic
-	@echo 'ZenovOS ISO verification: OK (BIOS El Torito boot, two-boot ZenovFS persistence and deterministic rebuild)'
+iso-check: live-image-check iso iso-qemu iso-live-session iso-deterministic
+	@echo 'ZenovOS Live ISO verification: OK (single ISO, no data disk, writable RAM session, desktop ready and deterministic rebuild)'
 
-$(VM_APPLIANCE_STAMP): $(ISO_IMAGE) $(BUILD)/zenov-data.img \
-  tools/build_vm_appliances.sh tools/verify_vm_appliances.sh \
-  packaging/prepare-vm.sh packaging/prepare-vm.ps1 \
-  packaging/ZenovOS-0.1.1.vmx packaging/VM-QUICKSTART.txt
-	bash tools/build_vm_appliances.sh $(BUILD)/zenov-data.img $(ISO_IMAGE) $(VM_APPLIANCE_DIR)
-	bash tools/verify_vm_appliances.sh $(BUILD)/zenov-data.img $(ISO_IMAGE) $(VM_APPLIANCE_DIR)
-	@touch $@
-
-vm-appliances: $(VM_APPLIANCE_STAMP)
-
-vm-appliances-semantic: $(VM_APPLIANCE_STAMP)
-	@rm -rf $(VM_APPLIANCE_REBUILD_DIR)
-	bash tools/build_vm_appliances.sh \
-	  $(BUILD)/zenov-data.img \
-	  $(ISO_IMAGE) \
-	  $(VM_APPLIANCE_REBUILD_DIR)
-	bash tools/verify_vm_appliances.sh \
-	  $(BUILD)/zenov-data.img \
-	  $(ISO_IMAGE) \
-	  $(VM_APPLIANCE_REBUILD_DIR)
-	cmp $(VM_APPLIANCE_DIR)/VM-APPLIANCE-MANIFEST.json $(VM_APPLIANCE_REBUILD_DIR)/VM-APPLIANCE-MANIFEST.json
-	cmp $(VM_APPLIANCE_DIR)/VM-QUICKSTART.txt $(VM_APPLIANCE_REBUILD_DIR)/VM-QUICKSTART.txt
-	cmp $(VM_APPLIANCE_DIR)/prepare-vm.sh $(VM_APPLIANCE_REBUILD_DIR)/prepare-vm.sh
-	cmp $(VM_APPLIANCE_DIR)/prepare-vm.ps1 $(VM_APPLIANCE_REBUILD_DIR)/prepare-vm.ps1
-	cmp $(VM_APPLIANCE_DIR)/ZenovOS-0.1.1.vmx $(VM_APPLIANCE_REBUILD_DIR)/ZenovOS-0.1.1.vmx
-	@echo 'VM appliance semantic rebuild: OK (stable metadata and byte-identical guest-visible ZenovFS content)'
-
-vm-lifecycle-check: $(BUILD)/zenov-data.img packaging/manage-vm.sh tests/vm_lifecycle_test.sh
-	bash tests/vm_lifecycle_test.sh $(BUILD)/zenov-data.img $(VM_LIFECYCLE_OUT)
-
-vm-package: $(VM_APPLIANCE_STAMP) tools/package_vm_appliances.sh packaging/manage-vm.sh $(BUILD)/build-manifest.json
-	bash tools/package_vm_appliances.sh \
-	  $(BUILD)/zenov-os.img \
-	  $(BUILD)/zenov-data.img \
-	  $(ISO_IMAGE) \
-	  $(VM_APPLIANCE_DIR) \
-	  $(VM_DIST) \
-	  $(BUILD)/build-manifest.json
-	install -m 0755 packaging/manage-vm.sh $(VM_DIST)/manage-vm.sh
-	@cd $(VM_DIST) && sha256sum manage-vm.sh >> SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt
-	@test "$$(find $(VM_DIST) -maxdepth 1 -type f | wc -l)" -eq 15
-	@echo 'VM lifecycle manager packaged: OK assets=15'
-
-vm-check: iso-check vm-appliances-semantic vm-lifecycle-check vm-package
-	@echo 'ZenovOS VM verification: OK (optical boot, persistence, appliance roundtrip, transactional lifecycle and direct packaging)'
+# Compatibility entrypoint for older CI callers. VM appliance generation is
+# intentionally retired from the current line; the only launch artifact is ISO.
+vm-check: iso-check
+	@echo 'ZenovOS VM compatibility check: OK via self-contained ISO-only path'

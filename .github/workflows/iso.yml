@@ -1,4 +1,4 @@
-name: ZenovOS BIOS ISO and VM appliances
+name: ZenovOS Self-Contained Live ISO
 
 on:
   pull_request:
@@ -6,37 +6,34 @@ on:
       - main
     paths:
       - '.github/workflows/iso.yml'
+      - '.github/workflows/publish-live1.yml'
       - 'Makefile'
       - 'GNUmakefile'
       - 'fs_surface.mk'
       - 'iso.mk'
       - 'boot/**'
       - 'kernel/**'
-      - 'packaging/**'
+      - 'user/**'
+      - 'packaging/ISO-README.txt'
       - 'tools/build_iso.sh'
-      - 'tools/build_vm_appliances.sh'
-      - 'tools/verify_vm_appliances.sh'
-      - 'tools/package_release.sh'
-      - 'tools/package_vm_appliances.sh'
+      - 'tools/live_image_pack.cpp'
       - 'tests/qemu_iso_smoke.sh'
       - 'tests/qemu_iso_persistence.sh'
-      - 'tests/vm_lifecycle_test.sh'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: zenov-os-iso-${{ github.event.pull_request.number || github.ref }}
+  group: zenov-os-live-iso-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-boot-persistence-and-appliances:
+  build-and-boot-live-iso:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       ZENOV_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
-      ZENOV_REQUIRE_ISO: 1
       SOURCE_DATE_EPOCH: 1784160000
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -45,33 +42,23 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify exact source and script syntax
+      - name: Verify exact source and ISO-only contract
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
           test -z "$(git status --porcelain)"
-          for script in \
-            tools/build_iso.sh \
-            tools/build_vm_appliances.sh \
-            tools/verify_vm_appliances.sh \
-            tools/package_release.sh \
-            tools/package_vm_appliances.sh \
-            tests/qemu_iso_smoke.sh \
-            tests/qemu_iso_persistence.sh \
-            tests/vm_lifecycle_test.sh \
-            packaging/run-qemu.sh \
-            packaging/prepare-vm.sh \
-            packaging/manage-vm.sh; do
-            bash -n "$script"
-          done
-          pwsh -NoProfile -Command '
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile(
-              "packaging/prepare-vm.ps1", [ref]$null, [ref]$errors
-            ) | Out-Null
-            if ($errors.Count -ne 0) { $errors | Format-List; exit 1 }
-          '
+          bash -n tools/build_iso.sh
+          bash -n tests/qemu_iso_smoke.sh
+          bash -n tests/qemu_iso_persistence.sh
+          grep -Fq ZLIVE003 tools/live_image_pack.cpp
+          grep -Fq 'format=ZLIVE003' kernel/parts/storage_live_image.inc
+          grep -Fq 'ZENOVFS_LIVE_READY' kernel/parts/storage_ata_deadline_init.inc
+          grep -Fq 'live_image_initialize' kernel/parts/storage_live_image.inc
+          grep -Fq 'generated/live_zenovfs.hpp' kernel/parts/storage.inc
+          grep -Fq 'ZENPKG_DATA_STAMP' iso.mk
+          grep -Fq 'external-disks=0' tests/qemu_iso_persistence.sh
+          ! grep -Fq 'vm-appliances' iso.mk
 
       - name: Install native toolchain, QEMU and ISO tooling
         run: |
@@ -80,123 +67,72 @@ jobs:
             build-essential \
             binutils \
             qemu-system-x86 \
-            qemu-utils \
-            xorriso \
-            zip \
-            unzip \
-            python3
+            xorriso
 
-      - name: Build and verify ISO plus VM appliances
-        run: |
-          set -euo pipefail
-          make all vm-check
-          test -s build/ZenovOS-0.1.1-x86.iso
-          xorriso -indev build/ZenovOS-0.1.1-x86.iso -report_el_torito plain
-          grep -Fq ZENOVOS_BOOT_OK build/qemu/iso/serial.log
-          grep -Fq ZENOVFS_MOUNT_OK build/qemu/iso/serial.log
-          grep -Fq GRAPHICAL_DESKTOP_READY build/qemu/iso/serial.log
-          grep -Fq ZENOVOS_UI_READY build/qemu/iso/serial.log
-          test "$(grep -Fc ZENOVOS_BOOT_OK build/qemu/iso-persistence/serial.log)" -ge 2
-          test "$(grep -Fc ISO_VM_PERSISTENCE_OK build/qemu/iso-persistence/serial.log)" -ge 2
-          grep -Fq ZENOVFS_FSCK_OK build/qemu/iso-persistence/serial-read.log
-
-      - name: Verify direct no-ZIP VM distribution
-        run: |
-          set -euo pipefail
-          expected=(
-            ZenovOS-0.1.1-x86.iso
-            ZenovOS-0.1.1-x86.img
-            ZenovOS-0.1.1-data.img
-            ZenovOS-0.1.1-data.qcow2
-            ZenovOS-0.1.1-data.vdi
-            ZenovOS-0.1.1-data.vmdk
-            ZenovOS-0.1.1.vmx
-            prepare-vm.sh
-            prepare-vm.ps1
-            manage-vm.sh
-            VM-QUICKSTART.txt
-            VM-APPLIANCE-MANIFEST.json
-            BUILD-MANIFEST.json
-            SOURCE-REVISION.txt
-            SHA256SUMS.txt
-          )
-          for asset in "${expected[@]}"; do
-            test -s "dist-vm/$asset"
-          done
-          test -x dist-vm/manage-vm.sh
-          test "$(find dist-vm -maxdepth 1 -type f | wc -l)" -eq 15
-          test "$(grep -Ec '^[0-9a-f]{64}  manage-vm\.sh$' dist-vm/SHA256SUMS.txt)" -eq 1
-          (cd dist-vm && sha256sum -c SHA256SUMS.txt)
-          grep -qx "$ZENOV_SOURCE_REVISION" dist-vm/SOURCE-REVISION.txt
-          ZENOV_VM_STATE_DIR="$RUNNER_TEMP/zenov-vm-status" \
-          ZENOV_VM_BACKUP_DIR="$RUNNER_TEMP/zenov-vm-backups" \
-            dist-vm/manage-vm.sh status | grep -Fq 'exists=no'
-          bash tools/verify_vm_appliances.sh \
-            build/zenov-data.img \
-            build/ZenovOS-0.1.1-x86.iso \
-            build/vm-appliances
-
-      - name: Execute packaged preparation helpers
+      - name: Build and verify the self-contained ISO
         shell: bash
         run: |
           set -euo pipefail
-          ZENOV_VM_START=0 bash dist-vm/prepare-vm.sh qemu \
-            | tee build/prepare-vm-sh.log
-          grep -Fq 'ZenovOS-0.1.1-x86.iso: OK' build/prepare-vm-sh.log
-          grep -Fq 'ZenovOS-0.1.1-data.img: OK' build/prepare-vm-sh.log
-          grep -Fq 'QEMU appliance prepared:' build/prepare-vm-sh.log
+          make clean
+          make all iso-check
+          test -s build/ZenovOS-0.1.1-x86.iso
+          test -s build/generated/live_zenovfs.hpp
+          test "$(stat -c%s build/KERNEL.BIN)" -le 524288
+          grep -Fq 'live_image_pack_bytes =' build/generated/live_zenovfs.hpp
+          grep -Fq 'live_image_compressed_bytes =' build/generated/live_zenovfs.hpp
+          raw="$(awk '/live_image_pack_bytes =/ {value=$5; gsub(/[^0-9]/, "", value); print value}' build/generated/live_zenovfs.hpp)"
+          compressed="$(awk '/live_image_compressed_bytes =/ {value=$5; gsub(/[^0-9]/, "", value); print value}' build/generated/live_zenovfs.hpp)"
+          [[ "$raw" =~ ^[0-9]+$ && "$compressed" =~ ^[0-9]+$ ]]
+          test "$raw" -gt "$compressed"
+          printf 'ZLIVE003_COMPRESSION_OK raw=%s compressed=%s\n' \
+            "$raw" "$compressed" | tee build/live-compression.txt
+          kernel_end="$(awk '/__kernel_end = \./ {print $1}' build/kernel.map | tail -1)"
+          [[ "$kernel_end" =~ ^0x[0-9a-fA-F]+$ ]]
+          headroom=$((0xA0000 - kernel_end))
+          test "$headroom" -ge 1024
+          printf 'LOW_MEMORY_HEADROOM_OK kernel_end=%s bytes=%s\n' \
+            "$kernel_end" "$headroom" | tee build/live-low-memory.txt
+          test ! -e dist-vm
+          sha256sum build/ZenovOS-0.1.1-x86.iso | tee build/live-iso.sha256
+          xorriso -indev build/ZenovOS-0.1.1-x86.iso -report_el_torito plain \
+            2>&1 | tee build/live-el-torito.txt
+          grep -Fq 'El Torito boot img' build/live-el-torito.txt
+          grep -Fq '/BOOT/ZENOVOS.IMG' build/live-el-torito.txt
 
-          pwsh -NoProfile -File dist-vm/prepare-vm.ps1 Qemu -PrepareOnly \
-            | tee build/prepare-vm-ps1.log
-          grep -Fq 'ZenovOS-0.1.1-x86.iso: OK' build/prepare-vm-ps1.log
-          grep -Fq 'ZenovOS-0.1.1-data.img: OK' build/prepare-vm-ps1.log
-          grep -Fq 'QEMU appliance prepared:' build/prepare-vm-ps1.log
-
-      - name: Preserve legacy package compatibility
+      - name: Verify no-disk boot and writable session evidence
+        shell: bash
         run: |
           set -euo pipefail
-          bash tools/package_release.sh \
-            build/zenov-os.img \
-            build/zenov-data.img \
-            dist \
-            package \
-            build/build-manifest.json \
-            build/ZenovOS-0.1.1-x86.iso
-          for asset in \
-            ZenovOS-0.1.1-x86.iso \
-            ZenovOS-0.1.1-data.img \
-            ZenovOS-0.1.1-x86.img \
-            ZenovOS-0.1.1-x86.zip \
-            BUILD-MANIFEST.json \
-            SOURCE-REVISION.txt \
-            INSTALL.txt \
-            SHA256SUMS.txt; do
-            test -s "dist/$asset"
+          for log in build/qemu/iso/serial.log build/qemu/iso-live/serial.log; do
+            grep -Fq ZENOVOS_BOOT_OK "$log"
+            grep -Fq 'ZENOVFS_LIVE_IMAGE_OK source=embedded format=ZLIVE003' "$log"
+            grep -Fq 'ZENOVFS_LIVE_READY mode=ram-overlay persistence=session' "$log"
+            grep -Fq 'ZENOVFS_STORAGE_MODE live-iso' "$log"
+            grep -Fq ZENOVFS_MOUNT_OK "$log"
+            grep -Fq GRAPHICAL_DESKTOP_READY "$log"
+            grep -Fq ZENOVOS_UI_READY "$log"
           done
-          (cd dist && sha256sum -c SHA256SUMS.txt)
+          grep -Fq WRITE_OK build/qemu/iso-live/serial.log
+          grep -Fq ISO_LIVE_SESSION_OK build/qemu/iso-live/serial.log
+          grep -Fq ZENOVFS_FSCK_OK build/qemu/iso-live/serial.log
+          grep -Fq SYNC_OK build/qemu/iso-live/serial.log
 
-      - name: Upload ISO and VM verification evidence
+      - name: Upload Live ISO evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: zenov-os-vm-appliances-${{ github.run_id }}-${{ github.run_attempt }}
+          name: zenov-os-live-iso-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 30
           path: |
-            dist-vm/
-            dist/
-            build/vm-appliances/
             build/ZenovOS-0.1.1-x86.iso
-            build/iso-root/
-            build/qemu/iso/serial.log
-            build/qemu/iso/qemu.stderr
-            build/qemu/iso-persistence/serial.log
-            build/qemu/iso-persistence/serial-write.log
-            build/qemu/iso-persistence/serial-read.log
-            build/qemu/iso-persistence/qemu-write.stderr
-            build/qemu/iso-persistence/qemu-read.stderr
-            build/prepare-vm-sh.log
-            build/prepare-vm-ps1.log
+            build/live-iso.sha256
+            build/live-compression.txt
+            build/live-low-memory.txt
+            build/live-el-torito.txt
+            build/generated/live_zenovfs.hpp
+            build/qemu/iso/
+            build/qemu/iso-live/
             build/KERNEL.BIN
             build/kernel.elf
             build/kernel.map

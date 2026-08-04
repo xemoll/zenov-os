@@ -1,35 +1,57 @@
 # ZenovOS 0.1.1 documentation
 
-- [`DESKTOP_0.1.1.md`](DESKTOP_0.1.1.md) — adaptive native desktop, 22 verified VBE modes, hybrid scaling, Settings controls and framebuffer evidence.
-- [`SYSTEM_APPS_0.1.1.md`](SYSTEM_APPS_0.1.1.md) — functional Notes, Tasks, Calendar and Clock applications, persistent ZenovFS state, controls, verification and explicit boundaries.
-- [`PRODUCTIVITY_UTILITIES_0.1.1.md`](PRODUCTIVITY_UTILITIES_0.1.1.md) — bounded Calculator, persistent Reminders, integrated Agenda, local alarms and verification boundary.
-- [`VM_APPLIANCES_0.1.1.md`](VM_APPLIANCES_0.1.1.md) — current VM Image 3 distribution, public ISO, RAW/QCOW2/VDI/VMDK disks, lifecycle manager and publication guarantees.
-- [`ROADMAP_0.1.1.md`](ROADMAP_0.1.1.md) — completed P0 contracts and remaining release-freeze work.
+## Current distribution
+
+- [`LIVE_ISO_0.1.1.md`](LIVE_ISO_0.1.1.md) — self-contained ISO architecture, embedded ZenovFS, writable RAM overlay, no-disk boot contract and verification boundary.
+- [`releases/v0.1.1-live1.md`](releases/v0.1.1-live1.md) — current one-file Live ISO download and startup guide.
+
+## Desktop and applications
+
+- [`DESKTOP_0.1.1.md`](DESKTOP_0.1.1.md) — adaptive native desktop, verified VBE modes, scaling, controls and framebuffer evidence.
+- [`SYSTEM_APPS_0.1.1.md`](SYSTEM_APPS_0.1.1.md) — Notes, Tasks, Calendar and Clock applications.
+- [`PRODUCTIVITY_UTILITIES_0.1.1.md`](PRODUCTIVITY_UTILITIES_0.1.1.md) — Calculator, Reminders, Agenda and local alarms.
 - [`ABI_0.1.1.md`](ABI_0.1.1.md) — application memory, stack, syscall and executable-format contract.
-- [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md) — signed per-application syscall masks, exact file scopes, denial audit and authority-lifetime contract.
-- [`ZCAP_0.1.1.md`](ZCAP_0.1.1.md) — canonical ZCAP1 binary format, RSA-PSS root, sequential update and rollback boundary.
-- [`SECURITY_MODEL_0.1.1.md`](SECURITY_MODEL_0.1.1.md) — enforced trust boundaries and explicit non-goals.
-- [`ZENOVGUARD_0.1.1.md`](ZENOVGUARD_0.1.1.md) — SHA-256 appraisal, signed policy, persistent audit and quarantine contract.
-- [`ANTIMALWARE_0.1.1.md`](ANTIMALWARE_0.1.1.md) — signed ZMID1 intelligence, bounded hash/pattern rules, pre-write prevention, protected quarantine and fail-closed update evidence.
-- [`ON_ACCESS_PROTECTION_0.1.1.md`](ON_ACCESS_PROTECTION_0.1.1.md) — synchronous shell/ring-3 read mediation, READ-BLOCK/READ-AUDIT evidence, output scrubbing and internal verification exclusions.
-- [`VERIFIED_READS_0.1.1.md`](VERIFIED_READS_0.1.1.md) — signed ZVRT1 path-bound Merkle commitments, supervisor memory layout and valid/corrupt QEMU evidence.
-- [`RANSOMWARE_DEFENSE_0.1.1.md`](RANSOMWARE_DEFENSE_0.1.1.md) — signed ZRWP1 controlled-folder policy, exact writer identities, mutation budgets, audit/block transition and durability evidence.
-- [`ZGDB_0.1.1.md`](ZGDB_0.1.1.md) — signed database format, RSA-PSS policy update, revocation and anti-rollback boundary.
-- [`AUDIT_JOURNAL_0.1.1.md`](AUDIT_JOURNAL_0.1.1.md) — ZGAL1 format, hash chain, COW fault matrix, recovery images and offline-attacker boundary.
-- [`TPM2_TIS_NV_COUNTER_0.1.1.md`](TPM2_TIS_NV_COUNTER_0.1.1.md) — supervisor-only TPM 2.0 TIS transport, explicit persistent NV counter lifecycle and the remaining ZPTJ1 hardware-anchor boundary.
-- [`ZENPKG_FORMAT_1.md`](ZENPKG_FORMAT_1.md) — deterministic package container and canonical manifest contract.
-- [`ZENREPO_OFFLINE_0.1.1.md`](ZENREPO_OFFLINE_0.1.1.md) — signed offline repository roles, root rotation, delegation, expiry and anti-rollback state.
-- [`ZENPKG_CACHE_0.1.1.md`](ZENPKG_CACHE_0.1.1.md) — protected staging, full target verification, atomic cache commit and five-boot QEMU evidence.
-- [`NATIVE_PACKAGE_MANAGER_0.1.1.md`](NATIVE_PACKAGE_MANAGER_0.1.1.md) — transactional lifecycle, planning, repair, rollback, signed authorization and least-privilege execution.
-- [`PACKAGE_COMPATIBILITY_ARCHITECTURE.md`](PACKAGE_COMPATIBILITY_ARCHITECTURE.md) — provider boundaries and staged foreign-runtime roadmap.
-- [`ZENUNIVERSE_REPOSITORY_0.1.1.md`](ZENUNIVERSE_REPOSITORY_0.1.1.md) — platform-neutral artifact catalog, HTTPS delivery contract and runtime-provider resolution.
-- [`RUNTIME_PROVIDER_ABI_0.1.1.md`](RUNTIME_PROVIDER_ABI_0.1.1.md) — verified host profiles, runtime architecture/capability gating, accepted artifact families and user-supplied firmware requirements.
+- [`ZEX_ABI.md`](ZEX_ABI.md) and [`ELF32_ABI.md`](ELF32_ABI.md) — executable-format references.
+
+## Storage, packages and runtime
+
 - [`ZENOVFS1_TRANSACTIONS.md`](ZENOVFS1_TRANSACTIONS.md) — interrupted-write ordering and recovery.
-- [`POST_MERGE_HARDENING.md`](POST_MERGE_HARDENING.md) — process-window scrub and W^X audit delta.
-- [`releases/v0.1.1-vm3.md`](releases/v0.1.1-vm3.md) — current integrated VM Image 3, direct public ISO links, 15-asset contract, lifecycle manager and unauthenticated-download verification.
-- [`releases/v0.1.1-vm2.md`](releases/v0.1.1-vm2.md) — historical persistent VM Image 2, direct hypervisor downloads, checksums and publication evidence.
-- [`releases/v0.1.1-vm1.md`](releases/v0.1.1-vm1.md) — earlier verified BIOS ISO release, raw writable disk, checksums and limitations.
-- [`releases/v0.1.1.md`](releases/v0.1.1.md) — immutable original tagged release notes, downloads, changes since 0.1.0 and known limitations.
-- [`RELEASE_CHECKLIST_0.1.1.md`](RELEASE_CHECKLIST_0.1.1.md) — final-main verification and publication gate.
-- [`SOURCE_ARCHITECTURE.md`](SOURCE_ARCHITECTURE.md) — modular Zenov configuration and scale contracts.
-- [`ZEX_ABI.md`](ZEX_ABI.md) and [`ELF32_ABI.md`](ELF32_ABI.md) — format-specific references.
+- [`ZENPKG_FORMAT_1.md`](ZENPKG_FORMAT_1.md) — deterministic package container and manifest contract.
+- [`ZENREPO_OFFLINE_0.1.1.md`](ZENREPO_OFFLINE_0.1.1.md) — signed offline repository roles, rotation, delegation, expiry and anti-rollback state.
+- [`ZENPKG_CACHE_0.1.1.md`](ZENPKG_CACHE_0.1.1.md) — protected staging, target verification and atomic cache commit.
+- [`NATIVE_PACKAGE_MANAGER_0.1.1.md`](NATIVE_PACKAGE_MANAGER_0.1.1.md) — transactional install, repair, rollback and removal.
+- [`PACKAGE_COMPATIBILITY_ARCHITECTURE.md`](PACKAGE_COMPATIBILITY_ARCHITECTURE.md) — provider boundaries and foreign-runtime roadmap.
+- [`ZENUNIVERSE_REPOSITORY_0.1.1.md`](ZENUNIVERSE_REPOSITORY_0.1.1.md) — platform-neutral artifact catalog.
+- [`RUNTIME_PROVIDER_ABI_0.1.1.md`](RUNTIME_PROVIDER_ABI_0.1.1.md) — runtime architecture and capability gates.
+
+## Security
+
+- [`SECURITY_MODEL_0.1.1.md`](SECURITY_MODEL_0.1.1.md) — enforced trust boundaries and non-goals.
+- [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md) — signed per-application syscall masks and file scopes.
+- [`ZCAP_0.1.1.md`](ZCAP_0.1.1.md) — ZCAP1 format and update boundary.
+- [`ZENOVGUARD_0.1.1.md`](ZENOVGUARD_0.1.1.md) — appraisal, signed policy, audit and quarantine.
+- [`ANTIMALWARE_0.1.1.md`](ANTIMALWARE_0.1.1.md) — ZMID1 intelligence and pre-write prevention.
+- [`ON_ACCESS_PROTECTION_0.1.1.md`](ON_ACCESS_PROTECTION_0.1.1.md) — synchronous read mediation.
+- [`VERIFIED_READS_0.1.1.md`](VERIFIED_READS_0.1.1.md) — signed ZVRT1 path-bound commitments.
+- [`RANSOMWARE_DEFENSE_0.1.1.md`](RANSOMWARE_DEFENSE_0.1.1.md) — ZRWP1 controlled-folder policy.
+- [`ZGDB_0.1.1.md`](ZGDB_0.1.1.md) — signed database and revocation.
+- [`AUDIT_JOURNAL_0.1.1.md`](AUDIT_JOURNAL_0.1.1.md) — persistent audit format and recovery matrix.
+- [`TPM2_TIS_NV_COUNTER_0.1.1.md`](TPM2_TIS_NV_COUNTER_0.1.1.md) — TPM 2.0 TIS transport and NV counter lifecycle.
+
+## Architecture and roadmap
+
+- [`SOURCE_ARCHITECTURE.md`](SOURCE_ARCHITECTURE.md) — source composition and scale contracts.
+- [`POST_MERGE_HARDENING.md`](POST_MERGE_HARDENING.md) — process-window scrub and W^X hardening.
+- [`ROADMAP_0.1.1.md`](ROADMAP_0.1.1.md) — completed contracts and remaining work.
+- [`RELEASE_CHECKLIST_0.1.1.md`](RELEASE_CHECKLIST_0.1.1.md) — final-main verification gate.
+
+## Historical VM distributions
+
+The following documents describe immutable older releases and are not the current launch path:
+
+- [`VM_APPLIANCES_0.1.1.md`](VM_APPLIANCES_0.1.1.md)
+- [`releases/v0.1.1-vm4.md`](releases/v0.1.1-vm4.md)
+- [`releases/v0.1.1-vm3.md`](releases/v0.1.1-vm3.md)
+- [`releases/v0.1.1-vm2.md`](releases/v0.1.1-vm2.md)
+- [`releases/v0.1.1-vm1.md`](releases/v0.1.1-vm1.md)
+- [`releases/v0.1.1.md`](releases/v0.1.1.md)

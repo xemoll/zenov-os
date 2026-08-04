@@ -1,0 +1,117 @@
+name: Verify ZenovOS Live1 public ISO
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/verify-live1-public.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zenov-os-live1-public-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RELEASE_TAG: v0.1.1-live1
+  ISO_NAME: ZenovOS-0.1.1-x86.iso
+  EXPECTED_SOURCE: 5bca9a6913a2bc9b80b1da9e12bbb3abfc41f6f3
+
+jobs:
+  verify-public-live-iso:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install public verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq qemu-system-x86 xorriso
+
+      - name: Download and boot the public ISO without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/live1-public-verify"
+          rm -rf "$out"
+          mkdir -p "$out"
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG"
+
+          env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --location \
+            --retry 5 --retry-delay 2 --retry-all-errors \
+            --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            "$api" -o "$out/release.json"
+
+          jq -e --arg tag "$RELEASE_TAG" --arg source "$EXPECTED_SOURCE" \
+            --arg name "$ISO_NAME" '
+              .tag_name == $tag and
+              .draft == false and
+              .prerelease == false and
+              .target_commitish == $source and
+              (.assets | length) == 1 and
+              .assets[0].name == $name
+            ' "$out/release.json" >/dev/null
+
+          url="$(jq -r '.assets[0].browser_download_url' "$out/release.json")"
+          test -n "$url"
+          test "$url" != null
+          env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --location \
+            --retry 5 --retry-delay 2 --retry-all-errors \
+            --silent --show-error "$url" -o "$out/$ISO_NAME"
+          test -s "$out/$ISO_NAME"
+
+          iso_sha="$(sha256sum "$out/$ISO_NAME" | cut -d' ' -f1)"
+          test "${#iso_sha}" -eq 64
+          printf '%s  %s\n' "$iso_sha" "$ISO_NAME" > "$out/SHA256SUMS.txt"
+
+          xorriso -indev "$out/$ISO_NAME" -report_el_torito plain \
+            2>&1 | tee "$out/el-torito.txt"
+          grep -Fq "Volume id    : 'ZENOVOS_011'" "$out/el-torito.txt"
+          grep -Fq 'El Torito boot img' "$out/el-torito.txt"
+          grep -Fq '/BOOT/ZENOVOS.IMG' "$out/el-torito.txt"
+
+          bash tests/qemu_iso_smoke.sh "$out/$ISO_NAME" "$out/qemu-smoke"
+          bash tests/qemu_iso_persistence.sh "$out/$ISO_NAME" "$out/qemu-live"
+
+          for log in "$out/qemu-smoke/serial.log" "$out/qemu-live/serial.log"; do
+            grep -Fq ZENOVOS_BOOT_OK "$log"
+            grep -Fq 'ZENOVFS_LIVE_IMAGE_OK source=embedded format=ZLIVE003' "$log"
+            grep -Fq 'LIVE_STORAGE_WORKSPACE_OK pack=65536 map=65536 overlay=524288 heap=preserved' "$log"
+            grep -Fq 'ZENOVFS_LIVE_READY mode=ram-overlay persistence=session' "$log"
+            grep -Fq 'ZENOVFS_STORAGE_MODE live-iso' "$log"
+            grep -Fq ZENOVFS_MOUNT_OK "$log"
+            grep -Fq GRAPHICAL_DESKTOP_READY "$log"
+            grep -Fq ZENOVOS_UI_READY "$log"
+          done
+          grep -Fq WRITE_OK "$out/qemu-live/serial.log"
+          grep -Fq ISO_LIVE_SESSION_OK "$out/qemu-live/serial.log"
+          grep -Fq ZENOVFS_FSCK_OK "$out/qemu-live/serial.log"
+          grep -Fq SYNC_OK "$out/qemu-live/serial.log"
+
+          printf 'PUBLIC_LIVE1_OK source=%s assets=1 iso=%s boot=el-torito storage=embedded-live desktop=ready writable=session external-disks=0\n' \
+            "$EXPECTED_SOURCE" "$iso_sha" | tee "$out/result.txt"
+          printf 'EVIDENCE_DIR=%s\n' "$out" >> "$GITHUB_ENV"
+
+      - name: Upload public Live1 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-live1-public-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            ${{ env.EVIDENCE_DIR }}/release.json
+            ${{ env.EVIDENCE_DIR }}/SHA256SUMS.txt
+            ${{ env.EVIDENCE_DIR }}/el-torito.txt
+            ${{ env.EVIDENCE_DIR }}/result.txt
+            ${{ env.EVIDENCE_DIR }}/qemu-smoke/
+            ${{ env.EVIDENCE_DIR }}/qemu-live/

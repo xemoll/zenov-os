@@ -9,7 +9,7 @@ void init_deadline() {
     (void)&fs_last_failure;
 
     heap::init();
-    serial::line("Storage: probing ATA primary master with monotonic deadlines...");
+    serial::line("Storage: probing optional ATA disk...");
     ata_present = false;
     ata_sector_total = 0U;
     ata0.present = false;
@@ -25,21 +25,43 @@ void init_deadline() {
 
     const bool identified = ata2_identify();
     ata2_publish_device_state(identified, identified ? ata_sector_total : 0U);
-    if (!ata0.present) {
-        serial::line("Storage: ATA device not found or recovery failed");
+    if (ata0.present) {
+        if (!block_device_contract_valid(ata0)) {
+            panic("Typed block device contract validation failed.");
+        }
+        serial::line("BLOCK_DEVICE_TYPED_ABI_READY version=1");
+        serial::line("ATA_DEADLINE_DRIVER_READY clock=pit100 timeout=3000ms reset=5000ms attempts=2");
+        serial::line("Storage: persistent ATA PIO device online");
+        const FsResult mounted = fs_record_result(mount_result());
+        if (!mounted.ok()) {
+            serial::write("Storage: attached ZenovFS mount failed status=");
+            serial::line(fs_status_name(mounted.status));
+            serial::line("ZENOVFS_EXTERNAL_FAIL_CLOSED");
+            return;
+        }
+        serial::line("ZENOVFS_STORAGE_MODE persistent-ata");
+        serial::line("ZENOVFS_RESULT_API_READY version=1");
+        serial::line("ZENOVFS_MOUNT_OK");
         return;
     }
-    if (!block_device_contract_valid(ata0)) panic("Typed block device contract validation failed.");
-    serial::line("BLOCK_DEVICE_TYPED_ABI_READY version=1");
-    serial::line("ATA_DEADLINE_DRIVER_READY clock=pit100 timeout=3000ms reset=5000ms attempts=2");
-    serial::line("Storage: ATA PIO device online");
 
+    serial::line("Storage: no ATA disk; activating self-contained Live ZenovFS...");
+    if (!live_image_initialize()) {
+        serial::line("Storage: embedded Live ZenovFS initialization failed");
+        return;
+    }
+    if (!block_device_contract_valid(ata0)) {
+        panic("Live block device contract validation failed.");
+    }
+    serial::line("BLOCK_DEVICE_TYPED_ABI_READY version=1");
     const FsResult mounted = fs_record_result(mount_result());
     if (!mounted.ok()) {
-        serial::write("Storage: ZenovFS mount failed status=");
+        serial::write("Storage: embedded Live ZenovFS mount failed status=");
         serial::line(fs_status_name(mounted.status));
         return;
     }
+    serial::line("ZENOVFS_LIVE_READY mode=ram-overlay persistence=session");
+    serial::line("ZENOVFS_STORAGE_MODE live-iso");
     serial::line("ZENOVFS_RESULT_API_READY version=1");
     serial::line("ZENOVFS_MOUNT_OK");
 }
