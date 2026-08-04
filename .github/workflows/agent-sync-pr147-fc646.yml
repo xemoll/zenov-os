@@ -1,0 +1,50 @@
+name: Diagnose PR147 Latest Main Merge
+
+on:
+  pull_request:
+    branches: [agent/pr147-sync-trigger-base]
+    paths:
+      - '.github/workflows/agent-sync-pr147-fc646.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-pr147-main-8def
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: agent/kernel-preemptive-scheduler-0.1.1
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compute exact merge conflict surface
+        shell: bash
+        env:
+          EXPECTED_SCHEDULER: 2755d438ce41e0c3d430a02e7ab8e1c00543f684
+          EXPECTED_MAIN: 8defe7147ace8e782afb8341913c09b2c9d594ac
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SCHEDULER"
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          set +e
+          git merge --no-ff --no-commit "$EXPECTED_MAIN"
+          rc=$?
+          set -e
+          printf 'MERGE_RC=%s\n' "$rc"
+          git status --short
+          printf 'CONFLICTS_BEGIN\n'
+          git diff --name-only --diff-filter=U
+          printf 'CONFLICTS_END\n'
+          git diff --check || true
+          if ((rc == 0)); then
+            echo 'PR147_LATEST_MAIN_AUTO_MERGE_OK'
+          else
+            echo 'PR147_LATEST_MAIN_CONFLICTS_RECORDED'
+          fi
