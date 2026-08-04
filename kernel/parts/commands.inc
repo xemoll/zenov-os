@@ -372,6 +372,9 @@ void execute(char* line) {
     else if (string_equal(command, "schedtest")) {
         if (!process::run_scheduler_probe()) console::warning("Scheduler diagnostic could not start.");
     }
+    else if (string_equal(command, "proctest")) {
+        if (!process::run_process_lifecycle_probe()) console::warning("Process lifecycle diagnostic could not start.");
+    }
     else if (string_equal(command, "history")) command_history();
     else if (string_equal(command, "bootlog")) command_bootlog();
     else if (string_equal(command, "clear") || string_equal(command, "cls")) console::clear_content();

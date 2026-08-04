@@ -114,6 +114,8 @@ bool sha256_self_test() { return security_guard::sha256_self_test(); }
 #include "parts/storage_result_commands.inc"
 #include "parts/process_policy.inc"
 #include "parts/process_linux_i386.inc"
+#include "parts/process_handles.inc"
+#include "parts/process_lifecycle.inc"
 #include "parts/scheduler.inc"
 #include "parts/graphics.inc"
 #include "parts/mouse_regression.inc"

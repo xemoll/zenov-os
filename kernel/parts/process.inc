@@ -10,8 +10,11 @@ constexpr uint32_t max_argument_bytes = 64U;
 constexpr uint32_t syscall_exit = 0, syscall_console_write = 1, syscall_ticks = 2, syscall_file_read = 3, syscall_file_write = 4;
 constexpr uint32_t syscall_file_stat = 5, syscall_version = 6, syscall_sync = 7, syscall_console_read = 8;
 constexpr uint32_t syscall_yield = 9, syscall_sleep = 10, syscall_getpid = 11;
+constexpr uint32_t syscall_spawn = 12, syscall_waitpid = 13, syscall_wait_handle = 14;
+constexpr uint32_t syscall_handle_close = 15, syscall_process_query = 16;
 constexpr uint32_t error_invalid = 0xFFFFFFFFU, error_not_found = 0xFFFFFFFEU, error_no_space = 0xFFFFFFFDU;
 constexpr uint32_t error_io = 0xFFFFFFFCU, error_fault = 0xFFFFFFFBU, error_unsupported = 0xFFFFFFFAU, error_denied = 0xFFFFFFF9U;
+constexpr uint32_t error_would_block = 0xFFFFFFF8U, error_stale = 0xFFFFFFF7U;
 
 extern "C" uint8_t gdt_tss[];
 extern "C" uint8_t gdt_user_code[];
@@ -34,6 +37,14 @@ struct [[gnu::packed]] Elf32Header {
 struct [[gnu::packed]] Elf32ProgramHeader { uint32_t type, offset, virtual_address, physical_address, file_size, memory_size, flags, alignment; };
 static_assert(sizeof(Elf32Header) == 52 && sizeof(Elf32ProgramHeader) == 32);
 struct [[gnu::packed]] UserFileInfo { uint32_t type, size, checksum; };
+struct [[gnu::packed]] UserWaitStatus {
+    uint32_t pid, exit_code, reason, fault_vector;
+};
+struct [[gnu::packed]] UserProcessInfo {
+    uint32_t pid, parent_pid, state, exit_code;
+    uint32_t fault_vector, runtime_ticks, context_switches, handle_references;
+};
+static_assert(sizeof(UserWaitStatus) == 16U && sizeof(UserProcessInfo) == 32U);
 struct ActiveCapabilityProfile {
     bool valid = false;
     uint32_t mask = 0U;
@@ -143,7 +154,11 @@ uint32_t read_console(uint8_t* output, uint32_t capacity) {
 extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
     if (!frame) return 1;
     const uint32_t number = frame->eax;
-    if (scheduler_active() && (number == syscall_exit || number == syscall_yield || number == syscall_sleep || number == syscall_getpid)) return scheduler_syscall(frame);
+    if (scheduler_active() &&
+        (number == syscall_exit || number == syscall_yield || number == syscall_sleep ||
+         number == syscall_getpid || number == syscall_spawn || number == syscall_waitpid ||
+         number == syscall_wait_handle || number == syscall_handle_close ||
+         number == syscall_process_query)) return scheduler_syscall(frame);
     if (number == syscall_yield) { frame->eax = 0U; return 0U; }
     if (number == syscall_sleep) { const uint32_t deadline = timer_ticks + frame->ebx; while (static_cast<int32_t>(timer_ticks - deadline) < 0) asm volatile("sti; hlt; cli"); frame->eax = 0U; return 0U; }
     if (number == syscall_getpid) { frame->eax = 0U; return 0U; }
