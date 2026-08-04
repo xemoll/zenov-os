@@ -49,6 +49,7 @@ foreach(app IN LISTS ZEN_APPS)
     target_compile_definitions(${target} PRIVATE ZEN_APP_KIND="${app}")
     target_link_libraries(${target} PRIVATE zenapps_ui)
     set_target_properties(${target} PROPERTIES
+        WIN32_EXECUTABLE TRUE
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_GUI_IDENTIFIER "io.zenov.${app}"
         MACOSX_BUNDLE_BUNDLE_NAME "${target}"
