@@ -7,6 +7,7 @@ on:
       - '.github/workflows/kernel-process-lifecycle.yml'
       - '.github/kernel-lifecycle-patch.part*'
       - '.github/kernel-lifecycle-followup.patch'
+      - '.github/kernel-lifecycle-stack-fix.patch'
   workflow_dispatch:
 
 permissions:
@@ -30,7 +31,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Verify and apply atomic kernel patch
+      - name: Verify and apply kernel-only patch set
         shell: bash
         run: |
           set -euo pipefail
@@ -41,6 +42,7 @@ jobs:
           echo 'e4d25363985ad29df500c1d3569034c661b650f72596c79ef70bec314071ecbd  .github/kernel-lifecycle-patch.part02' | sha256sum -c -
           echo 'd0af7edf46c51e9589857671e2f643e66de67ce25f46d7f873fea81159d9b5dc  .github/kernel-lifecycle-patch.part03' | sha256sum -c -
           echo '12ef5f519d81fd0f2be4cabb5e21682745273a3aaa2c58a54219284e39a9fdb9  .github/kernel-lifecycle-followup.patch' | sha256sum -c -
+          echo '1f1315a78a5e804fe4042b8bb94f5acbfa50bfd6fc43b76162d712f1ff98072a  .github/kernel-lifecycle-stack-fix.patch' | sha256sum -c -
           cat .github/kernel-lifecycle-patch.part0{0,1,2,3} > /tmp/kernel-lifecycle.b64
           test "$(wc -c < /tmp/kernel-lifecycle.b64)" -eq 22140
           echo '2d77a761aaeda72e1c3778db5bbe5e0bc29ec1791093ef761abca05188277a84  /tmp/kernel-lifecycle.b64' | sha256sum -c -
@@ -52,13 +54,17 @@ jobs:
           git apply --index /tmp/kernel-lifecycle.patch
           git apply --check .github/kernel-lifecycle-followup.patch
           git apply --index .github/kernel-lifecycle-followup.patch
-          git rm .github/kernel-lifecycle-patch.part0{0,1,2,3} .github/kernel-lifecycle-followup.patch
+          git apply --check .github/kernel-lifecycle-stack-fix.patch
+          git apply --index .github/kernel-lifecycle-stack-fix.patch
+          git rm .github/kernel-lifecycle-patch.part0{0,1,2,3} \
+                 .github/kernel-lifecycle-followup.patch \
+                 .github/kernel-lifecycle-stack-fix.patch
           git diff --cached --check
-          unexpected="$(git diff --cached --name-only | grep -Ev '^(\.github/kernel-lifecycle-(patch\.part0[0-3]|followup\.patch)|GNUmakefile|Makefile|docs/KERNEL_PROCESS_LIFECYCLE_0\.1\.1\.md|kernel/.*|tests/kernel_process_lifecycle_test\.cpp|tests/qemu_kernel_process_lifecycle\.sh)$' || true)"
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(\.github/kernel-lifecycle-(patch\.part0[0-3]|followup\.patch|stack-fix\.patch)|GNUmakefile|Makefile|docs/KERNEL_PROCESS_LIFECYCLE_0\.1\.1\.md|kernel/.*|tests/kernel_process_lifecycle_test\.cpp|tests/qemu_kernel_process_lifecycle\.sh)$' || true)"
           test -z "$unexpected" || { printf 'non-kernel staged path:\n%s\n' "$unexpected" >&2; exit 1; }
           test -z "$(git diff --cached --name-only | grep -E '^(user/|kernel/parts/(graphics|utilities)|tests/qemu_(display|notes|calendar|productivity))' || true)"
 
-      - name: Install toolchain and QEMU
+      - name: Install strict toolchain and QEMU
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang binutils qemu-system-x86
