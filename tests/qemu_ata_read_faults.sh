@@ -63,7 +63,10 @@ controller_recovered() {
 controller_exhausted() {
   local serial="$1"
   wait_for_serial "$serial" 'ATA_RECOVERY_RETRY_EXHAUSTED op=read attempts=2 status=command-aborted' || { echo quit; return 1; }
-  wait_for_serial "$serial" 'Storage: ZenovFS mount failed' || { echo quit; return 1; }
+  wait_for_serial "$serial" 'Storage: attached ZenovFS mount failed status=io-error' || { echo quit; return 1; }
+  wait_for_serial "$serial" 'ZENOVFS_EXTERNAL_FAIL_CLOSED' || { echo quit; return 1; }
+  wait_for_serial "$serial" 'ZENOVOS KERNEL PANIC' || { echo quit; return 1; }
+  wait_for_serial "$serial" 'Persistent signed policy transaction recovery failed.' || { echo quit; return 1; }
   sleep 0.2
   echo quit
 }
@@ -150,7 +153,10 @@ grep -Fq 'ZENOVOS_UI_READY' "$recovered"
 [[ "$(grep -Fc 'ATA_RECOVERY_REVALIDATE_OK command=identify capacity=stable' "$exhausted")" -eq 1 ]]
 [[ "$(grep -Fc 'ATA_RECOVERY_RETRY_EXHAUSTED op=read attempts=2 status=command-aborted' "$exhausted")" -eq 1 ]]
 ! grep -Fq 'ATA_RECOVERY_RETRY_OK op=read' "$exhausted"
-grep -Fq 'Storage: ZenovFS mount failed' "$exhausted"
+grep -Fq 'Storage: attached ZenovFS mount failed status=io-error' "$exhausted"
+grep -Fq 'ZENOVFS_EXTERNAL_FAIL_CLOSED' "$exhausted"
+grep -Fq 'ZENOVOS KERNEL PANIC' "$exhausted"
+grep -Fq 'Persistent signed policy transaction recovery failed.' "$exhausted"
 ! grep -Fq 'ZENOVFS_MOUNT_OK' "$exhausted"
 ! grep -Fq 'ZENOVOS_UI_READY' "$exhausted"
 
