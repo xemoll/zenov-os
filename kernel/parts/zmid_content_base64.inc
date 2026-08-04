@@ -75,7 +75,7 @@ bool decode_base64(const uint8_t* input,
 }
 
 bool text_case_candidate(const uint8_t* data, uint32_t size) {
-    if (!data || size < 8U) return false;
+    if (!data || size < 8U || size > workspace_bytes) return false;
     uint32_t printable = 0U;
     uint32_t lowercase = 0U;
     for (uint32_t i = 0U; i < size; ++i) {
