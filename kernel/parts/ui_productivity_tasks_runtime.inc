@@ -42,7 +42,7 @@ void render_scene() {
 
 bool init() {
     const bool initialized = init_productivity_base();
-    if (initialized) serial::line("UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting");
+    if (initialized) serial::line("UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting views=today+overdue+planned crud=add+edit+toggle+delete");
     return initialized;
 }
 
