@@ -1,8 +1,16 @@
 #define init init_unhardened [[maybe_unused]]
 #define update update_unhardened [[maybe_unused]]
+#define classify classify_raw
+#define print_status print_status_raw
 #include "zmid_policy.inc"
+#undef print_status
+#undef classify
 #undef update
 #undef init
+#include "zmid_content_workspace.inc"
+#define heap zmid_content_workspace_allocator
+#include "zmid_content_inspection.inc"
+#undef heap
 
 namespace zmid {
 bool transaction_write_version(uint32_t value) {
@@ -53,6 +61,11 @@ bool init() {
         serial::line("ZMID_SELFTEST_FAILED");
         return false;
     }
+    if (!content_inspection::init()) {
+        ready = false;
+        serial::line("ZMID_CONTENT_INSPECTION_FAILED");
+        return false;
+    }
     serial::line("ZMID_ROOT_KEY_OK id=6ca6a5275544c533");
     serial::line("ZMID_PSS_SIGNATURE_OK");
     serial::write("ZMID_DATABASE_VERSION_OK version=");
@@ -69,6 +82,21 @@ bool init() {
     serial::write("\r\n");
     serial::line("ZMID_READY");
     return true;
+}
+
+void print_status() {
+    print_status_raw();
+    console::line("  Content       bounded Base64 / case-fold / ZIP / DEFLATE");
+    console::line("  Archive caps  depth 2 / 16 entries / 64 KiB expanded / 128x ratio");
+    console::write("  Raw hits      "); console::unsigned_dec(content_inspection::raw_hits); console::put('\n');
+    console::write("  Decoded hits  "); console::unsigned_dec(content_inspection::transformed_hits); console::put('\n');
+    console::write("  Cache hits    "); console::unsigned_dec(content_inspection::cache_hits); console::put('\n');
+    console::write("  Unsupported   "); console::unsigned_dec(content_inspection::unsupported_containers); console::put('\n');
+    serial::write("ZMID_CONTENT_STATUS_OK raw="); process::serial_u32(content_inspection::raw_hits);
+    serial::write(" transformed="); process::serial_u32(content_inspection::transformed_hits);
+    serial::write(" cache="); process::serial_u32(content_inspection::cache_hits);
+    serial::write(" unsupported="); process::serial_u32(content_inspection::unsupported_containers);
+    serial::write("\r\n");
 }
 
 bool transaction_restore_update(uint32_t previous_version, [[maybe_unused]] uint32_t previous_size) {
@@ -197,6 +225,7 @@ bool update(const char* candidate_path) {
     }
 
     activate(candidate_records, count, version);
+    content_inspection::clear_cache();
     persistent_database_version = version;
     ready = true;
     serial::write("ZMID_ATOMIC_UPDATE_OK version=");
