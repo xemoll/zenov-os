@@ -137,7 +137,7 @@ bool self_test() {
 
 bool init() {
     if (!self_test()) return false;
-    serial::line("ZMID_CONTENT_INSPECTION_OK base64=2 tokens=1 casefold=1 zip=2 eocd=1 sfx=1 sfx-prefix=1 alias-safe=1 deflate=1 depth=2 entries=16 expanded=65536 cache=16 cache-path=1");
+    serial::line("ZMID_CONTENT_INSPECTION_OK base64=2 tokens=1 casefold=1 zip=2 eocd=1 sfx=1 sfx-prefix=1 alias-safe=1 deflate=1 depth=2 entries=16 expanded=65536 size-limit=closed cache=16 cache-path=1");
     return true;
 }
 
@@ -155,6 +155,12 @@ bool classify(const char* path,
     if (!ready || (!data && size) || !digest) return false;
 
     storage::path_copy(result.path, path ? path : "", sizeof(result.path));
+    if (size > content_inspection::workspace_bytes) {
+        result.verdict = security_guard::Verdict::suspicious;
+        storage::path_copy(result.signature, "Inspection.SizeLimit", sizeof(result.signature));
+        return true;
+    }
+
     bool matched = false;
     if (content_inspection::cache_lookup(digest, path, result, matched)) return matched;
     if (!content_inspection::ensure_workspace()) {
