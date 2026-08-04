@@ -97,7 +97,15 @@ fi
 ISO="$(cd "$(dirname "$ISO")" && pwd)/$(basename "$ISO")"
 
 QEMU="${QEMU:-}"
-if [[ -z "$QEMU" ]]; then
+if [[ -n "$QEMU" ]]; then
+  if [[ "$QEMU" == */* ]]; then
+    [[ -x "$QEMU" ]] || fail "configured QEMU is not executable: $QEMU"
+    QEMU="$(cd "$(dirname "$QEMU")" && pwd)/$(basename "$QEMU")"
+  else
+    command -v "$QEMU" >/dev/null 2>&1 || fail "configured QEMU command not found in PATH: $QEMU"
+    QEMU="$(command -v "$QEMU")"
+  fi
+else
   for candidate in qemu-system-i386 qemu-system-x86_64; do
     if command -v "$candidate" >/dev/null 2>&1; then
       QEMU="$(command -v "$candidate")"
