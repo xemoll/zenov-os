@@ -167,12 +167,14 @@ bool build_dynamic_tables(BitReader& reader,
         build_huffman(distances, lengths + literal_count, distance_count, true);
 }
 
-bool inflate_raw(const uint8_t* input,
-                 uint32_t input_size,
-                 uint8_t* output,
-                 uint32_t output_capacity,
-                 uint32_t& output_size) {
+bool inflate_raw_prefix(const uint8_t* input,
+                        uint32_t input_size,
+                        uint8_t* output,
+                        uint32_t output_capacity,
+                        uint32_t& output_size,
+                        uint32_t& input_consumed) {
     output_size = 0U;
+    input_consumed = 0U;
     if ((!input && input_size) || !output || !output_capacity) return false;
     BitReader reader{input, input_size};
     bool final_block = false;
@@ -236,7 +238,18 @@ bool inflate_raw(const uint8_t* input,
             }
         }
     }
-    return reader.offset == input_size;
+    input_consumed = reader.offset;
+    return true;
+}
+
+bool inflate_raw(const uint8_t* input,
+                 uint32_t input_size,
+                 uint8_t* output,
+                 uint32_t output_capacity,
+                 uint32_t& output_size) {
+    uint32_t input_consumed = 0U;
+    return inflate_raw_prefix(input, input_size, output, output_capacity,
+        output_size, input_consumed) && input_consumed == input_size;
 }
 
 uint32_t crc32(const uint8_t* data, uint32_t size) {
