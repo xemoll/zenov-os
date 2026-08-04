@@ -69,6 +69,16 @@ void render_scene();
 #undef init
 #undef render_scene
 
+#define render_scene render_scene_calendar_clock_base
+#define init init_calendar_clock_base
+#define handle_navigation_key handle_navigation_key_calendar_clock_base
+#define on_mouse_packet on_mouse_packet_calendar_clock_base
+#include "ui_productivity_calendar_clock_v2.inc"
+#undef on_mouse_packet
+#undef handle_navigation_key
+#undef init
+#undef render_scene
+
 #include "ui_productivity_utilities.inc"
 
 #undef terminal_cursor
