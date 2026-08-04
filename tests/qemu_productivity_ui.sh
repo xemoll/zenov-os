@@ -56,10 +56,18 @@ type_task_fixture() {
   done
 }
 
+type_updated_suffix() {
+  for key in spc u p d a t e d; do echo "sendkey $key 10"; done
+}
+
+type_temporary_task() {
+  for key in t e m p o r a r y; do echo "sendkey $key 10"; done
+}
+
 controller() {
   wait_for_serial "ZENOVOS_UI_READY" || { echo quit; return 1; }
   wait_for_serial "UI_PRODUCTIVITY_APPS_READY notes=yes calendar=yes clock=yes scratchpad=yes" || { echo quit; return 1; }
-  wait_for_serial "UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting" || { echo quit; return 1; }
+  wait_for_serial "UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting views=today+overdue+planned crud=add+edit+toggle+delete" || { echo quit; return 1; }
 
   open_start_result notes
   wait_for_serial "UI_NOTES_OPEN_APP_OK" || { echo quit; return 1; }
@@ -101,15 +109,34 @@ controller() {
 
   open_start_result tasks
   wait_for_serial "UI_TASKS_OPEN_APP_OK" || { echo quit; return 1; }
-  echo "sendkey f4 10"
+  echo "sendkey a 10"
   type_task_fixture
   echo "sendkey ret 10"
-  wait_for_serial "UI_TASKS_ADD_OK" || { echo quit; return 1; }
-  capture tasks-open
+  wait_for_count "UI_TASKS_ADD_OK" 1 || { echo quit; return 1; }
+  echo "sendkey f3 10"
+  wait_for_count "UI_TASKS_FILTER_OK" 1 || { echo quit; return 1; }
+  capture tasks-planned
+
+  echo "sendkey e 10"
+  type_updated_suffix
+  echo "sendkey ret 10"
+  wait_for_serial "UI_TASKS_EDIT_OK" || { echo quit; return 1; }
+  capture tasks-edited
+
   echo "sendkey ret 10"
   wait_for_serial "UI_TASKS_TOGGLE_OK" || { echo quit; return 1; }
-  echo "sendkey f3 10"
+  echo "sendkey f5 10"
   capture tasks-done
+
+  echo "sendkey a 10"
+  type_temporary_task
+  echo "sendkey ret 10"
+  wait_for_count "UI_TASKS_ADD_OK" 2 || { echo quit; return 1; }
+  echo "sendkey f4 10"
+  echo "sendkey delete 10"
+  wait_for_serial "UI_TASKS_DELETE_OK" || { echo quit; return 1; }
+  echo "sendkey f5 10"
+  capture tasks-delete-persisted
   echo "sendkey esc 10"
 
   open_start_result calendar
@@ -139,7 +166,7 @@ controller() {
 }
 
 set +e
-controller | timeout 170s "$QEMU" \
+controller | timeout 180s "$QEMU" \
   -drive "file=$BOOT_IMAGE,format=raw,if=floppy" \
   -drive "file=$RUNTIME_DATA,format=raw,if=ide,index=0,media=disk" \
   -boot a -m 32M -machine pc,vmport=off -vga std -display none \
@@ -166,22 +193,25 @@ check_ppm() {
   }
 }
 
-for image in notes-browser notes-editor scratchpad daily-note tasks-open tasks-done calendar-event clock-running; do
+for image in notes-browser notes-editor scratchpad daily-note tasks-planned tasks-edited tasks-done tasks-delete-persisted calendar-event clock-running; do
   check_ppm "$OUT/$image.ppm"
 done
 
 for marker in \
   "UI_PRODUCTIVITY_APPS_READY notes=yes calendar=yes clock=yes scratchpad=yes" \
-  "UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting" \
+  "UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting views=today+overdue+planned crud=add+edit+toggle+delete" \
   UI_PRODUCTIVITY_STORAGE_OK UI_NOTES_OPEN_APP_OK UI_NOTES_OPEN_OK UI_NOTES_SAVE_OK \
-  UI_TASKS_OPEN_APP_OK UI_TASKS_SCAN_OK UI_TASKS_ADD_OK UI_TASKS_TOGGLE_OK \
+  UI_TASKS_OPEN_APP_OK UI_TASKS_SCAN_OK UI_TASKS_FILTER_OK UI_TASKS_ADD_OK UI_TASKS_EDIT_OK UI_TASKS_TOGGLE_OK UI_TASKS_DELETE_OK \
   UI_CALENDAR_OPEN_APP_OK UI_CALENDAR_SAVE_OK UI_CLOCK_OPEN_APP_OK \
   UI_CLOCK_STOPWATCH_RUNNING UI_CLOCK_TIMER_SET_OK UI_CLOCK_TIMER_RUNNING; do
   grep -Fq "$marker" "$SERIAL" || { echo "qemu-productivity-ui: missing marker: $marker" >&2; exit 1; }
 done
 
-test "$(grep -Fc 'UI_TASKS_ADD_OK' "$SERIAL")" -eq 1
+test "$(grep -Fc 'UI_TASKS_ADD_OK' "$SERIAL")" -eq 2
+test "$(grep -Fc 'UI_TASKS_EDIT_OK' "$SERIAL")" -eq 1
 test "$(grep -Fc 'UI_TASKS_TOGGLE_OK' "$SERIAL")" -eq 1
+test "$(grep -Fc 'UI_TASKS_DELETE_OK' "$SERIAL")" -eq 1
+test "$(grep -Fc 'UI_TASKS_STALE_REJECTED' "$SERIAL" || true)" -eq 0
 
-printf 'qemu-productivity-ui: OK notes=local-markdown+scratch+daily tasks=aggregate+add+toggle calendar=persistent-events clock=rtc+stopwatch+countdown start-search=yes serial=%s screenshots=%s runtime=%s\n' \
+printf 'qemu-productivity-ui: OK notes=local-markdown+scratch+daily tasks=smart-views+add+guarded-edit+toggle+delete calendar=persistent-events clock=rtc+stopwatch+countdown start-search=yes serial=%s screenshots=%s runtime=%s\n' \
   "$SERIAL" "$OUT/*.ppm" "$RUNTIME_DATA"

@@ -1,3 +1,16 @@
+uint32_t productivity_background_last_tick = 0U;
+
+void background_tick() {
+    if (!active || !backbuffer) return;
+    const uint32_t current_tick = timer_ticks;
+    if (current_tick - productivity_background_last_tick < 100U) return;
+    productivity_background_last_tick = current_tick;
+    if (!productivity_reminders_check_due()) return;
+    render_scene();
+    present_full();
+    serial::line("UI_BACKGROUND_REMINDER_REFRESH_OK");
+}
+
 void productivity_open_utility_launcher_result(ProductivityUtilityApp app) {
     launcher_query_length = 0U;
     launcher_query[0] = 0;
@@ -8,7 +21,7 @@ void productivity_open_utility_launcher_result(ProductivityUtilityApp app) {
 }
 
 void render_scene() {
-    productivity_reminders_check_due();
+    (void)productivity_reminders_check_due();
     if (productivity_utility_app == ProductivityUtilityApp::none) {
         render_scene_tasks_base();
         productivity_reminder_render_banner();
@@ -35,7 +48,8 @@ bool init() {
     productivity_calculator_load_state();
     productivity_reminders_load();
     productivity_agenda_rebuild();
-    serial::line("UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+alarms");
+    productivity_background_last_tick = timer_ticks;
+    serial::line("UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+recurrence+quick-capture+background");
     return true;
 }
 
