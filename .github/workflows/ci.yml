@@ -40,9 +40,26 @@ jobs:
           rc=$?
           set -e
           printf 'MERGE_RC=%s\n' "$rc"
-          git status --short
-          printf 'CONFLICTS_BEGIN\n'
-          git diff --name-only --diff-filter=U
-          printf 'CONFLICTS_END\n'
-          git diff --check || true
-          echo 'PR147_LATEST_MAIN_CONFLICT_DIAGNOSTIC_OK'
+          git status --short | tee merge-status.txt
+          git diff --name-only --diff-filter=U | tee conflict-files.txt
+          test "$(wc -l < conflict-files.txt)" -eq 5
+          mkdir -p conflict-snapshot
+          while IFS= read -r path; do
+            mkdir -p "conflict-snapshot/$(dirname "$path")"
+            cp "$path" "conflict-snapshot/$path"
+            git show ":1:$path" > "conflict-snapshot/$path.base"
+            git show ":2:$path" > "conflict-snapshot/$path.ours"
+            git show ":3:$path" > "conflict-snapshot/$path.theirs"
+          done < conflict-files.txt
+          git diff --cc > conflict-snapshot/combined.diff
+          echo 'PR147_LATEST_MAIN_CONFLICT_SNAPSHOT_OK'
+      - name: Upload conflict snapshot
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pr147-main-8def-conflicts-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 2
+          if-no-files-found: error
+          path: |
+            conflict-snapshot/**
+            conflict-files.txt
+            merge-status.txt
