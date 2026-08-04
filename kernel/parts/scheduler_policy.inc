@@ -3,6 +3,15 @@ constexpr uint8_t priority_levels = 4U;
 constexpr uint8_t default_priority = 1U;
 constexpr uint8_t maximum_priority = priority_levels - 1U;
 constexpr uint32_t aging_ticks = 50U;
+constexpr uint8_t minimum_quantum_ticks = 3U;
+constexpr uint8_t maximum_quantum_ticks = minimum_quantum_ticks + maximum_priority;
+
+static_assert(priority_levels >= 2U && priority_levels <= 8U,
+              "scheduler priorities must remain small and bounded");
+static_assert(default_priority < priority_levels,
+              "default scheduler priority must be selectable");
+static_assert(aging_ticks > maximum_quantum_ticks,
+              "aging must not promote a task during one time slice");
 
 struct Candidate {
     bool ready;
@@ -15,7 +24,7 @@ uint8_t clamp_priority(uint8_t priority) {
     return priority > maximum_priority ? maximum_priority : priority;
 }
 uint8_t quantum_ticks(uint8_t priority) {
-    return static_cast<uint8_t>(3U + clamp_priority(priority));
+    return static_cast<uint8_t>(minimum_quantum_ticks + clamp_priority(priority));
 }
 void account_wait(Candidate& candidate) {
     if (!candidate.ready) { candidate.wait_ticks = 0U; return; }
