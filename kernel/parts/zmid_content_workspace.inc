@@ -73,8 +73,15 @@ bool mapping_exact() {
 
 bool acquire_mapping() {
     if (!paging::enabled || mapping_fault) return false;
-    if (mapping_active) return mapping_exact();
-    if (paging::page_directory[directory_index] || !table_empty()) return false;
+    if (mapping_active) {
+        if (mapping_exact()) return true;
+        mapping_fault = true;
+        return false;
+    }
+    if (paging::page_directory[directory_index] || !table_empty()) {
+        mapping_fault = true;
+        return false;
+    }
 
     map_range(supervisor_layout::zmid_workspace_virtual_a,
               supervisor_layout::zmid_workspace_physical_a);
@@ -83,7 +90,9 @@ bool acquire_mapping() {
     paging::page_directory[directory_index] = expected_directory_entry();
     paging::reload();
     mapping_active = true;
-    return mapping_exact();
+    if (mapping_exact()) return true;
+    mapping_fault = true;
+    return false;
 }
 
 void release_mapping() {
