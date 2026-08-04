@@ -37,8 +37,23 @@ void cache_store(const uint8_t digest[security_guard::sha256_bytes],
 }
 
 bool self_test() {
-    if (!ensure_workspace()) return false;
+    if (!ensure_workspace()) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=workspace-map");
+        return false;
+    }
     WorkspaceMappingGuard mapping_guard(true);
+    workspace_a[0] = 0xA5U;
+    workspace_a[workspace_bytes - 1U] = 0x5AU;
+    workspace_b[0] = 0x3CU;
+    workspace_b[workspace_bytes - 1U] = 0xC3U;
+    if (workspace_a[0] != 0xA5U || workspace_a[workspace_bytes - 1U] != 0x5AU ||
+        workspace_b[0] != 0x3CU || workspace_b[workspace_bytes - 1U] != 0xC3U) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=workspace-alias");
+        return false;
+    }
+    memset(workspace_a, 0, workspace_bytes);
+    memset(workspace_b, 0, workspace_bytes);
+
     static constexpr uint8_t case_vector[] = "zenov_ransomware_test_v1";
     static constexpr uint8_t base64_vector[] = "WkVOT1ZfUkFOU09NV0FSRV9URVNUX1Yx";
     static constexpr uint8_t embedded_base64_vector[] = "payload=WkVOT1ZfUkFOU09NV0FSRV9URVNUX1Yx";
@@ -52,25 +67,48 @@ bool self_test() {
     security_guard::ScanResult result{};
     if (inspect_payload("<content-case-selftest>", case_vector, sizeof(case_vector) - 1U,
             0U, workspace_a, workspace_b, result) != InspectionResult::matched ||
-        result.verdict != security_guard::Verdict::infected) return false;
+        result.verdict != security_guard::Verdict::infected) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=casefold");
+        return false;
+    }
     result = {};
     if (inspect_payload("<content-base64-selftest>", base64_vector, sizeof(base64_vector) - 1U,
             0U, workspace_a, workspace_b, result) != InspectionResult::matched ||
-        result.verdict != security_guard::Verdict::infected) return false;
+        result.verdict != security_guard::Verdict::infected) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=base64");
+        return false;
+    }
     result = {};
     if (inspect_payload("<content-base64-token-selftest>", embedded_base64_vector,
             sizeof(embedded_base64_vector) - 1U, 0U, workspace_a, workspace_b, result) != InspectionResult::matched ||
-        result.verdict != security_guard::Verdict::infected) return false;
+        result.verdict != security_guard::Verdict::infected) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=base64-token");
+        return false;
+    }
     result = {};
     if (inspect_payload("<content-base64-unpadded-selftest>", unpadded_base64_vector,
             sizeof(unpadded_base64_vector) - 1U, 0U, workspace_a, workspace_b, result) != InspectionResult::matched ||
-        result.verdict != security_guard::Verdict::infected) return false;
+        result.verdict != security_guard::Verdict::infected) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=base64-unpadded");
+        return false;
+    }
 
     uint32_t expanded = 0U;
     if (!inflate_raw(deflate_vector, sizeof(deflate_vector), workspace_a,
-            workspace_bytes, expanded) || expanded != sizeof(expected) - 1U ||
-        !storage::bytes_equal(workspace_a, expected, expanded)) return false;
+            workspace_bytes, expanded)) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=deflate-decode");
+        return false;
+    }
+    if (expanded != sizeof(expected) - 1U) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=deflate-size");
+        return false;
+    }
+    if (!storage::bytes_equal(workspace_a, expected, expanded)) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=deflate-bytes");
+        return false;
+    }
     clear_cache();
+    serial::line("ZMID_CONTENT_SELFTEST_OK workspace=distinct stages=5");
     return true;
 }
 
