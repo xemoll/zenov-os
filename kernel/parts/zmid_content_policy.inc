@@ -94,6 +94,10 @@ bool self_test() {
         serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=casefold");
         return false;
     }
+    if (text_case_candidate(case_vector, workspace_bytes + 1U)) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=size-limit");
+        return false;
+    }
     result = {};
     if (inspect_payload("<content-base64-selftest>", base64_vector, sizeof(base64_vector) - 1U,
             0U, workspace_a, workspace_b, result) != InspectionResult::matched ||
@@ -131,13 +135,13 @@ bool self_test() {
         return false;
     }
     clear_cache();
-    serial::line("ZMID_CONTENT_SELFTEST_OK workspace=distinct stages=5");
+    serial::line("ZMID_CONTENT_SELFTEST_OK workspace=distinct stages=6 size-limit=closed");
     return true;
 }
 
 bool init() {
     if (!self_test()) return false;
-    serial::line("ZMID_CONTENT_INSPECTION_OK base64=2 tokens=1 casefold=1 zip=2 eocd=1 sfx=1 sfx-prefix=1 alias-safe=1 deflate=1 depth=2 entries=16 expanded=65536 size-limit=closed cache=16 cache-path=1");
+    serial::line("ZMID_CONTENT_INSPECTION_OK base64=2 tokens=1 casefold=1 zip=2 eocd=1 sfx=1 sfx-prefix=1 alias-safe=1 deflate=1 depth=2 entries=16 expanded=65536 cache=16 cache-path=1 size-limit=closed");
     return true;
 }
 
