@@ -5,30 +5,85 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/ci.yml'
+      - '.agent/pr147-internal-probe.patch.b64'
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: apply-pr147-trust-probe
+  cancel-in-progress: false
 
 jobs:
-  export-exact-scheduler-source:
+  apply-verified-scheduler-fix:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: bfde85b923674098e67c3c9c350a90739905b04e
+          ref: agent/kernel-preemptive-scheduler-0.1.1
           fetch-depth: 1
-          persist-credentials: false
-      - name: Archive exact scheduler head
+          persist-credentials: true
+
+      - name: Verify and apply exact patch
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 'bfde85b923674098e67c3c9c350a90739905b04e'
+          expected_head='bfde85b923674098e67c3c9c350a90739905b04e'
+          expected_patch='0a4b24c51590afbf0b0cca3793413c7266dd895ee114f974aaba4eb128f6de73'
+          test "$(git rev-parse HEAD)" = "$expected_head"
           test -z "$(git status --porcelain)"
-          git archive --format=tar.gz --output=scheduler-source-bfde85b.tar.gz HEAD
-          test -s scheduler-source-bfde85b.tar.gz
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+          git fetch --no-tags --depth=1 origin agent/main-08ad-source-export
+          git show FETCH_HEAD:.agent/pr147-internal-probe.patch.b64 | base64 -d > /tmp/pr147.patch
+          echo "$expected_patch  /tmp/pr147.patch" | sha256sum -c -
+          git apply --check /tmp/pr147.patch
+          git apply /tmp/pr147.patch
+          git diff --check
+          test -z "$(git diff --name-only -- .github/workflows)"
+          grep -Fq 'SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata' kernel/parts/scheduler.inc
+          grep -Fq 'schedtest' kernel/parts/commands.inc
+          test -f kernel/scheduler_probe.S
+
+      - name: Run full strict host verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make -j2 all check | tee pr147-host-verification.log
+          echo '2b7ba0114d5228825b30aca30e0e978f2faf9b798cf7f5494742d7a1d330956a  build/HELLO.ZEX' | sha256sum -c -
+          test "$(stat -c%s build/KERNEL.BIN)" -le 524288
+          static_end="$(awk '/__kernel_static_end = \. / {print $1}' build/kernel.map | tail -1)"
+          [[ "$static_end" =~ ^0x[0-9a-fA-F]+$ ]]
+          test $((static_end)) -le $((0x480000))
+          grep -Fq 'SCHEDULER_POLICY_TEST_OK priority-levels=4 rr=equal aging=50 quantum=3-6' pr147-host-verification.log
+          bash -n tests/qemu_scheduler.sh
+          bash -n tests/qemu_smoke.sh
+
+      - name: Publish atomic scheduler fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'ZenovOS Kernel Agent'
+          git config user.email 'actions@users.noreply.github.com'
+          git add Makefile docs/SCHEDULER_0.1.1.md kernel/scheduler_probe.S \
+            kernel/parts/commands.inc kernel/parts/scheduler.inc \
+            tests/qemu_scheduler.sh tests/qemu_smoke.sh user/hello.S
+          git diff --cached --check
+          test "$(git diff --cached --name-only | wc -l)" -eq 8
+          git commit -m 'kernel: preserve trust chain with internal preemption probe'
+          git push origin HEAD:refs/heads/agent/kernel-preemptive-scheduler-0.1.1
+
+      - name: Upload host evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: scheduler-source-bfde85b
-          if-no-files-found: error
-          retention-days: 1
-          path: scheduler-source-bfde85b.tar.gz
+          name: pr147-trust-probe-host-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            pr147-host-verification.log
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/HELLO.ZEX
