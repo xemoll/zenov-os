@@ -17,13 +17,18 @@ constexpr uintptr_t live_overlay_data = 0x00336000U;
 constexpr uint32_t live_overlay_data_bytes = 0x00080000U;
 constexpr uintptr_t live_storage_end = live_overlay_data + live_overlay_data_bytes;
 
-/* The linker places all zero-initialized kernel state here.  The interval is
- * supervisor-only, already inside the PMM's permanent low-memory reservation,
- * and deliberately terminates at the existing ring-3 physical window.
- */
+/* The linker places all zero-initialized kernel state here. */
 constexpr uintptr_t kernel_static_start = live_storage_end;
 constexpr uintptr_t kernel_static_limit = 0x00400000U;
 constexpr uintptr_t user_base = kernel_static_limit;
+
+/* Ring-3 currently uses only the first 1 MiB of the 4-8 MiB page-table
+ * window. The final 128 KiB remain inside the PMM permanent reservation and
+ * are mapped only while the bounded ZMID decoder is running, with no user bit.
+ */
+constexpr uintptr_t zmid_workspace_a = 0x007E0000U;
+constexpr uintptr_t zmid_workspace_b = 0x007F0000U;
+constexpr uint32_t zmid_workspace_bytes = 0x00010000U;
 constexpr uintptr_t pmm_reserved_end = 0x00800000U;
 
 static_assert(heap_start < heap_end);
@@ -37,5 +42,7 @@ static_assert(live_overlay_map + live_overlay_map_bytes == live_overlay_data);
 static_assert(live_storage_end == kernel_static_start);
 static_assert(kernel_static_start < kernel_static_limit);
 static_assert(kernel_static_limit == user_base);
-static_assert(user_base < pmm_reserved_end);
+static_assert(user_base + 0x00100000U <= zmid_workspace_a);
+static_assert(zmid_workspace_a + zmid_workspace_bytes == zmid_workspace_b);
+static_assert(zmid_workspace_b + zmid_workspace_bytes == pmm_reserved_end);
 } // namespace supervisor_layout
