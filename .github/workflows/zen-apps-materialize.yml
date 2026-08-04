@@ -56,22 +56,18 @@ jobs:
           test -f desktop/packaging/arch/PKGBUILD
           echo 'ZEN_APPS_PAYLOAD_OK sha256=89c50131d9973c9d9f0e36f50d700503b3c17b4b8ec23909ff9d3d07f8c7bb5d'
 
-      - name: Install Linux GUI dependencies
+      - name: Install Linux Qt and build dependencies
         if: steps.payload.outputs.present == 'true'
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build libgl1-mesa-dev libxkbcommon-x11-0 \
-            libxcb-cursor0 xvfb
-
-      - name: Install Qt
-        if: steps.payload.outputs.present == 'true'
-        uses: jurplel/install-qt-action/action@26d6394617249cc034008e532a6d07cf77e19ff7
-        with:
-          version: '6.8.3'
-          cache: true
+            build-essential cmake ninja-build \
+            qt6-base-dev qt6-base-dev-tools libqt6sql6-sqlite \
+            libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 xvfb
+          qmake6 -query QT_VERSION
+          cmake --version
 
       - name: Build with strict warnings
         if: steps.payload.outputs.present == 'true'
