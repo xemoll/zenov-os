@@ -1,3 +1,30 @@
+bool productivity_calendar_clock_v2_append_text(char* output, uint32_t capacity, uint32_t& length, const char* text) {
+    if (!output || !text || !capacity || length >= capacity) return false;
+    for (uint32_t index = 0U; text[index]; ++index) {
+        if (length + 1U >= capacity) return false;
+        output[length++] = text[index];
+    }
+    output[length] = 0;
+    return true;
+}
+
+void productivity_calendar_clock_v2_append_uint(char* output, uint32_t capacity, uint32_t& length,
+                                                uint32_t value, uint8_t minimum_digits = 0U) {
+    if (!output || !capacity || length >= capacity) return;
+    char reversed[11]{};
+    uint8_t count = 0U;
+    do {
+        reversed[count++] = static_cast<char>('0' + value % 10U);
+        value /= 10U;
+    } while (value && count < sizeof(reversed));
+    while (count < minimum_digits && count < sizeof(reversed)) reversed[count++] = '0';
+    while (count) {
+        if (length + 1U >= capacity) return;
+        output[length++] = reversed[--count];
+    }
+    output[length] = 0;
+}
+
 bool productivity_calendar_clock_v2_parse_digits(const char* text, uint32_t offset, uint8_t count, uint32_t& value) {
     value = 0U;
     if (!text) return false;
