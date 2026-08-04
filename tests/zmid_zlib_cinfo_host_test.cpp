@@ -46,7 +46,7 @@ std::vector<std::uint8_t> read_all(const char* path) {
     return bytes;
 }
 
-int run(const char* undersized_window_path) {
+int run(const char* undersized_window_path, const char* full_window_path) {
     using InspectionResult = zmid::content_inspection::InspectionResult;
     using WrappedResult = zmid::content_inspection::WrappedDeflateResult;
     std::array<std::uint8_t, 64U * 1024U> decoded{};
@@ -96,33 +96,53 @@ int run(const char* undersized_window_path) {
     }
 
     const auto undersized = read_all(undersized_window_path);
+    const auto full_window = read_all(full_window_path);
     if (!zmid::content_inspection::zlib_header_valid(
             undersized.data(), static_cast<std::uint32_t>(undersized.size())) ||
-        zmid::content_inspection::zlib_window_limit(undersized.data()) != 256U) {
+        zmid::content_inspection::zlib_window_limit(undersized.data()) != 256U ||
+        !zmid::content_inspection::zlib_header_valid(
+            full_window.data(), static_cast<std::uint32_t>(full_window.size())) ||
+        zmid::content_inspection::zlib_window_limit(full_window.data()) != 32768U ||
+        undersized.size() != full_window.size() ||
+        !std::equal(undersized.begin() + 2, undersized.end(), full_window.begin() + 2)) {
         return 51;
     }
+
     std::uint32_t decoded_size = 0U;
+    if (zmid::content_inspection::decode_zlib(
+            full_window.data(), static_cast<std::uint32_t>(full_window.size()),
+            decoded.data(), static_cast<std::uint32_t>(decoded.size()),
+            decoded_size) != WrappedResult::decoded || decoded_size != 260U ||
+        decoded[0] != 0U || decoded[1] != 1U || decoded[2] != 2U ||
+        decoded[256] != 0U || decoded[257] != 0U ||
+        decoded[258] != 1U || decoded[259] != 2U) {
+        return 52;
+    }
+
+    decoded.fill(0U);
+    decoded_size = 0U;
     if (zmid::content_inspection::decode_zlib(
             undersized.data(), static_cast<std::uint32_t>(undersized.size()),
             decoded.data(), static_cast<std::uint32_t>(decoded.size()),
             decoded_size) != WrappedResult::unsupported) {
-        return 52;
+        return 53;
     }
 
     std::cout << "ZMID_ZLIB_CINFO_OK windows=0-7 magic=cmf-flg"
                  " decode=8/8 inspect=8/8 invalid=blocked"
-                 " window=declared-distance-blocked\n";
+                 " window=control-accepted+declared-distance-blocked\n";
     return 0;
 }
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        std::cerr << "usage: zmid-zlib-cinfo-host-test <undersized-window.zlib>\n";
+    if (argc != 3) {
+        std::cerr << "usage: zmid-zlib-cinfo-host-test <undersized-window.zlib>"
+                     " <full-window-control.zlib>\n";
         return 2;
     }
     try {
-        return run(argv[1]);
+        return run(argv[1], argv[2]);
     } catch (const std::exception& error) {
         std::cerr << "zmid-zlib-cinfo-host-test: " << error.what() << "\n";
         return 1;
