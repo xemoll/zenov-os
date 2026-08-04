@@ -16,7 +16,14 @@ constexpr uint32_t live_overlay_map_bytes = 0x00010000U;
 constexpr uintptr_t live_overlay_data = 0x00336000U;
 constexpr uint32_t live_overlay_data_bytes = 0x00080000U;
 constexpr uintptr_t live_storage_end = live_overlay_data + live_overlay_data_bytes;
-constexpr uintptr_t user_base = 0x00400000U;
+
+/* The linker places all zero-initialized kernel state here.  The interval is
+ * supervisor-only, already inside the PMM's permanent low-memory reservation,
+ * and deliberately terminates at the existing ring-3 physical window.
+ */
+constexpr uintptr_t kernel_static_start = live_storage_end;
+constexpr uintptr_t kernel_static_limit = 0x00400000U;
+constexpr uintptr_t user_base = kernel_static_limit;
 constexpr uintptr_t pmm_reserved_end = 0x00800000U;
 
 static_assert(heap_start < heap_end);
@@ -27,6 +34,8 @@ static_assert(pmm_bitmap + pmm_bitmap_bytes == policy_transaction);
 static_assert(policy_transaction + policy_transaction_bytes == live_image_workspace);
 static_assert(live_image_workspace + live_image_workspace_bytes == live_overlay_map);
 static_assert(live_overlay_map + live_overlay_map_bytes == live_overlay_data);
-static_assert(live_storage_end <= user_base);
+static_assert(live_storage_end == kernel_static_start);
+static_assert(kernel_static_start < kernel_static_limit);
+static_assert(kernel_static_limit == user_base);
 static_assert(user_base < pmm_reserved_end);
 } // namespace supervisor_layout
