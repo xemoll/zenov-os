@@ -60,5 +60,5 @@ uint32_t productivity_clock_v2_laps[productivity_clock_v2_lap_capacity]{};
 uint8_t productivity_clock_v2_lap_count = 0U;
 ProductivityClockTimerV2 productivity_clock_v2_timers[productivity_clock_v2_timer_capacity]{};
 uint8_t productivity_clock_v2_timer_focus = 0U;
-int8_t productivity_clock_v2_banner_index = -1;
+int32_t productivity_clock_v2_banner_index = -1;
 uint32_t productivity_clock_v2_banner_until = 0U;
