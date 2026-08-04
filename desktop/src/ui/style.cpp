@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QFont>
+#include <QFontDatabase>
 #include <QLabel>
 #include <QPalette>
 #include <QPushButton>
@@ -9,13 +10,38 @@
 #include <QWidget>
 
 namespace zenapps {
+namespace {
+
+QFont interfaceFont(const QApplication& application) {
+    QFont font = application.font();
+    const QStringList candidates = {
+        QStringLiteral("Inter"),
+        QStringLiteral("Noto Sans"),
+        QStringLiteral("Segoe UI"),
+        QStringLiteral("Arial"),
+        QStringLiteral("Helvetica Neue"),
+        QStringLiteral("Helvetica"),
+        QStringLiteral("DejaVu Sans")
+    };
+    const QStringList installed = QFontDatabase::families();
+    for (const QString& candidate : candidates) {
+        const auto match = std::find_if(installed.cbegin(), installed.cend(), [&](const QString& family) {
+            return family.compare(candidate, Qt::CaseInsensitive) == 0;
+        });
+        if (match != installed.cend()) {
+            font.setFamily(*match);
+            break;
+        }
+    }
+    font.setPointSize(10);
+    return font;
+}
+
+}  // namespace
 
 void applyZenStyle(QApplication& application) {
     application.setStyle(QStyleFactory::create("Fusion"));
-    QFont font = application.font();
-    font.setFamilies({"Inter", "Noto Sans", "Segoe UI", "SF Pro Text"});
-    font.setPointSize(10);
-    application.setFont(font);
+    application.setFont(interfaceFont(application));
 
     QPalette palette;
     palette.setColor(QPalette::Window, QColor("#0b0e15"));
