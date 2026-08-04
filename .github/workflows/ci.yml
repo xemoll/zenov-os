@@ -32,6 +32,31 @@ jobs:
           git fetch origin agent/sync-pr147-main-fc646
           git show origin/agent/sync-pr147-main-fc646:.agent/merge_pr147_latest_main.sh > /tmp/merge-pr147.sh
           test -s /tmp/merge-pr147.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/merge-pr147.sh')
+          text = path.read_text()
+          needle = '''git add kernel/kernel.cpp
+
+          # Scheduler process ABI plus dynamic user segment rebasing.'''
+          replacement = '''git add kernel/kernel.cpp
+          python3 - <<'PYBOOT'
+          from pathlib import Path
+          p = Path('kernel/kernel.cpp')
+          s = p.read_text()
+          old = '    process::init();\\n'
+          new = '    process::init();\\n    process::scheduler_init();\\n'
+          if s.count(old) != 1:
+              raise SystemExit(f'scheduler boot init anchor mismatch count={s.count(old)}')
+          p.write_text(s.replace(old, new, 1))
+          PYBOOT
+          git add kernel/kernel.cpp
+
+          # Scheduler process ABI plus dynamic user segment rebasing.'''
+          if text.count(needle) != 1:
+              raise SystemExit(f'resolver insertion anchor mismatch count={text.count(needle)}')
+          path.write_text(text.replace(needle, replacement, 1))
+          PY
           bash -n /tmp/merge-pr147.sh
           bash /tmp/merge-pr147.sh
       - name: Upload combined evidence
