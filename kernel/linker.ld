@@ -17,15 +17,21 @@ SECTIONS
   .data : ALIGN(16) { *(.data*) } :data
   __kernel_file_end = .;
 
-  /* Keep the entry and privilege-transition stacks in conventional memory.
-   * The BIOS loader still places the flat KERNEL.BIN at physical 0x10000, so
-   * every file-backed byte and both early stacks must remain below VGA RAM.
+  /* The repository verifier has a deep, bounded call chain with several
+   * kilobyte-scale validation records.  The previous 16 KiB stack silently
+   * overflowed into adjacent .bss.  Keep a dedicated 64 KiB bootstrap/kernel
+   * stack in conventional RAM until large verifier frames are moved to heap.
    */
   .kernel_stack (NOLOAD) : ALIGN(16) {
     __kernel_stack_bottom = .;
-    . += 16384;
+    . += 65536;
     __kernel_stack_top = .;
   } :data
+  ASSERT((__kernel_stack_top - __kernel_stack_bottom) >= 65536,
+         "kernel stack is too small for verified boot")
+
+  /* Ring-3 transitions use a separate stack so an application cannot consume
+   * the boot/service stack budget. */
   .ring3_kernel_stack (NOLOAD) : ALIGN(16) {
     __stack_bottom = .;
     . += 16384;
