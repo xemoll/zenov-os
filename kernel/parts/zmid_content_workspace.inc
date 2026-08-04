@@ -90,7 +90,7 @@ bool table_empty(uint32_t& occupied_index, uint32_t& occupied_value) {
     return true;
 }
 
-bool table_empty() {
+[[maybe_unused]] bool table_empty() {
     uint32_t index = 0U, value = 0U;
     return table_empty(index, value);
 }
@@ -113,8 +113,8 @@ bool range_mapped_exact(uintptr_t virtual_address,
     return true;
 }
 
-bool range_mapped_exact(uintptr_t virtual_address,
-                        uintptr_t physical_address) {
+[[maybe_unused]] bool range_mapped_exact(uintptr_t virtual_address,
+                                         uintptr_t physical_address) {
     uint32_t index = 0U, actual = 0U, expected = 0U;
     return range_mapped_exact(virtual_address, physical_address,
                               index, actual, expected);
@@ -151,7 +151,7 @@ bool mapping_exact(uint32_t& mismatch_index,
                               mismatch_index, actual, expected);
 }
 
-bool mapping_exact() {
+[[maybe_unused]] bool mapping_exact() {
     uint32_t index = 0U, actual = 0U, expected = 0U;
     return mapping_exact(index, actual, expected);
 }
