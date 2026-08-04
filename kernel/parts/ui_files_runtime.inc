@@ -73,6 +73,9 @@ bool init() {
 
 bool handle_navigation_key(uint16_t key) {
     if (active_view != View::files || quick_settings_open) return handle_navigation_key_base(key);
+    keyboard_focus_mode = true;
+    hovered_target = HoverTarget::none;
+    files_clear_hover();
     if (key == key_f5 || key == key_f6 || key == key_f7 || key == key_f8 || key == key_f9 || key == key_f10 || key == key_super) return handle_navigation_key_base(key);
 
     if (files_preview_open) {
@@ -106,6 +109,7 @@ void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
         return;
     }
     if (!active) return;
+    if (delta_x != 0 || delta_y != 0 || buttons != mouse_buttons) keyboard_focus_mode = false;
     restore_cursor(mouse_screen_x, mouse_screen_y);
     mouse_screen_x += delta_x;
     mouse_screen_y += delta_y;

@@ -30,8 +30,10 @@ bool mouse_decoder_regression() {
     graphics::mouse_screen_x = mouse_screen_from_logical_x(static_cast<int32_t>(graphics::width / 2U));
     graphics::mouse_screen_y = mouse_screen_from_logical_y(static_cast<int32_t>(graphics::height / 2U));
     graphics::update_logical_mouse();
-    graphics::window_x = 150;
-    graphics::window_y = 88;
+    const int32_t start_x = 150;
+    const int32_t start_y = graphics::window_drag_min_y();
+    graphics::window_x = start_x;
+    graphics::window_y = start_y;
     graphics::mouse_buttons = 0U;
     graphics::dragging = false;
     graphics::first_mouse_packet = true;
@@ -42,18 +44,25 @@ bool mouse_decoder_regression() {
     inject_mouse_packet_to_decoder(0x08U, 1U, 1U);
     const bool packet_ok = !graphics::first_mouse_packet && mouse_packet_index == 0U;
 
-    graphics::mouse_screen_x = mouse_screen_from_logical_x(200);
-    graphics::mouse_screen_y = mouse_screen_from_logical_y(104);
+    graphics::mouse_screen_x = mouse_screen_from_logical_x(start_x + 50);
+    graphics::mouse_screen_y = mouse_screen_from_logical_y(start_y + 16);
     graphics::update_logical_mouse();
     inject_mouse_packet_to_decoder(0x09U, 0U, 0U);
     const int32_t press_x = graphics::mouse_x;
     const int32_t press_y = graphics::mouse_y;
     inject_mouse_packet_to_decoder(0x29U, 80U, 226U);
-    const int32_t expected_x = 150 + graphics::mouse_x - press_x;
-    const int32_t expected_y = 88 + graphics::mouse_y - press_y;
+    int32_t expected_x = start_x + graphics::mouse_x - press_x;
+    int32_t expected_y = start_y + graphics::mouse_y - press_y;
+    if (expected_x < graphics::window_drag_min_x()) expected_x = graphics::window_drag_min_x();
+    if (expected_x > graphics::window_drag_max_x()) expected_x = graphics::window_drag_max_x();
+    if (expected_y < graphics::window_drag_min_y()) expected_y = graphics::window_drag_min_y();
+    if (expected_y > graphics::window_drag_max_y()) expected_y = graphics::window_drag_max_y();
+    const bool signed_delta_ok = graphics::mouse_y > press_y;
     inject_mouse_packet_to_decoder(0x08U, 0U, 0U);
 
-    const bool drag_ok = graphics::drag_reported && mouse_packet_index == 0U &&
+    const bool bounds_ok = graphics::window_drag_min_x() <= graphics::window_drag_max_x() &&
+        graphics::window_drag_min_y() <= graphics::window_drag_max_y();
+    const bool drag_ok = graphics::drag_reported && mouse_packet_index == 0U && signed_delta_ok && bounds_ok &&
         graphics::window_x == expected_x && graphics::window_y == expected_y;
     enable_interrupts();
     return packet_ok && drag_ok;

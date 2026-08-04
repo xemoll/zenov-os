@@ -24,7 +24,7 @@ uint32_t files_preview_size = 0;
 uint32_t files_preview_total = 0;
 uint32_t files_preview_checksum = 0;
 
-constexpr const char* files_place_names[5] = {"ROOT", "APPS", "CONFIG", "SECURITY", "SYSTEM"};
+constexpr const char* files_place_names[5] = {"Root", "Apps", "Config", "Security", "System"};
 constexpr const char* files_place_paths[5] = {"/", "/apps", "/config", "/security", "/system"};
 
 void files_uint_text(uint32_t value, char output[16]) {
@@ -34,23 +34,6 @@ void files_uint_text(uint32_t value, char output[16]) {
     uint32_t index = 0;
     while (count) output[index++] = reverse[--count];
     output[index] = 0;
-}
-
-void files_truncate(const char* input, char* output, uint32_t capacity, uint32_t maximum) {
-    if (!output || capacity == 0U) return;
-    output[0] = 0;
-    if (!input) return;
-    uint32_t length = 0;
-    while (input[length] && length < maximum && length + 1U < capacity) {
-        output[length] = input[length];
-        ++length;
-    }
-    if (input[length] && length + 4U < capacity && length >= 3U) {
-        output[length++] = '.';
-        output[length++] = '.';
-        output[length++] = '.';
-    }
-    output[length] = 0;
 }
 
 void files_ensure_visible() {
@@ -125,7 +108,7 @@ uint8_t files_active_place() {
 
 void draw_files_place(uint8_t index, int32_t y) {
     const bool selected = files_active_place() == index;
-    const bool hovered = files_hover_place == index;
+    const bool hovered = !keyboard_focus_mode && files_hover_place == index;
     if (selected) fill_round_rect(window_x + files_sidebar_x_offset, y, files_sidebar_width, 30, 8, current_theme.accent_soft);
     else if (hovered) fill_round_rect(window_x + files_sidebar_x_offset, y, files_sidebar_width, 30, 8,
                                       mix(current_theme.surface_high, current_theme.accent, 1U, 6U));
@@ -145,8 +128,8 @@ void draw_files_entry_icon(int32_t x, int32_t y, bool directory) {
 
 void render_files_list() {
     files_reload();
-    draw_window_chrome("ZEN FILES", "ZENOVFS1");
-    draw_text(window_x + 16, window_y + 68, "PLACES", current_theme.text_muted, 1);
+    draw_window_chrome("Files", "ZenovFS");
+    draw_text(window_x + 16, window_y + 68, "Places", current_theme.text_muted, 1);
     for (uint8_t i = 0; i < 5U; ++i) draw_files_place(i, window_y + 88 + static_cast<int32_t>(i * 38U));
 
     fill_rect(window_x + 128, window_y + 56, 1, 312, current_theme.border);
@@ -155,13 +138,12 @@ void render_files_list() {
     fill_round_rect(content_x + 6, window_y + 66, 24, 24, 7,
                     string_equal(files_path, "/") ? current_theme.surface_high : current_theme.accent_soft);
     draw_char(content_x + 15, window_y + 75, '<', current_theme.text, 1);
-    char path_label[45];
-    files_truncate(files_path, path_label, sizeof(path_label), 43U);
-    draw_text(content_x + 40, window_y + 75, path_label, current_theme.text, 1);
+    draw_text_ellipsis(content_x + 40, window_y + 75, files_content_width - 52,
+                       files_path, current_theme.text, 1);
 
-    draw_text(content_x + 8, window_y + 108, "NAME", current_theme.text_muted, 1);
-    draw_text(content_x + 230, window_y + 108, "TYPE", current_theme.text_muted, 1);
-    draw_text_right(content_x + files_content_width - 8, window_y + 108, "SIZE", current_theme.text_muted, 1);
+    draw_text(content_x + 8, window_y + 108, "Name", current_theme.text_muted, 1);
+    draw_text(content_x + 230, window_y + 108, "Type", current_theme.text_muted, 1);
+    draw_text_right(content_x + files_content_width - 8, window_y + 108, "Size", current_theme.text_muted, 1);
     fill_rect(content_x, window_y + 120, files_content_width, 1, current_theme.border);
 
     for (uint32_t visible = 0; visible < files_visible_rows; ++visible) {
@@ -170,26 +152,26 @@ void render_files_list() {
         const storage::BrowserEntry& entry = files_entries[index];
         const int32_t row_y = window_y + files_row_y_offset + static_cast<int32_t>(visible * files_row_height);
         const bool focused = index == files_focus;
-        const bool hovered = static_cast<int32_t>(index) == files_hover_row;
+        const bool hovered = !keyboard_focus_mode && static_cast<int32_t>(index) == files_hover_row;
         if (focused) fill_round_rect(content_x, row_y, files_content_width, files_row_height - 2, 7, current_theme.accent_soft);
         else if (hovered) fill_round_rect(content_x, row_y, files_content_width, files_row_height - 2, 7,
                                           mix(current_theme.surface_high, current_theme.accent, 1U, 7U));
         const bool directory = entry.type == storage::zfs_type_directory;
         draw_files_entry_icon(content_x + 6, row_y + 4, directory);
-        char name[30];
-        files_truncate(entry.name, name, sizeof(name), 26U);
-        draw_text(content_x + 38, row_y + 11, name, current_theme.text, 1);
-        draw_text(content_x + 230, row_y + 11, directory ? "DIR" : "FILE", current_theme.text_muted, 1);
+        draw_text_ellipsis(content_x + 38, row_y + 11, 180, entry.name, current_theme.text, 1);
+        draw_text(content_x + 230, row_y + 11, directory ? "DIR" : "FILE", focus_text_color(focused), 1);
         if (!directory) {
             char size[16];
             files_uint_text(entry.size, size);
-            draw_text_right(content_x + files_content_width - 14, row_y + 11, size, current_theme.text_muted, 1);
+            draw_text_right(content_x + files_content_width - 14, row_y + 11, size, focus_text_color(focused), 1);
         }
+        if (focused) draw_focus_outline(content_x, row_y, files_content_width,
+                                        files_row_height - 2, current_theme.accent);
     }
 
     fill_rect(content_x, window_y + 342, files_content_width, 1, current_theme.border);
-    draw_text(content_x + 8, window_y + 354, "UP/DOWN SELECT  ENTER OPEN  BACKSPACE UP", current_theme.text_muted, 1);
-    draw_text(content_x + 8, window_y + 374, "GEN", current_theme.text_muted, 1);
+    draw_text(content_x + 8, window_y + 354, "Arrows select   Enter open   Backspace up", current_theme.text_muted, 1);
+    draw_text(content_x + 8, window_y + 374, "Generation", current_theme.text_muted, 1);
     draw_uint(content_x + 32, window_y + 374, storage::browser_generation(), current_theme.text);
     draw_text_right(content_x + files_content_width - 8, window_y + 374,
                     files_entry_count == files_capacity ? "32+ ITEMS" : "LIVE INDEX", current_theme.success, 1);
@@ -233,9 +215,8 @@ void render_files_text_preview(int32_t x, int32_t y) {
 
 void render_files_preview() {
     draw_window_chrome("ZEN FILES", "PREVIEW");
-    char name[60];
-    files_truncate(files_preview_path, name, sizeof(name), 56U);
-    draw_text(window_x + 24, window_y + 68, name, current_theme.text, 1);
+    draw_text_ellipsis(window_x + 24, window_y + 68, window_width - 48,
+                       files_preview_path, current_theme.text, 1);
     draw_text(window_x + 24, window_y + 88, files_preview_binary ? "BINARY" : "TEXT", current_theme.text_muted, 1);
     draw_text(window_x + 120, window_y + 88, "SIZE", current_theme.text_muted, 1);
     draw_uint(window_x + 150, window_y + 88, files_preview_total, current_theme.text);
