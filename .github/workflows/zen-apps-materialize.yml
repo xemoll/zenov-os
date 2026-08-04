@@ -6,6 +6,12 @@ on:
       - agent/cross-platform-zen-apps
     paths:
       - '.zen-apps-staging/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.zen-apps-staging/**'
+      - '.github/workflows/zen-apps-materialize.yml'
   workflow_dispatch:
 
 permissions:
