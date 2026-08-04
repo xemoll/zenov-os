@@ -165,8 +165,9 @@ bool productivity_reminder_parse_quick(const char* input, uint8_t input_size, Pr
             uint8_t position = static_cast<uint8_t>(marker + 1U);
             const uint8_t digits_start = position;
             while (position < size && text[position] >= '0' && text[position] <= '9') {
-                if (value > 525600U) return false;
-                value = value * 10U + static_cast<uint32_t>(text[position] - '0');
+                const uint32_t digit = static_cast<uint32_t>(text[position] - '0');
+                if (value > (525600U - digit) / 10U) return false;
+                value = value * 10U + digit;
                 ++position;
             }
             if (position == digits_start || position + 1U != size || !value) return false;
