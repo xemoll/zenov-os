@@ -11,6 +11,10 @@ void productivity_tasks_sort() {
 }
 
 bool productivity_task_matches_filter(const ProductivityTask& task) {
+    const int32_t relation = productivity_task_relation_to_today(task);
+    if (productivity_task_filter == ProductivityTaskFilter::today) return !task.done && relation == 0;
+    if (productivity_task_filter == ProductivityTaskFilter::overdue) return !task.done && relation < 0;
+    if (productivity_task_filter == ProductivityTaskFilter::planned) return !task.done && task.due_year && relation >= 0 && relation <= 1;
     if (productivity_task_filter == ProductivityTaskFilter::open) return !task.done;
     if (productivity_task_filter == ProductivityTaskFilter::done) return task.done;
     return true;
@@ -54,22 +58,29 @@ void productivity_tasks_scan() {
             if (position < size) ++position;
             uint32_t marker = line_start;
             while (marker < line_end && (data[marker] == ' ' || data[marker] == '\t')) ++marker;
-            if (marker + 5U <= line_end && data[marker] == '-' && data[marker + 1U] == ' ' &&
+            if (marker + 5U < line_end && data[marker] == '-' && data[marker + 1U] == ' ' &&
                 data[marker + 2U] == '[' && data[marker + 4U] == ']' &&
-                (data[marker + 3U] == ' ' || data[marker + 3U] == 'x' || data[marker + 3U] == 'X')) {
+                (data[marker + 3U] == ' ' || data[marker + 3U] == 'x' || data[marker + 3U] == 'X') &&
+                productivity_task_tag_boundary(data[marker + 5U])) {
+                uint32_t payload_start = marker + 5U;
+                while (payload_start < line_end && productivity_task_tag_boundary(data[payload_start])) ++payload_start;
+                if (payload_start >= line_end) continue;
                 ProductivityTask& task = productivity_tasks[productivity_task_count++];
                 memset(&task, 0, sizeof(task));
                 string_copy(task.source_path, note.path, sizeof(task.source_path));
+                task.line_start = static_cast<uint16_t>(line_start);
+                task.line_end = static_cast<uint16_t>(line_end);
+                task.payload_offset = static_cast<uint16_t>(payload_start);
                 task.state_offset = static_cast<uint16_t>(marker + 3U);
                 task.line_number = line_number;
+                task.line_hash = productivity_task_line_hash(data, line_start, line_end);
                 task.done = data[marker + 3U] != ' ';
-                task.waiting = productivity_task_line_has_token_ci(data, marker + 5U, line_end, "#W");
-                task.priority = productivity_task_line_has_token_ci(data, marker + 5U, line_end, "#P1") ? 1U :
-                    (productivity_task_line_has_token_ci(data, marker + 5U, line_end, "#P2") ? 2U :
-                    (productivity_task_line_has_token_ci(data, marker + 5U, line_end, "#P3") ? 3U : 4U));
-                (void)productivity_task_parse_due(data, marker + 5U, line_end, task.due_year, task.due_month, task.due_day);
-                uint32_t text_position = marker + 5U;
-                while (text_position < line_end && data[text_position] == ' ') ++text_position;
+                task.waiting = productivity_task_line_has_token_ci(data, payload_start, line_end, "#W");
+                task.priority = productivity_task_line_has_token_ci(data, payload_start, line_end, "#P1") ? 1U :
+                    (productivity_task_line_has_token_ci(data, payload_start, line_end, "#P2") ? 2U :
+                    (productivity_task_line_has_token_ci(data, payload_start, line_end, "#P3") ? 3U : 4U));
+                (void)productivity_task_parse_due(data, payload_start, line_end, task.due_year, task.due_month, task.due_day);
+                uint32_t text_position = payload_start;
                 uint32_t output = 0U;
                 while (text_position < line_end && output + 1U < sizeof(task.text)) {
                     const char value = data[text_position++];

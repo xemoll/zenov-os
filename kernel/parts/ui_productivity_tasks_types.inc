@@ -1,4 +1,4 @@
-enum class ProductivityTaskFilter : uint8_t { open, all, done };
+enum class ProductivityTaskFilter : uint8_t { today, overdue, planned, open, done, all };
 
 constexpr uint32_t productivity_task_capacity = 24U;
 constexpr uint32_t productivity_task_visible_rows = 8U;
@@ -7,12 +7,16 @@ constexpr uint32_t productivity_task_text_capacity = 65U;
 struct ProductivityTask {
     char source_path[48];
     char text[productivity_task_text_capacity];
+    uint16_t line_start;
+    uint16_t line_end;
+    uint16_t payload_offset;
     uint16_t state_offset;
     uint16_t line_number;
     uint16_t due_year;
     uint8_t due_month;
     uint8_t due_day;
     uint8_t priority;
+    uint32_t line_hash;
     bool done;
     bool waiting;
 };
@@ -26,11 +30,22 @@ uint8_t productivity_task_scroll = 0U;
 ProductivityTaskFilter productivity_task_filter = ProductivityTaskFilter::open;
 bool productivity_tasks_open = false;
 bool productivity_task_adding = false;
-char productivity_task_input[48]{};
+bool productivity_task_editing = false;
+char productivity_task_input[productivity_task_text_capacity]{};
 uint8_t productivity_task_input_size = 0U;
 
 bool productivity_task_tag_boundary(char value) {
     return value == ' ' || value == '\t';
+}
+
+uint32_t productivity_task_line_hash(const char* data, uint32_t start, uint32_t end) {
+    uint32_t hash = 2166136261U;
+    if (!data || end < start) return 0U;
+    for (uint32_t index = start; index < end; ++index) {
+        hash ^= static_cast<uint8_t>(data[index]);
+        hash = static_cast<uint32_t>(static_cast<uint64_t>(hash) * 16777619ULL);
+    }
+    return hash;
 }
 
 bool productivity_task_line_has_token_ci(const char* data, uint32_t start, uint32_t end, const char* token) {
@@ -78,6 +93,22 @@ bool productivity_task_parse_due(const char* data, uint32_t start, uint32_t end,
     return false;
 }
 
+int32_t productivity_task_compare_date(uint16_t left_year, uint8_t left_month, uint8_t left_day,
+                                       uint16_t right_year, uint8_t right_month, uint8_t right_day) {
+    if (left_year != right_year) return left_year < right_year ? -1 : 1;
+    if (left_month != right_month) return left_month < right_month ? -1 : 1;
+    if (left_day != right_day) return left_day < right_day ? -1 : 1;
+    return 0;
+}
+
+int32_t productivity_task_relation_to_today(const ProductivityTask& task) {
+    if (!task.due_year) return 2;
+    uint8_t weekday = 0U, current_day = 0U, current_month = 0U, current_year = 0U;
+    if (!rtc_read_date(weekday, current_day, current_month, current_year)) return 2;
+    return productivity_task_compare_date(task.due_year, task.due_month, task.due_day,
+        static_cast<uint16_t>(2000U + current_year), current_month, current_day);
+}
+
 int32_t productivity_task_compare_text(const char* left, const char* right) {
     uint32_t index = 0U;
     while (left[index] && right[index]) {
@@ -108,9 +139,9 @@ bool productivity_task_due_before(const ProductivityTask& left, const Productivi
 bool productivity_task_before(const ProductivityTask& left, const ProductivityTask& right) {
     if (left.done != right.done) return !left.done;
     if (left.waiting != right.waiting) return !left.waiting;
-    if (left.priority != right.priority) return left.priority < right.priority;
     if (productivity_task_due_before(left, right)) return true;
     if (productivity_task_due_before(right, left)) return false;
+    if (left.priority != right.priority) return left.priority < right.priority;
     const int32_t source_order = productivity_task_compare_text(left.source_path, right.source_path);
     if (source_order != 0) return source_order < 0;
     return left.line_number < right.line_number;
