@@ -21,18 +21,20 @@ constexpr uintptr_t live_storage_end = live_overlay_data + live_overlay_data_byt
 constexpr uintptr_t kernel_static_start = live_storage_end;
 constexpr uintptr_t kernel_static_limit = 0x00400000U;
 constexpr uintptr_t user_base = kernel_static_limit;
+constexpr uint32_t user_window_bytes = 0x00100000U;
+constexpr uintptr_t user_physical_end = user_base + user_window_bytes;
 
-/* Physical backing remains inside the PMM permanent 0-8 MiB reservation.
- * ZMID receives a separate supervisor-only PDE at 8 MiB rather than sharing
- * the 4-8 MiB ring-3 page table.
+/* Physical backing is kept beyond the 4-5 MiB ring-3 process window and
+ * inside the PMM permanent reservation. ZMID receives a distinct
+ * supervisor-only PDE at 8 MiB; no user PTE references these frames.
  */
-constexpr uintptr_t zmid_workspace_physical_a = 0x007E0000U;
-constexpr uintptr_t zmid_workspace_physical_b = 0x007F0000U;
+constexpr uintptr_t zmid_workspace_physical_a = 0x00800000U;
+constexpr uintptr_t zmid_workspace_physical_b = 0x00810000U;
 constexpr uintptr_t zmid_workspace_virtual_a = 0x00800000U;
 constexpr uintptr_t zmid_workspace_virtual_b = 0x00810000U;
 constexpr uint32_t zmid_workspace_bytes = 0x00010000U;
 constexpr uintptr_t zmid_workspace_virtual_end = 0x00820000U;
-constexpr uintptr_t pmm_reserved_end = 0x00800000U;
+constexpr uintptr_t pmm_reserved_end = 0x00820000U;
 
 static_assert(heap_start < heap_end);
 static_assert(heap_end == scan_workspace);
@@ -45,7 +47,7 @@ static_assert(live_overlay_map + live_overlay_map_bytes == live_overlay_data);
 static_assert(live_storage_end == kernel_static_start);
 static_assert(kernel_static_start < kernel_static_limit);
 static_assert(kernel_static_limit == user_base);
-static_assert(user_base + 0x00100000U <= zmid_workspace_physical_a);
+static_assert(user_physical_end <= zmid_workspace_physical_a);
 static_assert(zmid_workspace_physical_a + zmid_workspace_bytes == zmid_workspace_physical_b);
 static_assert(zmid_workspace_physical_b + zmid_workspace_bytes == pmm_reserved_end);
 static_assert(zmid_workspace_virtual_a == 0x00800000U);
