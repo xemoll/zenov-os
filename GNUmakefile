@@ -229,3 +229,26 @@ $(SCHEDULER_QEMU_STAMP): all tests/qemu_scheduler.sh
 	bash tests/qemu_scheduler.sh $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(SCHEDULER_QEMU_OUT)
 	@touch $@
 scheduler-qemu: $(SCHEDULER_QEMU_STAMP)
+
+KERNEL_PROCESS_LIFECYCLE_TEST := $(BUILD)/kernel-process-lifecycle-test
+KERNEL_PROCESS_LIFECYCLE_QEMU_OUT := $(BUILD)/qemu/kernel-process-lifecycle
+KERNEL_PROCESS_LIFECYCLE_QEMU_STAMP := $(KERNEL_PROCESS_LIFECYCLE_QEMU_OUT)/.stamp
+
+.PHONY: kernel-process-lifecycle-qemu
+
+$(KERNEL_PROCESS_LIFECYCLE_TEST): tests/kernel_process_lifecycle_test.cpp kernel/parts/process_handles.inc kernel/parts/process_lifecycle.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+	$@
+
+check: $(KERNEL_PROCESS_LIFECYCLE_TEST)
+
+$(KERNEL_PROCESS_LIFECYCLE_QEMU_STAMP): all tests/qemu_kernel_process_lifecycle.sh
+	@rm -rf $(KERNEL_PROCESS_LIFECYCLE_QEMU_OUT)
+	@mkdir -p $(KERNEL_PROCESS_LIFECYCLE_QEMU_OUT)
+	bash tests/qemu_kernel_process_lifecycle.sh \
+	  $(BUILD)/zenov-os.img \
+	  $(BUILD)/zenov-data.img \
+	  $(KERNEL_PROCESS_LIFECYCLE_QEMU_OUT)
+	@touch $@
+
+kernel-process-lifecycle-qemu: $(KERNEL_PROCESS_LIFECYCLE_QEMU_STAMP)

@@ -63,8 +63,8 @@ user_abort_entry:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    call user_window_cleanup
     mov esp, [saved_kernel_esp]
+    call user_window_cleanup
     pop edi
     pop esi
     pop ebx

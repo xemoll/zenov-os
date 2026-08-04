@@ -372,6 +372,41 @@ bool user_access(uint32_t offset, uint32_t length, bool write) {
     }
     return true;
 }
+bool address_space_user_access(const AddressSpace& space, uint32_t offset,
+                               uint32_t length, bool write) {
+    if (!space.table_physical) return false;
+    if (!length) return offset <= process_window_bytes;
+    if (offset >= process_window_bytes || length > process_window_bytes - offset) return false;
+    const uint32_t first_page = page_floor(offset) / page_size;
+    const uint32_t end_page = page_ceiling(offset + length) / page_size;
+    const uint32_t* const table = address_space_table(space);
+    if (!table) return false;
+    for (uint32_t page = first_page; page < end_page; ++page) {
+        const uint32_t entry = table[page];
+        if (!(entry & present) || !(entry & user) || (write && !(entry & writable))) return false;
+    }
+    return true;
+}
+
+bool address_space_write(AddressSpace& space, uint32_t offset,
+                         const void* source, uint32_t length) {
+    if ((!source && length) || !address_space_user_access(space, offset, length, true)) return false;
+    const auto* input = static_cast<const uint8_t*>(source);
+    uint32_t copied = 0U;
+    uint32_t* const table = address_space_table(space);
+    while (copied < length) {
+        const uint32_t current = offset + copied;
+        const uint32_t page = current / page_size;
+        const uint32_t within = current % page_size;
+        uint32_t chunk = page_size - within;
+        if (chunk > length - copied) chunk = length - copied;
+        const uintptr_t frame = table[page] & ~(static_cast<uintptr_t>(page_size) - 1U);
+        memcpy(reinterpret_cast<void*>(frame + within), input + copied, chunk);
+        copied += chunk;
+    }
+    return true;
+}
+
 bool writable_at(uint32_t offset) {
     const uint32_t* const table = current_user_table();
     return table && offset < process_window_bytes &&

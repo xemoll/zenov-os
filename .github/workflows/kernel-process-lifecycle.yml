@@ -1,0 +1,145 @@
+name: ZenovOS Kernel Process Lifecycle
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/kernel-process-lifecycle.yml'
+      - 'GNUmakefile'
+      - 'Makefile'
+      - 'docs/KERNEL_PROCESS_LIFECYCLE_0.1.1.md'
+      - 'kernel/**'
+      - 'tests/kernel_process_lifecycle_test.cpp'
+      - 'tests/qemu_kernel_process_lifecycle.sh'
+      - 'tests/qemu_scheduler.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-process-lifecycle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact kernel-only source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags origin main
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/kernel-process-lifecycle.yml|GNUmakefile|Makefile|docs/KERNEL_PROCESS_LIFECYCLE_0.1.1.md|kernel/*|tests/kernel_process_lifecycle_test.cpp|tests/qemu_kernel_process_lifecycle.sh) ;;
+              *) printf 'non-kernel scope: %s\n' "$path" >&2; exit 1 ;;
+            esac
+          done < <(git diff --name-only origin/main...HEAD)
+          bash -n tests/qemu_kernel_process_lifecycle.sh
+          bash -n tests/qemu_scheduler.sh
+          grep -Fq 'syscall_spawn = 12' kernel/parts/process.inc
+          grep -Fq 'syscall_waitpid = 13' kernel/parts/process.inc
+          grep -Fq 'syscall_wait_handle = 14' kernel/parts/process.inc
+          grep -Fq 'syscall_handle_close = 15' kernel/parts/process.inc
+          grep -Fq 'syscall_process_query = 16' kernel/parts/process.inc
+          grep -Fq 'PROCESS_OBJECT_MANAGER_OK objects=16 handles-per-process=8 pid-generation=yes' kernel/parts/scheduler.inc
+          grep -Fq 'PROCESS_LIFECYCLE_RUNTIME_OK spawned=2 reaped=2 handles=closed stale=blocked objects=collected' kernel/parts/scheduler.inc
+          grep -Fq 'process_lifecycle_probe_start' kernel/process_lifecycle_probe.S
+          grep -Fq 'proctest' kernel/parts/commands.inc
+          grep -Fq 'mov esp, [saved_kernel_esp]' kernel/user.S
+          ! sed -n '/bool switch_interrupt/,/^}/p' kernel/parts/scheduler.inc | grep -Fq 'scrub_deferred_stacks'
+          ! sed -n '/bool switch_syscall/,/^}/p' kernel/parts/scheduler.inc | grep -Fq 'scrub_deferred_stacks'
+
+      - name: Install strict toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang binutils qemu-system-x86
+
+      - name: Validate process-object models with sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/kernel-process-lifecycle
+          mkdir -p /tmp/kernel-process-lifecycle
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tests/kernel_process_lifecycle_test.cpp \
+            -o /tmp/kernel-process-lifecycle/model-gcc
+          /tmp/kernel-process-lifecycle/model-gcc | tee /tmp/kernel-process-lifecycle/model-gcc.log
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+            -fsanitize=address,undefined,integer,implicit-conversion \
+            -fno-omit-frame-pointer tests/kernel_process_lifecycle_test.cpp \
+            -o /tmp/kernel-process-lifecycle/model-clang
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+            UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            /tmp/kernel-process-lifecycle/model-clang | tee /tmp/kernel-process-lifecycle/model-clang.log
+          marker='KERNEL_PROCESS_LIFECYCLE_TEST_OK objects=16 handles=8 pid-generation=1 waitable=1 reap=deferred stale=blocked'
+          grep -Fqx "$marker" /tmp/kernel-process-lifecycle/model-gcc.log
+          grep -Fqx "$marker" /tmp/kernel-process-lifecycle/model-clang.log
+
+      - name: Build exact kernel and run host graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make -j2 all check | tee /tmp/kernel-process-lifecycle-all-check.log
+          grep -Fq 'SCHEDULER_POLICY_TEST_OK priority-levels=4 rr=equal aging=50 quantum=3-6' /tmp/kernel-process-lifecycle-all-check.log
+          grep -Fq 'KERNEL_PROCESS_LIFECYCLE_TEST_OK objects=16 handles=8 pid-generation=1 waitable=1 reap=deferred stale=blocked' /tmp/kernel-process-lifecycle-all-check.log
+          test "$(sha256sum build/HELLO.ZEX | cut -d' ' -f1)" = '2b7ba0114d5228825b30aca30e0e978f2faf9b798cf7f5494742d7a1d330956a'
+          test "$(stat -c%s build/KERNEL.BIN)" -le 524288
+          static_end="$(awk '/__kernel_static_end = \./ {print $1}' build/kernel.map | tail -1)"
+          [[ "$static_end" =~ ^0x[0-9a-fA-F]+$ ]]
+          test $((static_end)) -le $((0x480000))
+          readelf -r build/process-lifecycle-probe.o | grep -Fq 'There are no relocations'
+          mkdir -p build/kernel-process-lifecycle
+          cp /tmp/kernel-process-lifecycle-all-check.log build/kernel-process-lifecycle/all-check.log
+          cp /tmp/kernel-process-lifecycle/model-gcc.log build/kernel-process-lifecycle/model-gcc.log
+          cp /tmp/kernel-process-lifecycle/model-clang.log build/kernel-process-lifecycle/model-clang.log
+
+      - name: Prove spawn, wait, handles and deterministic cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/qemu_kernel_process_lifecycle.sh \
+            build/zenov-os.img build/zenov-data.img \
+            build/qemu/kernel-process-lifecycle
+          grep -Fq 'PROCESS_LIFECYCLE_RUNTIME_OK spawned=2 reaped=2 handles=closed stale=blocked objects=collected' \
+            build/qemu/kernel-process-lifecycle/serial.log
+
+      - name: Regress timer preemption and address-space isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/qemu_scheduler.sh \
+            build/zenov-os.img build/zenov-data.img \
+            build/qemu/scheduler-regression
+          grep -Fq 'PREEMPTIVE_MULTITASKING_OK isolation=per-address-space' \
+            build/qemu/scheduler-regression/serial.log
+
+      - name: Upload kernel lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zenov-kernel-process-lifecycle-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/zenov-os.img
+            build/zenov-data.img
+            build/kernel-process-lifecycle/
+            build/qemu/kernel-process-lifecycle/
+            build/qemu/scheduler-regression/
