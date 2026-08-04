@@ -28,4 +28,18 @@ bool activate_external_capability_profile(const char* input, const uint8_t diges
     serial::write("\r\n");
     return true;
 }
+
+bool activate_linux_i386_profile(const char* input,
+                                 const uint8_t digest[security_guard::sha256_bytes],
+                                 uint32_t image_bias) {
+    if (!input || !digest || !image_bias || security_policy::protected_path(input) ||
+        !activate_external_capability_profile(input, digest, capability_console_write, nullptr, nullptr)) {
+        serial::line("LINUX_I386_CAPABILITY_PROFILE_REJECTED");
+        return false;
+    }
+    active_syscall_abi = SyscallAbi::linux_i386;
+    linux_i386_image_bias = image_bias;
+    serial::line("LINUX_I386_CAPABILITY_PROFILE_OK mask=console-write");
+    return true;
+}
 } // namespace process

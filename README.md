@@ -2,7 +2,7 @@
 
 **ZenovOS is an experimental 32-bit x86 operating system with its own BIOS loader, freestanding kernel, graphical desktop, ZenovFS filesystem, application ABI, package manager and signed local security model.**
 
-ZenovOS is not a Linux distribution and does not reuse Windows or macOS userland. It boots through Legacy BIOS and runs supported native ZEX1 and static ELF32/i386 applications in ring 3.
+ZenovOS is not a Linux distribution and does not reuse Windows or macOS userland. It boots through Legacy BIOS, runs native ZEX1 and static ELF32/i386 applications in ring 3, and includes a minimal console-only Linux/i386 compatibility sandbox.
 
 ![ZenovOS graphical desktop](docs/screenshots/zenov-os-0.1.1-graphical-desktop.png)
 
@@ -78,6 +78,7 @@ Files and settings work during the running session. Changes reset after reboot o
 | Storage | Embedded ZenovFS base plus writable RAM overlay; optional ATA path retained for development |
 | Applications | Native ZEX1 and validated static little-endian ELF32/i386 binaries |
 | ABI | `INT 0x80` syscalls, guarded userspace pointers and signed capability profiles |
+| Compatibility | Minimal static Linux/i386 `int 0x80` sandbox: console `write`, `exit` and `exit_group` |
 | Packages | ZenPkg lifecycle, signed ZenRepo metadata, verified cache and deterministic launch plans |
 | Security | Signed trust, capability policy, malware intelligence, controlled folders, authenticated reads, quarantine and audit |
 | Hardware trust | TPM 2.0 TIS FIFO transport with explicitly provisioned NV counter |
@@ -107,7 +108,7 @@ ZenovOS supports:
 
 Applications run in a page-granular ring-3 window with a separate stack. Kernel and framebuffer pages remain supervisor-only. Malformed binaries and writable-plus-executable ELF segments are rejected.
 
-The system remains single-foreground-process and single-threaded. It does not provide POSIX, a dynamic linker, `fork`/`exec`, Linux binary compatibility, Wine, Proton, or macOS runtime compatibility.
+The system remains single-foreground-process and single-threaded. It does not provide POSIX, a dynamic linker, `fork`/`exec`, general Linux binary compatibility, Wine, Proton, or macOS runtime compatibility.
 
 ## ZenovFS and Live storage
 
@@ -128,7 +129,15 @@ Live-session storage is temporary. The public release does not require or publis
 
 ZenPkg provides signed repository metadata, dependency and conflict planning, verification, installation, upgrade, repair, rollback, removal and protected cache state.
 
-It can classify selected Windows, Linux, macOS, Xbox and PlayStation artifact families. Classification is not execution. General foreign-binary compatibility requires runtime providers that are not implemented in ZenovOS 0.1.1.
+It can classify selected Windows, Linux, macOS, Xbox and PlayStation artifact families. ZenPkg also performs exact, fail-closed structural preflight for Linux/i386 ELF, Windows PE32, PS-X EXE, PlayStation 2 R5900 ELF and Original Xbox XBE. Structural validity is not signature trust and is not execution. The one implemented foreign execution slice is a static Linux/i386 console sandbox:
+
+```text
+pkg compat status
+pkg compat check /downloads/program.exe
+pkg compat run-linux /samples/linux-i386-hello.elf
+```
+
+The preflight command never executes the inspected file and reports foreign trust as unverified. The Linux sandbox supports only i386 `write` to stdout/stderr plus `exit` and `exit_group`; unknown syscalls fail with `-ENOSYS`. General Linux, Windows, macOS and console compatibility still requires runtime providers that are not implemented. See [compatibility preflight](docs/PACKAGE_COMPATIBILITY_PREFLIGHT_0.1.1.md) and [Linux/i386 minimal compatibility runtime](docs/LINUX_I386_COMPAT_0.1.1.md).
 
 ## Security model
 
@@ -198,6 +207,7 @@ ZenovOS remains experimental. Current limitations include:
 - no networking, audio, Bluetooth, battery service or multi-monitor stack;
 - no guest additions or accelerated 3D;
 - no dynamic linking or POSIX layer;
+- only the documented minimal Linux/i386 console syscall subset;
 - no physical-hardware installer.
 
 ## Documentation
@@ -209,6 +219,7 @@ ZenovOS remains experimental. Current limitations include:
 - [Application ABI](docs/ABI_0.1.1.md)
 - [Security model](docs/SECURITY_MODEL_0.1.1.md)
 - [Native package manager](docs/NATIVE_PACKAGE_MANAGER_0.1.1.md)
+- [Linux/i386 minimal compatibility runtime](docs/LINUX_I386_COMPAT_0.1.1.md)
 - [Documentation index](docs/INDEX.md)
 
 Older VM1–VM4 releases remain immutable historical snapshots. `v0.1.1-live1` is the current one-file distribution.

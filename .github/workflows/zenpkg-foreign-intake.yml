@@ -6,8 +6,15 @@ on:
       - main
     paths:
       - 'GNUmakefile'
+      - 'Makefile'
+      - 'zenpkg.mk'
       - 'tools/zenpkg/**'
+      - 'tools/zenovfs_builder.cpp'
       - 'tests/package_foreign_format_test.cpp'
+      - 'tests/package_compatibility_preflight_test.cpp'
+      - 'tests/linux_i386_abi_test.cpp'
+      - 'tests/linux_i386_elf_test.cpp'
+      - 'tests/zenpkg_data_image_retry_test.sh'
       - 'tests/zenpkg_foreign_test.sh'
       - 'tests/zenpkg_streaming_test.sh'
       - 'tests/zenpkg_native_snapshot_test.cpp'
@@ -15,16 +22,30 @@ on:
       - 'tests/qemu_zenpkg_foreign.sh'
       - 'kernel/parts/package_foreign_format.inc'
       - 'kernel/parts/package_foreign_policy.inc'
+      - 'kernel/parts/package_compatibility_preflight.inc'
+      - 'kernel/parts/linux_i386_abi.inc'
+      - 'kernel/parts/linux_i386_elf.inc'
+      - 'kernel/parts/process_linux_i386.inc'
       - 'kernel/parts/package_manager.inc'
       - 'kernel/parts/package_manager/**'
+      - 'user/linux_i386_hello.S'
+      - 'user/linux_i386_linker.ld'
+      - 'packages/universe/*linux-i386*'
       - '.github/workflows/zenpkg-foreign-intake.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'GNUmakefile'
+      - 'Makefile'
+      - 'zenpkg.mk'
       - 'tools/zenpkg/**'
+      - 'tools/zenovfs_builder.cpp'
       - 'tests/package_foreign_format_test.cpp'
+      - 'tests/package_compatibility_preflight_test.cpp'
+      - 'tests/linux_i386_abi_test.cpp'
+      - 'tests/linux_i386_elf_test.cpp'
+      - 'tests/zenpkg_data_image_retry_test.sh'
       - 'tests/zenpkg_foreign_test.sh'
       - 'tests/zenpkg_streaming_test.sh'
       - 'tests/zenpkg_native_snapshot_test.cpp'
@@ -32,8 +53,15 @@ on:
       - 'tests/qemu_zenpkg_foreign.sh'
       - 'kernel/parts/package_foreign_format.inc'
       - 'kernel/parts/package_foreign_policy.inc'
+      - 'kernel/parts/package_compatibility_preflight.inc'
+      - 'kernel/parts/linux_i386_abi.inc'
+      - 'kernel/parts/linux_i386_elf.inc'
+      - 'kernel/parts/process_linux_i386.inc'
       - 'kernel/parts/package_manager.inc'
       - 'kernel/parts/package_manager/**'
+      - 'user/linux_i386_hello.S'
+      - 'user/linux_i386_linker.ld'
+      - 'packages/universe/*linux-i386*'
       - '.github/workflows/zenpkg-foreign-intake.yml'
   merge_group:
     types:
@@ -73,8 +101,8 @@ jobs:
           test -z "$(git status --porcelain)"
           echo "tested-source-revision=$actual_revision"
 
-      - name: Install strict host toolchains
-        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang
+      - name: Install strict host and guest toolchains
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang qemu-system-x86
 
       - name: Validate shell harnesses
         run: |
@@ -82,6 +110,7 @@ jobs:
           bash -n tests/zenpkg_foreign_test.sh
           bash -n tests/zenpkg_streaming_test.sh
           bash -n tests/qemu_zenpkg_foreign.sh
+          bash -n tests/zenpkg_data_image_retry_test.sh
 
       - name: Build kernel and complete foreign intake regression
         run: |
@@ -101,6 +130,10 @@ jobs:
           grep -Fq 'ZENPKG_FOREIGN_TEST_OK' /tmp/zenpkg-foreign-check.log
           grep -Fq 'ZENPKG_STREAMING_TEST_OK' /tmp/zenpkg-foreign-check.log
           grep -Fq 'ZENPKG_NATIVE_SNAPSHOT_TEST_OK' /tmp/zenpkg-foreign-check.log
+          grep -Fq 'PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=33 truncations=4492 validators=5 runtime-ready=1 fail-closed=1' /tmp/zenpkg-foreign-check.log
+          grep -Fq 'LINUX_I386_ABI_TEST_OK syscalls=write,exit,exit_group fail_closed=1' /tmp/zenpkg-foreign-check.log
+          grep -Fq 'LINUX_I386_ELF_TEST_OK bias=0x08048000 negatives=wx,machine,dynamic,entry' /tmp/zenpkg-foreign-check.log
+          grep -Fq 'ZENPKG_DATA_RETRY_TEST_OK' /tmp/zenpkg-foreign-check.log
           test -s build/kernel.map
           kernel_end="$(awk '$2 == "__kernel_end" {print $1}' build/kernel.map | tail -n 1)"
           [[ "$kernel_end" =~ ^0x[0-9a-fA-F]+$ ]]
@@ -126,6 +159,12 @@ jobs:
               -o build/clang-sanitized/zenpkg-sha256-test
             clang++ "${flags[@]}" tests/package_foreign_format_test.cpp \
               -o build/clang-sanitized/package-foreign-format-test
+            clang++ "${flags[@]}" tests/package_compatibility_preflight_test.cpp \
+              -o build/clang-sanitized/package-compatibility-preflight-test
+            clang++ "${flags[@]}" tests/linux_i386_abi_test.cpp \
+              -o build/clang-sanitized/linux-i386-abi-test
+            clang++ "${flags[@]}" tests/linux_i386_elf_test.cpp \
+              -o build/clang-sanitized/linux-i386-elf-test
             clang++ "${flags[@]}" tests/zenpkg_native_snapshot_test.cpp \
               -o build/clang-sanitized/zenpkg-native-snapshot-test
             clang++ "${flags[@]}" tools/zenpkg/main.cpp \
@@ -141,6 +180,12 @@ jobs:
             2>&1 | tee build/ci-logs/sha256-sanitized.log
           build/clang-sanitized/package-foreign-format-test \
             2>&1 | tee build/ci-logs/foreign-format-sanitized.log
+          build/clang-sanitized/package-compatibility-preflight-test \
+            2>&1 | tee build/ci-logs/compat-preflight-sanitized.log
+          build/clang-sanitized/linux-i386-abi-test \
+            2>&1 | tee build/ci-logs/linux-i386-abi-sanitized.log
+          build/clang-sanitized/linux-i386-elf-test build/LINUX-I386-HELLO.ELF \
+            2>&1 | tee build/ci-logs/linux-i386-elf-sanitized.log
           build/clang-sanitized/zenpkg-native-snapshot-test \
             build/HELLO.ZEX build/clang-sanitized/native-snapshot \
             2>&1 | tee build/ci-logs/native-snapshot-sanitized.log
@@ -152,9 +197,27 @@ jobs:
             2>&1 | tee build/ci-logs/streaming-sanitized.log
           grep -Fqx 'ZENPKG_SHA256_TEST_OK vectors=3 streaming=1 explicit_mod32=1' build/ci-logs/sha256-sanitized.log
           grep -Fq 'PACKAGE_FOREIGN_FORMAT_TEST_OK' build/ci-logs/foreign-format-sanitized.log
+          grep -Fq 'PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=33 truncations=4492 validators=5 runtime-ready=1 fail-closed=1' build/ci-logs/compat-preflight-sanitized.log
+          grep -Fq 'LINUX_I386_ABI_TEST_OK' build/ci-logs/linux-i386-abi-sanitized.log
+          grep -Fq 'LINUX_I386_ELF_TEST_OK' build/ci-logs/linux-i386-elf-sanitized.log
           grep -Fq 'ZENPKG_NATIVE_SNAPSHOT_TEST_OK' build/ci-logs/native-snapshot-sanitized.log
           grep -Fq 'ZENPKG_FOREIGN_TEST_OK' build/ci-logs/foreign-intake-sanitized.log
           grep -Fq 'ZENPKG_STREAMING_TEST_OK' build/ci-logs/streaming-sanitized.log
+
+      - name: Prove package preflight and Linux i386 sandbox in QEMU
+        run: |
+          set -euo pipefail
+          if ! make zenpkg-foreign-qemu > /tmp/zenpkg-foreign-qemu.log 2>&1; then
+            tail -n 360 /tmp/zenpkg-foreign-qemu.log
+            mkdir -p build/ci-logs
+            cp /tmp/zenpkg-foreign-qemu.log build/ci-logs/foreign-qemu.log
+            exit 1
+          fi
+          cp /tmp/zenpkg-foreign-qemu.log build/ci-logs/foreign-qemu.log
+          tail -n 200 /tmp/zenpkg-foreign-qemu.log
+          grep -Fq 'ZENPKG_FOREIGN_QEMU_OK formats=1 preflight=linux-i386 linux-i386=write+exit+enosys+sandbox probe=zenpkg install=1 run=1 fsck=1' build/qemu/zenpkg-foreign/summary.log
+          grep -Fq 'ZENPKG_COMPAT_READY validators=5 runtimes=1 fail-closed=1 antivirus-unchanged=1' build/qemu/zenpkg-foreign/serial.log
+          grep -Fq 'ZENPKG_COMPAT_PREFLIGHT_OK format=elf structural=1 runtime=1 trust=0 verdict=runnable-sandbox' build/qemu/zenpkg-foreign/serial.log
 
       - name: Upload foreign intake evidence
         if: always()
@@ -168,4 +231,5 @@ jobs:
             build/kernel.map
             build/KERNEL.BIN
             build/zenpkg-foreign-test/
+            build/qemu/zenpkg-foreign/
             build/clang-sanitized/

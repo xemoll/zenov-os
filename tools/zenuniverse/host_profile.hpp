@@ -32,6 +32,7 @@ const StringMap<HostProfile>& builtin_host_profiles() {
                 "x86",
                 "Current ZenovOS 0.1.1 BIOS/i686 single-foreground-process runtime substrate.",
                 {
+                    "abi.linux.i386.int80-minimal",
                     "abi.zenov.zex1",
                     "cpu.x86",
                     "graphics.framebuffer",
