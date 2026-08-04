@@ -112,6 +112,7 @@ bool sha256_self_test() { return security_guard::sha256_self_test(); }
 #include "parts/security_io.inc"
 #include "parts/storage_result_commands.inc"
 #include "parts/process_policy.inc"
+#include "parts/scheduler.inc"
 #include "parts/graphics.inc"
 #include "parts/mouse_regression.inc"
 #include "parts/input_v2.inc"
@@ -175,6 +176,7 @@ extern "C" void kernel_main() {
     if (!storage::fs_surface_contract_valid()) panic("Filesystem result surface contract failed.");
     serial::line("ZENOVFS_SURFACE_CONTRACT_OK version=1");
     process::init();
+    process::scheduler_init();
     if (!security_policy_transaction::recover_pending()) {
         panic("Persistent signed policy transaction recovery failed.");
     }

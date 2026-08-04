@@ -30,7 +30,7 @@ Every failure after the live object may have changed attempts to restore the exa
 
 ## Memory domain
 
-The shared rollback bytes are not part of low kernel BSS. They occupy the reserved supervisor-only physical range `0x00312000–0x00315FFF`, after the PMM bitmap and before the ring-3 base at `0x00400000`. Compile-time assertions reject overlap with adjacent fixed regions. The workspace is serialized by a `busy` guard and is wiped through volatile stores on release.
+The shared rollback bytes are not part of low kernel BSS. They occupy the reserved supervisor-only physical range `0x00312000–0x00315FFF`, after the PMM bitmap and before the Live-image workspaces and independently of the high ring-3 base at `0x40000000`. Compile-time assertions reject overlap with adjacent fixed regions. The workspace is serialized by a `busy` guard and is wiped through volatile stores on release.
 
 ## Verification
 

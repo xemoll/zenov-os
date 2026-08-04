@@ -52,6 +52,7 @@ send_text() {
       '-') echo "sendkey minus 10" ;;
       '_') echo "sendkey shift-minus 10" ;;
       '/') echo "sendkey slash 10" ;;
+      '&') echo "sendkey shift-7 10" ;;
       *) echo "qemu-smoke: unsupported test key: $char" >&2; return 1 ;;
     esac
     sleep 0.012
@@ -143,6 +144,14 @@ controller_first() {
   send_command "echo $long_payload"; wait_for_serial "$serial" "$LONG_INPUT_MARKER" || { echo quit; return 1; }
   send_command "write PERSIST.TXT PERSISTENCE_0_1_1_OK"; wait_for_count "$serial" "WRITE_OK" 2 || { echo quit; return 1; }
   send_command "run HELLO"; wait_for_serial "$serial" "HELLO_ZEX_0_1_1_OK" || { echo quit; return 1; }
+  send_command "run HELLO preempt-a & HELLO preempt-b"
+  wait_for_serial "$serial" "SCHED_BATCH_START tasks=2" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PREEMPT_A_START" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PREEMPT_B_START" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PREEMPT_A_DONE" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PREEMPT_B_DONE" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PREEMPTIVE_MULTITASKING_OK isolation=per-address-space" || { echo quit; return 1; }
+  awk '/PREEMPT_B_START/ {b=NR} /PREEMPT_A_DONE/ {a=NR} END {exit !(b && a && b < a)}' "$serial" || { echo quit; return 1; }
   send_command "run FILEIO.ELF"; wait_for_serial "$serial" "FILEIO_ELF_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
   prompt_count="$(grep -c "$PROMPT" "$serial" || true)"
   send_command "run FILEIO.ELF"

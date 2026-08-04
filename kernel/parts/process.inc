@@ -1,6 +1,6 @@
 namespace process {
-constexpr uintptr_t user_base = 0x00400000U;
-constexpr uint32_t user_limit = 0x00100000U;
+constexpr uintptr_t user_base = paging::user_virtual_base;
+constexpr uint32_t user_limit = paging::process_window_bytes;
 constexpr uint32_t stack_bytes = 16U * 1024U;
 constexpr uint32_t stack_base = user_limit - stack_bytes;
 constexpr uint32_t stack_top = user_limit - 16U;
@@ -9,6 +9,7 @@ constexpr uint32_t max_argument_bytes = 64U;
 
 constexpr uint32_t syscall_exit = 0, syscall_console_write = 1, syscall_ticks = 2, syscall_file_read = 3, syscall_file_write = 4;
 constexpr uint32_t syscall_file_stat = 5, syscall_version = 6, syscall_sync = 7, syscall_console_read = 8;
+constexpr uint32_t syscall_yield = 9, syscall_sleep = 10, syscall_getpid = 11;
 constexpr uint32_t error_invalid = 0xFFFFFFFFU, error_not_found = 0xFFFFFFFEU, error_no_space = 0xFFFFFFFDU;
 constexpr uint32_t error_io = 0xFFFFFFFCU, error_fault = 0xFFFFFFFBU, error_unsupported = 0xFFFFFFFAU, error_denied = 0xFFFFFFF9U;
 
@@ -31,6 +32,14 @@ struct [[gnu::packed]] Elf32Header {
 struct [[gnu::packed]] Elf32ProgramHeader { uint32_t type, offset, virtual_address, physical_address, file_size, memory_size, flags, alignment; };
 static_assert(sizeof(Elf32Header) == 52 && sizeof(Elf32ProgramHeader) == 32);
 struct [[gnu::packed]] UserFileInfo { uint32_t type, size, checksum; };
+struct ActiveCapabilityProfile {
+    bool valid = false;
+    uint32_t mask = 0U;
+    char path[48]{};
+    char read_scope[48]{};
+    char write_scope[48]{};
+    uint8_t digest[32]{};
+};
 struct SyscallFrame { uint32_t gs, fs, es, ds; uint32_t edi, esi, ebp, esp_dummy, ebx, edx, ecx, eax; uint32_t eip, cs, eflags, useresp, ss; };
 
 Tss kernel_tss{};
@@ -41,6 +50,14 @@ bool initialized = false, application_faulted = false;
 char current_application[48] = "<none>";
 char current_format[8] = "none";
 
+bool scheduler_active();
+uint32_t scheduler_syscall(SyscallFrame* frame);
+bool run_task_batch(char* input);
+
+void set_kernel_stack(uintptr_t stack_top_address) {
+    kernel_tss.esp0 = stack_top_address;
+    kernel_tss.ss0 = 0x10U;
+}
 void descriptor_set_tss(uintptr_t base, uint32_t limit) {
     gdt_tss[0] = static_cast<uint8_t>(limit); gdt_tss[1] = static_cast<uint8_t>(limit >> 8U); gdt_tss[2] = static_cast<uint8_t>(base);
     gdt_tss[3] = static_cast<uint8_t>(base >> 8U); gdt_tss[4] = static_cast<uint8_t>(base >> 16U); gdt_tss[5] = 0x89;
@@ -99,6 +116,10 @@ uint32_t read_console(uint8_t* output, uint32_t capacity) {
 extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
     if (!frame) return 1;
     const uint32_t number = frame->eax;
+    if (scheduler_active() && (number == syscall_exit || number == syscall_yield || number == syscall_sleep || number == syscall_getpid)) return scheduler_syscall(frame);
+    if (number == syscall_yield) { frame->eax = 0U; return 0U; }
+    if (number == syscall_sleep) { const uint32_t deadline = timer_ticks + frame->ebx; while (static_cast<int32_t>(timer_ticks - deadline) < 0) asm volatile("sti; hlt; cli"); frame->eax = 0U; return 0U; }
+    if (number == syscall_getpid) { frame->eax = 0U; return 0U; }
     if (number == syscall_exit) { last_exit_code = frame->ebx; serial::write("APP_EXIT code="); serial_u32(last_exit_code); serial::write("\r\n"); return 1; }
     if (number == syscall_console_write) {
         const uint8_t* text = user_bytes(frame->ebx, frame->ecx, false);
@@ -146,7 +167,7 @@ extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
 }
 
 void init() {
-    memset(&kernel_tss, 0, sizeof(kernel_tss)); kernel_tss.esp0 = reinterpret_cast<uintptr_t>(&__stack_top); kernel_tss.ss0 = 0x10;
+    memset(&kernel_tss, 0, sizeof(kernel_tss)); set_kernel_stack(reinterpret_cast<uintptr_t>(&__stack_top));
     kernel_tss.iomap_base = static_cast<uint16_t>(sizeof(Tss)); descriptor_set_tss(reinterpret_cast<uintptr_t>(&kernel_tss), sizeof(Tss) - 1U);
     const uint16_t selector = 0x28; asm volatile("ltr %w0" : : "r"(selector));
     application_buffer = static_cast<uint8_t*>(heap::allocate(64U * 1024U, 16)); initialized = application_buffer && paging::enabled;
@@ -285,6 +306,16 @@ bool build_initial_stack(char* arguments[max_arguments], uint32_t count, uint32_
 }
 bool run(char* input) {
     if (!initialized || !storage::ready() || !input) return false;
+    bool quoted = false;
+    char quote = 0;
+    for (char* cursor = input; *cursor; ++cursor) {
+        if ((*cursor == '\'' || *cursor == '"')) {
+            if (!quoted) { quoted = true; quote = *cursor; }
+            else if (*cursor == quote) { quoted = false; quote = 0; }
+        } else if (*cursor == '&' && !quoted) {
+            return run_task_batch(input);
+        }
+    }
     char* arguments[max_arguments]{};
     const uint32_t argument_count = parse_arguments(input, arguments);
     if (!argument_count) return false;

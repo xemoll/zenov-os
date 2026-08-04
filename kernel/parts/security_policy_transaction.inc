@@ -51,7 +51,7 @@ uint8_t* rollback_data = host_rollback_data;
 constexpr uintptr_t workspace_address = supervisor_layout::policy_transaction;
 static_assert(workspace_bytes == supervisor_layout::policy_transaction_bytes);
 static_assert(workspace_address >= supervisor_layout::pmm_bitmap + supervisor_layout::pmm_bitmap_bytes);
-static_assert(workspace_address + workspace_bytes <= supervisor_layout::user_base);
+static_assert(workspace_address + workspace_bytes <= supervisor_layout::live_image_workspace);
 uint8_t* rollback_data = reinterpret_cast<uint8_t*>(workspace_address);
 #endif
 uint8_t version_backup[version_backup_bytes]{};

@@ -47,7 +47,7 @@ ZVRT1 therefore does not place its 4 KiB active/candidate record workspace in lo
 - antimalware scan workspace: `0x00300000–0x0030FFFF`;
 - ZVRT records: `0x00310000–0x00310FFF`;
 - PMM bitmap: `0x00311000–0x00311FFF`;
-- ring-3 base: `0x00400000`.
+- ring-3 base: `0x40000000`.
 
 The existing VGA linker assertion remains unchanged and is part of the strict build gate.
 

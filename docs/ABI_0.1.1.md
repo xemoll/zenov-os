@@ -2,7 +2,7 @@
 
 ## Address model
 
-Applications execute in ring 3 with 32-bit code and data segments whose linear base is `0x00400000`. Application-visible pointers are offsets inside a 1 MiB window. Only pages required by the current executable and its 16 KiB stack are present. The complete physical window is scrubbed before first use and after every application exit or recoverable fault.
+Applications execute in ring 3 with 32-bit code and data segments whose linear base is `0x40000000`. Application-visible pointers are offsets inside a 1 MiB window. Only pages required by the current executable and its 16 KiB stack are present. Scheduled tasks receive separate PMM-backed page tables and zeroed physical frames; the compatibility foreground window is scrubbed at launch boundaries.
 
 ## Initial stack
 
@@ -30,6 +30,9 @@ Applications use `INT 0x80`; `EAX` contains the number and result, while `EBX`, 
 | 6 | `get_version` | `EBX=output`, `ECX=capacity` | string length |
 | 7 | `sync` | none | zero |
 | 8 | `read_console` | `EBX=output`, `ECX=capacity` | bytes read |
+| 9 | `yield` | none | zero |
+| 10 | `sleep` | `EBX=ticks` | zero |
+| 11 | `getpid` | none | PID |
 
 The syscall table is an ABI surface, not an automatic grant. After final-read trust appraisal, each bundled application receives a per-application capability mask from the active RSA-PSS-signed ZCAP1 policy. File operations additionally require an exact normalized path scope. See [`SYSCALL_CAPABILITIES_0.1.1.md`](SYSCALL_CAPABILITIES_0.1.1.md).
 
@@ -58,7 +61,7 @@ All user ranges are checked for overflow, mapping presence and required write pe
 
 The active syscall profile is cleared before every launch attempt. A profile is installed only after ZGDB2, executable-policy, path-and-SHA-256 trust and persistent execution-audit checks succeed on the bytes consumed by the loader. It is cleared again after normal exit, recoverable fault or load failure.
 
-There is one active profile because ZenovOS 0.1.1 has one foreground process. Authority is not inherited from the preceding process and is not derived from executable format alone.
+Each scheduled task stores its own signed capability snapshot. The kernel restores that authority together with the address space on every context switch; authority is never inherited from a preceding task or derived from executable format alone.
 
 ## Executable formats
 
@@ -68,4 +71,4 @@ The ELF loader accepts static little-endian ELF32/i386 with a valid entry in an 
 
 ## Fault contract
 
-A ring-3 exception terminates the foreground application, records its identity, vector, error code and EIP, and returns to the shell. Page faults additionally record CR2 and present/write/user bits. Kernel exceptions remain fatal. The common exit/fault path scrubs the reused process window and clears syscall authority before returning.
+A ring-3 exception terminates only the faulting scheduled task, records its identity, vector, error code and EIP, and dispatches another ready task when available. Page faults additionally record CR2 and present/write/user bits. Kernel exceptions remain fatal. The common exit/fault path scrubs the reused process window and clears syscall authority before returning.

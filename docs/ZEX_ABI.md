@@ -9,12 +9,12 @@ ring 3. Neither format provides Windows PE or DOS MZ compatibility.
 - privilege: ring 3
 - code selector: `0x1B`
 - data and stack selector: `0x23`
-- linear user window: `0x00400000` through `0x004FFFFF`
+- linear user window: `0x40000000` through `0x400FFFFF`
 - segment-relative address range: `0x00000000` through `0x000FFFFF`
 - initial stack pointer: `0x000FF000`
 - system-call gate: `INT 0x80`
 - memory pages: present, writable and user-accessible within the mapped window
-- scheduling: one foreground application at a time
+- scheduling: PIT-preempted priority/round-robin tasks in foreground batches
 
 Application pointers passed in registers are segment-relative offsets. The kernel
 validates each complete range before translating it to the linear user window.
@@ -70,6 +70,10 @@ System calls use `EAX` for the call number. Return values are written to `EAX`.
 | 5 | `file_stat` | `EBX` = path, `ECX` = `UserFileInfo` output | `0` on success |
 | 6 | `system_version` | `EBX` = output, `ECX` = capacity | version string length |
 | 7 | `sync` | none | `0` after metadata flush |
+| 8 | `read_console` | `EBX` = output, `ECX` = capacity | bytes read |
+| 9 | `yield` | none | `0` |
+| 10 | `sleep` | `EBX` = PIT ticks | `0` |
+| 11 | `getpid` | none | task PID |
 
 `file_stat` writes:
 
