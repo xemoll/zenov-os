@@ -48,7 +48,7 @@ static_assert(kernel_static_limit == user_base);
 static_assert(user_base + 0x00100000U <= zmid_workspace_physical_a);
 static_assert(zmid_workspace_physical_a + zmid_workspace_bytes == zmid_workspace_physical_b);
 static_assert(zmid_workspace_physical_b + zmid_workspace_bytes == pmm_reserved_end);
-static_assert(zmid_workspace_virtual_a == paging::table_span * 2U);
+static_assert(zmid_workspace_virtual_a == 0x00800000U);
 static_assert(zmid_workspace_virtual_a + zmid_workspace_bytes == zmid_workspace_virtual_b);
 static_assert(zmid_workspace_virtual_b + zmid_workspace_bytes == zmid_workspace_virtual_end);
 } // namespace supervisor_layout
