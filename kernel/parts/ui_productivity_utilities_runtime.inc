@@ -6,11 +6,16 @@ void background_tick() {
     if (current_tick - productivity_background_last_tick < 100U) return;
     productivity_background_last_tick = current_tick;
     const bool clock_changed = productivity_clock_v2_background_tick();
+    bool clock_live = productivity_overlay_open && productivity_app == ProductivityApp::clock && productivity_stopwatch_running;
+    if (productivity_overlay_open && productivity_app == ProductivityApp::clock) {
+        for (uint8_t index = 0U; index < productivity_clock_v2_timer_capacity; ++index)
+            if (productivity_clock_v2_timers[index].running) clock_live = true;
+    }
     const bool reminder_changed = productivity_reminders_check_due();
-    if (!clock_changed && !reminder_changed) return;
+    if (!clock_changed && !clock_live && !reminder_changed) return;
     render_scene();
     present_full();
-    if (clock_changed) serial::line("UI_BACKGROUND_CLOCK_REFRESH_OK");
+    if (clock_changed || clock_live) serial::line("UI_BACKGROUND_CLOCK_REFRESH_OK");
     if (reminder_changed) serial::line("UI_BACKGROUND_REMINDER_REFRESH_OK");
 }
 
