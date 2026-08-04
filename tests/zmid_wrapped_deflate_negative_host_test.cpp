@@ -1,3 +1,5 @@
+#include "zmid_content_workspace_host_shim.hpp"
+
 #define FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
 #include "zmid_content_inspection_host_test.cpp"
 #undef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
