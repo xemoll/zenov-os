@@ -36,8 +36,31 @@ void cache_store(const uint8_t digest[security_guard::sha256_bytes],
     }
 }
 
+void serial_u32_value(uint32_t value) {
+    char digits[10]{};
+    uint32_t count = 0U;
+    do {
+        digits[count++] = static_cast<char>('0' + value % 10U);
+        value /= 10U;
+    } while (value && count < sizeof(digits));
+    while (count) serial::put(digits[--count]);
+}
+
+void print_workspace_failure() {
+    serial::write("ZMID_CONTENT_WORKSPACE_FAILED reason=");
+    serial::write(heap::failure_name());
+    serial::write(" index=");
+    serial_u32_value(heap::failure_index);
+    serial::write(" actual=");
+    serial_u32_value(heap::failure_actual);
+    serial::write(" expected=");
+    serial_u32_value(heap::failure_expected);
+    serial::line("");
+}
+
 bool self_test() {
     if (!ensure_workspace()) {
+        print_workspace_failure();
         serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=workspace-map");
         return false;
     }
