@@ -8,6 +8,7 @@ url='https://github.com/xemoll/zenov-os'
 license=('BSD-2-Clause')
 depends=('qt6-base')
 makedepends=('cmake' 'ninja' 'git')
+options=('!debug')
 source=("git+https://github.com/xemoll/zenov-os.git")
 sha256sums=('SKIP')
 
