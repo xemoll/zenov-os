@@ -13,11 +13,15 @@ KERNEL_FLAGS := $(filter-out -O2,$(KERNEL_FLAGS)) -Os
 ZENPKG_FOREIGN_FORMAT_TEST := $(BUILD)/package-foreign-format-test
 ZENPKG_NATIVE_SNAPSHOT_TEST := $(BUILD)/zenpkg-native-snapshot-test
 ZENPKG_SHA256_TEST := $(BUILD)/zenpkg-sha256-test
+LINUX_I386_ABI_TEST := $(BUILD)/linux-i386-abi-test
+LINUX_I386_ELF_TEST := $(BUILD)/linux-i386-elf-test
+ZENPKG_COMPAT_PREFLIGHT_TEST := $(BUILD)/package-compatibility-preflight-test
 ZENPKG_FOREIGN_CHECK_OUT := $(BUILD)/zenpkg-foreign-test
 ZENPKG_FOREIGN_CHECK_STAMP := $(ZENPKG_FOREIGN_CHECK_OUT)/.stamp
 ZENPKG_FOREIGN_QEMU_OUT := $(BUILD)/qemu/zenpkg-foreign
 ZENPKG_FOREIGN_QEMU_STAMP := $(ZENPKG_FOREIGN_QEMU_OUT)/.stamp
 ZENPKG_FOREIGN_FORMAT_SRC := kernel/parts/package_foreign_format.inc kernel/parts/package_foreign_policy.inc
+ZENPKG_COMPAT_PREFLIGHT_SRC := kernel/parts/package_compatibility_preflight.inc kernel/parts/linux_i386_elf.inc
 ZENPKG_FOREIGN_HOST_SRC := tools/zenpkg/foreign.hpp tools/zenpkg/foreign_import.hpp tools/zenpkg/foreign_probe.hpp
 ZENPKG_SHA256_SRC := tools/zenpkg/sha256.hpp tools/zenpkg/common.hpp
 
@@ -36,7 +40,7 @@ TPM2_SRC := kernel/parts/tpm2_protocol.inc kernel/parts/tpm2_tis.inc kernel/part
 
 $(ZENPKG_CHECK_STAMP): $(BUILD)/zenpkg-manifest.json $(ZENPKG_FOREIGN_CHECK_STAMP)
 $(BUILD)/zenpkg: $(ZENPKG_FOREIGN_FORMAT_SRC) $(ZENPKG_FOREIGN_HOST_SRC) $(ZENPKG_SHA256_SRC)
-$(BUILD)/kernel.o: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc $(POLICY_JOURNAL_SRC) $(TPM2_SRC)
+$(BUILD)/kernel.o: $(ZENPKG_FOREIGN_FORMAT_SRC) $(ZENPKG_COMPAT_PREFLIGHT_SRC) kernel/parts/package_manager/formats.inc kernel/parts/package_manager/commands_compat.inc $(POLICY_JOURNAL_SRC) $(TPM2_SRC)
 $(BUILD)/build-manifest.json: $(ZENPKG_FOREIGN_FORMAT_SRC) kernel/parts/package_manager/formats.inc $(POLICY_JOURNAL_SRC) $(TPM2_SRC)
 
 ATA_POLICY_TEST := $(BUILD)/storage-ata-policy-test
@@ -62,10 +66,22 @@ $(ZENPKG_NATIVE_SNAPSHOT_TEST): tests/zenpkg_native_snapshot_test.cpp $(ZENPKG_F
 $(ZENPKG_SHA256_TEST): tests/zenpkg_sha256_test.cpp $(ZENPKG_SHA256_SRC) | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
-$(ZENPKG_FOREIGN_CHECK_STAMP): $(ZENPKG_FOREIGN_FORMAT_TEST) $(ZENPKG_NATIVE_SNAPSHOT_TEST) $(ZENPKG_SHA256_TEST) $(BUILD)/zenpkg $(BUILD)/HELLO.ZEX tests/zenpkg_foreign_test.sh tests/zenpkg_streaming_test.sh $(ZENPKG_FOREIGN_HOST_SRC) $(ZENPKG_FOREIGN_FORMAT_SRC) $(ZENPKG_SHA256_SRC)
+$(LINUX_I386_ABI_TEST): tests/linux_i386_abi_test.cpp kernel/parts/linux_i386_abi.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+$(LINUX_I386_ELF_TEST): tests/linux_i386_elf_test.cpp kernel/parts/linux_i386_elf.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+$(ZENPKG_COMPAT_PREFLIGHT_TEST): tests/package_compatibility_preflight_test.cpp $(ZENPKG_FOREIGN_FORMAT_SRC) $(ZENPKG_COMPAT_PREFLIGHT_SRC) | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
+$(ZENPKG_FOREIGN_CHECK_STAMP): $(ZENPKG_FOREIGN_FORMAT_TEST) $(ZENPKG_NATIVE_SNAPSHOT_TEST) $(ZENPKG_SHA256_TEST) $(LINUX_I386_ABI_TEST) $(LINUX_I386_ELF_TEST) $(ZENPKG_COMPAT_PREFLIGHT_TEST) $(BUILD)/LINUX-I386-HELLO.ELF $(BUILD)/zenpkg $(BUILD)/HELLO.ZEX tests/zenpkg_foreign_test.sh tests/zenpkg_streaming_test.sh $(ZENPKG_FOREIGN_HOST_SRC) $(ZENPKG_FOREIGN_FORMAT_SRC) $(ZENPKG_COMPAT_PREFLIGHT_SRC) $(ZENPKG_SHA256_SRC)
 	@rm -rf $(ZENPKG_FOREIGN_CHECK_OUT)
 	@mkdir -p $(ZENPKG_FOREIGN_CHECK_OUT)
 	$(ZENPKG_SHA256_TEST)
+	$(LINUX_I386_ABI_TEST)
+	$(LINUX_I386_ELF_TEST) $(BUILD)/LINUX-I386-HELLO.ELF
+	$(ZENPKG_COMPAT_PREFLIGHT_TEST)
 	$(ZENPKG_FOREIGN_FORMAT_TEST)
 	$(ZENPKG_NATIVE_SNAPSHOT_TEST) $(BUILD)/HELLO.ZEX $(ZENPKG_FOREIGN_CHECK_OUT)/snapshot
 	bash tests/zenpkg_foreign_test.sh $(BUILD)/zenpkg $(BUILD)/HELLO.ZEX $(ZENPKG_FOREIGN_CHECK_OUT)
@@ -198,3 +214,18 @@ $(BLOCK_STATUS_QEMU_STAMP): all tests/qemu_block_status.sh $(BUILD)/zenovfs-veri
 block-status-qemu: $(BLOCK_STATUS_QEMU_STAMP)
 
 include fs_surface.mk
+
+SCHEDULER_POLICY_TEST := $(BUILD)/scheduler-policy-test
+$(SCHEDULER_POLICY_TEST): tests/scheduler_policy_test.cpp kernel/parts/scheduler_policy.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+	$@
+check: $(SCHEDULER_POLICY_TEST)
+
+SCHEDULER_QEMU_OUT := $(BUILD)/qemu/scheduler
+SCHEDULER_QEMU_STAMP := $(SCHEDULER_QEMU_OUT)/.stamp
+$(SCHEDULER_QEMU_STAMP): all tests/qemu_scheduler.sh
+	@rm -rf $(SCHEDULER_QEMU_OUT)
+	@mkdir -p $(SCHEDULER_QEMU_OUT)
+	bash tests/qemu_scheduler.sh $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(SCHEDULER_QEMU_OUT)
+	@touch $@
+scheduler-qemu: $(SCHEDULER_QEMU_STAMP)

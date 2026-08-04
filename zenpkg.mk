@@ -13,6 +13,7 @@ ZENREPO_METADATA := \
   $(BUILD)/zenrepo-metadata/snapshot.zrm \
   $(BUILD)/zenrepo-metadata/timestamp.zrm
 ZENPKG_DATA_STAMP := $(BUILD)/zenpkg-data.stamp
+ZENPKG_DATA_STAGE := $(BUILD)/.zenov-data.packaging.tmp
 ZENPKG_CHECK_STAMP := $(BUILD)/zenpkg-check.stamp
 ZENPKG_QEMU_STAMP := $(BUILD)/qemu/zenpkg-qemu.stamp
 ZENPKG_TRANSPORT_QEMU_STAMP := $(BUILD)/qemu/zenpkg-transport-qemu.stamp
@@ -68,10 +69,18 @@ $(BUILD)/hello-native-0.2.0.zpk: packages/examples/hello-native-0.2.0.zpkgmanife
 $(BUILD)/hello-native-0.3.0.zpk: packages/examples/hello-native-0.3.0.zpkgmanifest $(BUILD)/HELLO.ZEX $(BUILD)/zenpkg
 	$(BUILD)/zenpkg pack --manifest $< --payload $(BUILD)/HELLO.ZEX --output $@
 
-$(ZENPKG_DATA_STAMP): $(BUILD)/zenov-data.img $(ZENPKG_PACKAGES) $(ZENREPO_METADATA) $(BUILD)/zenovfs-package-seed $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-audit-verify
-	$(BUILD)/zenovfs-package-seed $(BUILD)/zenov-data.img $(ZENPKG_PACKAGES) $(ZENREPO_METADATA)
-	$(BUILD)/zenovfs-verify $(BUILD)/zenov-data.img
-	$(BUILD)/zenovfs-audit-verify $(BUILD)/zenov-data.img
+$(BUILD)/zenov-data.img: $(ZENOV_DATA_BASE) $(ZENPKG_PACKAGES) $(ZENREPO_METADATA) $(BUILD)/zenovfs-package-seed $(BUILD)/zenovfs-verify $(BUILD)/zenovfs-audit-verify | $(BUILD)
+	@set -e; \
+	 stage='$(ZENPKG_DATA_STAGE)'; \
+	 trap 'rm -f "$$stage"' EXIT; \
+	 cp '$(ZENOV_DATA_BASE)' "$$stage"; \
+	 $(BUILD)/zenovfs-package-seed "$$stage" $(ZENPKG_PACKAGES) $(ZENREPO_METADATA); \
+	 $(BUILD)/zenovfs-verify "$$stage"; \
+	 $(BUILD)/zenovfs-audit-verify "$$stage"; \
+	 mv "$$stage" '$@'; \
+	 trap - EXIT
+
+$(ZENPKG_DATA_STAMP): $(BUILD)/zenov-data.img
 	@touch $@
 
 $(BUILD)/zenpkg-manifest.json: $(ZENPKG_PACKAGES) $(ZENREPO_METADATA) $(ZENPKG_DATA_STAMP) | $(BUILD)
@@ -111,6 +120,7 @@ $(ZENPKG_CHECK_STAMP): $(BUILD)/package-repository-kernel-test $(BUILD)/package-
 	@touch $@
 
 zenpkg-check: $(ZENPKG_CHECK_STAMP)
+	bash tests/zenpkg_data_image_retry_test.sh '$(MAKE)' '$(BUILD)'
 
 $(ZENPKG_QEMU_STAMP): all tests/qemu_zenpkg.sh
 	@mkdir -p $(BUILD)/qemu/zenpkg

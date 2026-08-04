@@ -2,13 +2,16 @@
 
 ZenovOS 0.1.1 contains a bounded transactional manager for native ZEX1 and static ELF32/i386 applications. Container integrity, repository authorization, executable appraisal and syscall authority are separate gates; no successful gate bypasses another.
 
-Foreign intake is deliberately separate from native installation. ZenPkg identifies historical and current Windows, Linux, macOS, Xbox and PlayStation package, executable and media families, but identification does not make their binaries executable on ZenovOS.
+Foreign intake is deliberately separate from native installation. ZenPkg identifies historical and current Windows, Linux, macOS, Xbox and PlayStation package, executable and media families, but identification does not make their binaries executable on ZenovOS. The only foreign execution path is the separately constrained minimal Linux/i386 console sandbox.
 
 ## Shell commands
 
 ```text
 pkg status
 pkg formats
+pkg compat status
+pkg compat check <file>
+pkg compat run-linux <file> [arguments]
 pkg probe <file>
 pkg list
 pkg search <query>
@@ -48,6 +51,10 @@ pkg repo refresh
 
 Probe is read-only. It never runs setup directives, package scripts, custom actions, firmware payloads or title code. It never decrypts protected content, changes package state or grants execution authority.
 
+`pkg compat check` goes beyond signature classification. It applies a format-specific bounded structural validator to Linux/i386 ELF, Windows PE32, PS-X EXE, PlayStation 2 R5900 ELF or Original Xbox XBE. Its result separates recognition, structural validity, foreign signature trust and runtime availability. A structurally valid foreign file remains `inspect-only` unless an implemented sandbox exists; raw foreign trust is never inferred from format bytes.
+
+`pkg compat run-linux` is not a probe or install shortcut. It accepts only the [documented static Linux/i386 subset](LINUX_I386_COMPAT_0.1.1.md) from `/samples` or `/downloads` and activates a compiled console-only capability mask.
+
 ## Host intake commands
 
 ```text
@@ -69,6 +76,8 @@ zenpkg import-native FILE \
 - a little-endian ELF32/i386 `ET_EXEC` image with no dynamic interpreter or dynamic segment.
 
 Native import does not perform a path-based preflight followed by a second source read. It opens the source once, determines its size, rejects inputs larger than 64 KiB before allocating the payload buffer, reads one exact bounded snapshot and rejects truncation, growth or I/O failure. Classification, snapshot SHA-256 binding, loader validation and package construction all consume that same byte vector. The emitted package is re-read and its payload digest must equal the validated snapshot digest; a mismatch removes the output and fails closed.
+
+The offline repository data image is also assembled transactionally. Package and metadata seeding happens on a fresh staging copy of the verified base ZenovFS image. Verification and audit validation complete before an atomic rename publishes `zenov-data.img`; interruption removes the staging file and a missing build stamp can be reconstructed without reseeding an already populated image.
 
 ELF import rejects `PT_INTERP`, `PT_DYNAMIC`, W+X load segments, overlapping mappings, conflicting page permissions, invalid entrypoints, unsupported architectures and out-of-range files. ZEX1 import rechecks the complete header, image length, stack/BSS constraints and checksum.
 
@@ -172,7 +181,8 @@ The expanded foreign-intake suite adds:
 - eight native-snapshot invariants covering digest binding, source-path independence, tamper rejection without output and pre-allocation rejection of a 65,537-byte input;
 - false-positive regressions for bare MZ, Java `CAFEBABE` and generic MIPS misclassification;
 - ASan/UBSan execution of the classifier, complete host intake suite and native-snapshot regression;
-- a QEMU lifecycle proving `pkg formats`, `pkg probe`, signed installation, execution and ZenovFS `fsck`.
+- exact Linux/i386 syscall and ELF-policy host tests, including fail-closed negative vectors;
+- a QEMU lifecycle proving the minimal Linux/i386 sandbox plus `pkg formats`, `pkg probe`, signed installation, execution and ZenovFS `fsck`.
 
 Expected evidence markers:
 
@@ -180,8 +190,10 @@ Expected evidence markers:
 PACKAGE_FOREIGN_FORMAT_TEST_OK cases=46 generations=legacy-current
 ZENPKG_FOREIGN_TEST_OK probes=39 native-import=zex1,elf32 deterministic=2 rejection=7 generations=legacy-current streaming=1
 ZENPKG_STREAMING_TEST_OK cases=2 hash=full probe=head65536+tail512 overlap=none
-ZENPKG_NATIVE_SNAPSHOT_TEST_OK cases=8 bounded=1 digest=1 path-independent=1
-ZENPKG_FOREIGN_QEMU_OK formats=1 probe=zenpkg install=1 run=1 fsck=1
+ZENPKG_NATIVE_SNAPSHOT_TEST_OK cases=11 bounded=1 digest=1 path-independent=1 checksum=fnv1a32
+LINUX_I386_ABI_TEST_OK syscalls=write,exit,exit_group fail_closed=1
+LINUX_I386_ELF_TEST_OK bias=0x08048000 negatives=wx,machine,dynamic,entry
+ZENPKG_FOREIGN_QEMU_OK formats=1 linux-i386=write+exit+enosys+sandbox probe=zenpkg install=1 run=1 fsck=1
 ```
 
 ## Explicit limits

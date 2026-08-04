@@ -2,8 +2,16 @@ extern "C" void syscall_entry();
 extern "C" void user_abort_entry();
 extern "C" void isr44();
 namespace paging { uintptr_t fault_address(); }
-namespace process { void record_user_fault(uint32_t vector, uint32_t error, uint32_t eip, uintptr_t address); }
-namespace graphics { void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons); }
+struct InterruptFrame;
+namespace process {
+void record_user_fault(uint32_t vector, uint32_t error, uint32_t eip, uintptr_t address);
+uint32_t timer_interrupt(InterruptFrame* frame);
+uint32_t user_exception(InterruptFrame* frame);
+}
+namespace graphics {
+void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons);
+void background_tick();
+}
 
 struct [[gnu::packed]] BootInfo { uint32_t magic; uint8_t drive; uint8_t e820_count; uint16_t reserved; };
 struct [[gnu::packed]] E820Entry { uint32_t base_low, base_high, length_low, length_high, type, attributes; };
@@ -45,7 +53,18 @@ volatile uint16_t key_queue[key_queue_capacity]; volatile uint32_t key_head = 0,
 bool shift_pressed = false, caps_lock = false, extended_scancode = false;
 void key_push(uint16_t key) { const uint32_t next = (key_head + 1) % key_queue_capacity; if (next != key_tail) { key_queue[key_head] = key; key_head = next; } }
 uint16_t key_pop_blocking() {
-    for (;;) { disable_interrupts(); if (key_tail != key_head) { const uint16_t key = key_queue[key_tail]; key_tail = (key_tail + 1) % key_queue_capacity; enable_interrupts(); return key; } asm volatile("sti; hlt; cli"); }
+    for (;;) {
+        disable_interrupts();
+        if (key_tail != key_head) {
+            const uint16_t key = key_queue[key_tail];
+            key_tail = (key_tail + 1) % key_queue_capacity;
+            enable_interrupts();
+            return key;
+        }
+        asm volatile("sti; hlt; cli");
+        enable_interrupts();
+        graphics::background_tick();
+    }
 }
 char key_ascii(uint8_t code, bool shifted) {
     switch (code) {
@@ -132,14 +151,10 @@ struct InterruptFrame {
     console::line("System halted. Diagnostic output is available on COM1."); halt_forever();
 }
 extern "C" uint32_t interrupt_dispatch(InterruptFrame* frame) {
-    if (frame->vector == 32) { ++timer_ticks; pic_eoi(0); return 0; }
+    if (frame->vector == 32) { ++timer_ticks; const uint32_t action = process::timer_interrupt(frame); pic_eoi(0); return action; }
     if (frame->vector == 33) { keyboard_scancode(in8(0x60)); pic_eoi(1); return 0; }
     if (frame->vector == 44) { mouse_byte(in8(0x60)); pic_eoi(12); return 0; }
-    if ((frame->cs & 3U) == 3U) {
-        const uintptr_t address = frame->vector == 14 ? paging::fault_address() : 0;
-        process::record_user_fault(frame->vector, frame->error, frame->eip, address);
-        return 1;
-    }
+    if ((frame->cs & 3U) == 3U) return process::user_exception(frame);
     panic(frame->vector == 14 ? "Kernel page fault." : "Unhandled CPU exception.", frame);
 }
 

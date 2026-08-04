@@ -160,10 +160,11 @@ int main(int argc, char** argv) {
             throw std::runtime_error("calendar event persistence missing");
         }
         const auto tasks = files.find("/notes/tasks.md");
-        const std::string expected_task = "- [x] ship #P1 #D-2099-12-31\n";
+        const std::string expected_task = "- [x] ship #P1 #D-2099-12-31 updated\n";
         if (tasks == files.end() || tasks->second.find(expected_task) == std::string::npos ||
-            tasks->second.find("- [ ] ship #P1 #D-2099-12-31\n") != std::string::npos) {
-            throw std::runtime_error("Markdown task add/toggle persistence missing");
+            tasks->second.find("- [ ] ship #P1 #D-2099-12-31 updated\n") != std::string::npos ||
+            tasks->second.find("temporary") != std::string::npos) {
+            throw std::runtime_error("Markdown task CRUD persistence missing");
         }
 
         bool normal_note = false;
@@ -178,7 +179,7 @@ int main(int argc, char** argv) {
         if (!normal_note) throw std::runtime_error("normal Markdown note persistence missing");
         if (!daily_note) throw std::runtime_error("daily note persistence missing");
 
-        std::cout << "ZENOV_PRODUCTIVITY_RUNTIME_IMAGE_OK notes=markdown+scratch+daily tasks=checkbox+metadata+toggle calendar=events checksum=valid geometry=bounded\n";
+        std::cout << "ZENOV_PRODUCTIVITY_RUNTIME_IMAGE_OK notes=markdown+scratch+daily tasks=smart-views+guarded-crud calendar=events checksum=valid geometry=bounded\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zenovfs-productivity-verify: " << error.what() << "\n";

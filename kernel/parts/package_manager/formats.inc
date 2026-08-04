@@ -45,8 +45,9 @@ void formats() {
     console::line("  FORMAT/FAMILY                  0.1.1 STATUS");
     console::line("  ----------------------------- ------------------------------------------");
     console::line("  ZenPkg, ZEX1, ELF32/i386      native verify/import/sign/install path");
+    console::line("  Linux ELF32/i386 static       minimal int80 sandbox: write/exit only");
     console::line("  DEB/RPM/APK/pkg.tar/CAB/WIM   inspect-only; package scripts never run");
-    console::line("  AppImage/Snap/Flatpak         runtime-required; Linux ABI is absent");
+    console::line("  AppImage/Snap/Flatpak         unsupported; full Linux ABI is absent");
     console::line("  PE/MSI/MSIX/AppX              runtime-required; Win32/UWP ABI is absent");
     console::line("  PKG/DMG/Mach-O                runtime-required; Darwin ABI is absent");
     console::line("  XBE/XEX/STFS                  legacy Xbox runtime-required");

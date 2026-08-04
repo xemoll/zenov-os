@@ -42,6 +42,12 @@ struct Entry {
 static_assert(sizeof(Superblock) == kSectorSize);
 static_assert(sizeof(Entry) == 64);
 
+struct ReminderRecord {
+    bool done{};
+    char repeat{};
+    std::string title;
+};
+
 std::uint32_t fnv1a(const std::uint8_t* data, std::size_t size) {
     std::uint32_t hash = 2166136261u;
     for (std::size_t index = 0; index < size; ++index) {
@@ -121,13 +127,13 @@ unsigned month_days(unsigned year, unsigned month) {
     return month == 2U && leap(year) ? 29U : days[month - 1U];
 }
 
-void verify_reminder_line(const std::string& line) {
-    if (line.size() < 23U || line.size() > 62U || line.compare(0, 3, "R1|") != 0 ||
-        line[3] != '1' || line[4] != '|' || line[9] != '-' || line[12] != '-' ||
-        line[15] != '|' || line[18] != ':' || line[21] != '|')
-        throw std::runtime_error("noncanonical completed reminder");
+ReminderRecord verify_reminder_line(const std::string& line) {
+    if (line.size() < 28U || line.size() > 67U || line.compare(0, 3, "R2|") != 0 ||
+        (line[3] != '0' && line[3] != '1') || line[4] != '|' || line[9] != '-' || line[12] != '-' ||
+        line[15] != '|' || line[18] != ':' || line[21] != '|' || line[23] != '|' || line[26] != '|')
+        throw std::runtime_error("noncanonical R2 reminder");
     if (!digits(line, 5, 4) || !digits(line, 10, 2) || !digits(line, 13, 2) ||
-        !digits(line, 16, 2) || !digits(line, 19, 2))
+        !digits(line, 16, 2) || !digits(line, 19, 2) || !digits(line, 24, 2))
         throw std::runtime_error("non-numeric reminder timestamp");
     const unsigned year = parse_unsigned(line, 5, 4);
     const unsigned month = parse_unsigned(line, 10, 2);
@@ -137,7 +143,14 @@ void verify_reminder_line(const std::string& line) {
     if (year < 2000U || year > 2099U || month < 1U || month > 12U || day < 1U ||
         day > month_days(year, month) || hour > 23U || minute > 59U)
         throw std::runtime_error("invalid reminder timestamp");
-    if (line.substr(22) != "drink water") throw std::runtime_error("reminder title mismatch");
+    if (line[22] != 'N' && line[22] != 'D' && line[22] != 'W' && line[22] != 'M')
+        throw std::runtime_error("invalid reminder repeat code");
+    const unsigned repeat_day = parse_unsigned(line, 24, 2);
+    if (repeat_day < 1U || repeat_day > 31U) throw std::runtime_error("invalid reminder repeat anchor");
+    const std::string title = line.substr(27);
+    if (title.empty() || title.size() > 40U || title.find('|') != std::string::npos)
+        throw std::runtime_error("invalid reminder title");
+    return ReminderRecord{line[3] == '1', line[22], title};
 }
 } // namespace
 
@@ -183,20 +196,26 @@ int main(int argc, char** argv) {
 
         const auto reminders = files.find("/reminders/reminders.db");
         if (reminders == files.end()) throw std::runtime_error("reminder database missing");
+        std::vector<ReminderRecord> records;
         std::size_t start = 0;
-        unsigned lines = 0;
         while (start < reminders->second.size()) {
             const std::size_t end = reminders->second.find('\n', start);
             if (end == std::string::npos) throw std::runtime_error("reminder database lacks final newline");
-            if (end > start) {
-                verify_reminder_line(reminders->second.substr(start, end - start));
-                ++lines;
-            }
+            if (end > start) records.push_back(verify_reminder_line(reminders->second.substr(start, end - start)));
             start = end + 1U;
         }
-        if (lines != 1U) throw std::runtime_error("unexpected reminder count");
+        if (records.size() != 2U) throw std::runtime_error("unexpected reminder count");
 
-        std::cout << "ZENOV_PRODUCTIVITY_UTILITIES_RUNTIME_IMAGE_OK calculator=history+memory reminders=canonical+done+snoozed reboot=persistent checksum=valid geometry=bounded\n";
+        bool completed_once = false;
+        bool active_daily = false;
+        for (const ReminderRecord& record : records) {
+            if (record.title == "drink water" && record.done && record.repeat == 'N') completed_once = true;
+            if (record.title == "stand up" && !record.done && record.repeat == 'D') active_daily = true;
+        }
+        if (!completed_once || !active_daily)
+            throw std::runtime_error("completed one-shot or active daily reminder missing");
+
+        std::cout << "ZENOV_PRODUCTIVITY_UTILITIES_RUNTIME_IMAGE_OK calculator=history+memory reminders=v2+one-shot+daily recurrence=advanced reboot=persistent checksum=valid geometry=bounded\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zenovfs-productivity-utilities-verify: " << error.what() << "\n";

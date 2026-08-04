@@ -10,13 +10,13 @@ mkdir -p "$BUILD/catalog" "$BUILD/catalog-copy" "$BUILD/negative"
 "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
   "$ROOT/tools/zenuniverse/main.cpp" -o "$BUILD/zenuniverse"
 "$BUILD/zenuniverse" self-test
-"$BUILD/zenuniverse" validate "$ROOT"/packages/universe/*.zsource | grep -q 'ZENUNIVERSE_VALIDATE_OK count=22'
+"$BUILD/zenuniverse" validate "$ROOT"/packages/universe/*.zsource | grep -q 'ZENUNIVERSE_VALIDATE_OK count=24'
 "$BUILD/zenuniverse" compile --input "$ROOT/packages/universe" --output "$BUILD/universe.zuc"
 cp -a "$ROOT/packages/universe/." "$BUILD/catalog-copy/"
 "$BUILD/zenuniverse" compile --input "$BUILD/catalog-copy" --output "$BUILD/universe-copy.zuc"
 cmp "$BUILD/universe.zuc" "$BUILD/universe-copy.zuc"
 grep -q '^ZENUNIVERSE1$' "$BUILD/universe.zuc"
-grep -q '^count=22$' "$BUILD/universe.zuc"
+grep -q '^count=24$' "$BUILD/universe.zuc"
 grep -q '^provider-abi=zen-runtime-provider-1$' "$BUILD/universe.zuc"
 grep -q '^requires-any=graphics.opengl3.1|graphics.vulkan1.0$' "$BUILD/universe.zuc"
 ! grep -q -- '-or-vulkan' "$BUILD/universe.zuc"
@@ -254,9 +254,9 @@ grep -q 'unknown manual capability' "$BUILD/negative/manual-capability.log"
 "$CXX" -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
   -fsanitize=address,undefined -fno-omit-frame-pointer \
   "$ROOT/tools/zenuniverse/main.cpp" -o "$BUILD/zenuniverse-sanitized"
-ASAN_OPTIONS=detect_leaks=1 "$BUILD/zenuniverse-sanitized" self-test
-ASAN_OPTIONS=detect_leaks=1 "$BUILD/zenuniverse-sanitized" compile \
+ASAN_OPTIONS="detect_leaks=${ZENUNIVERSE_DETECT_LEAKS:-1}" "$BUILD/zenuniverse-sanitized" self-test
+ASAN_OPTIONS="detect_leaks=${ZENUNIVERSE_DETECT_LEAKS:-1}" "$BUILD/zenuniverse-sanitized" compile \
   --input "$ROOT/packages/universe" --output "$BUILD/universe-sanitized.zuc"
 cmp "$BUILD/universe.zuc" "$BUILD/universe-sanitized.zuc"
 
-printf 'ZENUNIVERSE_TESTS_OK descriptors=22 deterministic=yes resolver=yes alternatives=typed native-provider=ready legal-asset-policy=yes capability-registry=yes sanitizers=yes\n'
+printf 'ZENUNIVERSE_TESTS_OK descriptors=24 deterministic=yes resolver=yes alternatives=typed native-provider=ready linux-i386=ready legal-asset-policy=yes capability-registry=yes sanitizers=yes\n'

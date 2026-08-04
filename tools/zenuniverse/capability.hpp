@@ -6,7 +6,7 @@ namespace zenuniverse {
 
 const StringSet& runtime_names() {
     static const StringSet values = {
-        "native", "linux-abi", "wine", "proton", "qemu-user", "qemu-system",
+        "native", "linux-i386-minimal", "linux-abi", "wine", "proton", "qemu-user", "qemu-system",
         "darling", "duckstation", "ppsspp", "pcsx2", "rpcs3", "xemu", "xenia", "external"
     };
     return values;
@@ -15,6 +15,7 @@ const StringSet& runtime_names() {
 const StringSet& static_capabilities() {
     static const StringSet values = {
         "abi.zenov.zex1",
+        "abi.linux.i386.int80-minimal",
         "audio.low-latency", "audio.stream",
         "cpu.avx2", "cpu.sse4.1", "cpu.x86", "cpu.x86_64-modern",
         "filesystem.fuse-or-extract", "filesystem.overlay",

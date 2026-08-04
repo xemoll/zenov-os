@@ -52,6 +52,7 @@ send_text() {
       '-') echo "sendkey minus 10" ;;
       '_') echo "sendkey shift-minus 10" ;;
       '/') echo "sendkey slash 10" ;;
+      '&') echo "sendkey shift-7 10" ;;
       *) echo "qemu-smoke: unsupported test key: $char" >&2; return 1 ;;
     esac
     sleep 0.012
@@ -124,17 +125,19 @@ controller_first() {
   send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 2 || { echo quit; return 1; }
   send_command "guard selftest"; wait_for_count "$serial" "ZENOV_GUARD_SELFTEST_OK" 2 || { echo quit; return 1; }
   send_command "cat /data/samples/pua-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_READ_AUDIT path=/samples/pua-test.bin verdict=SUSPICIOUS signature=PUA.Zenov.Test" || { echo quit; return 1; }
-  send_command "cat /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_READ_BLOCKED path=/samples/ransomware-test.bin verdict=INFECTED signature=Pattern.Ransomware.Test" || { echo quit; return 1; }
   send_command "write /data/ransomware-write.bin ZENOV_RANSOMWARE_TEST_V1"; wait_for_serial "$serial" "ZENOV_GUARD_WRITE_BLOCKED path=/ransomware-write.bin" || { echo quit; return 1; }
   send_command "write /data/pua-audit.bin ZENOV_PUA_TEST_V1"; wait_for_serial "$serial" "ZENOV_GUARD_WRITE_AUDIT path=/pua-audit.bin" || { echo quit; return 1; }; wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
   send_command "write /data/split.bin prefix-ZENOV_RANSOMWARE_"; wait_for_count "$serial" "WRITE_OK" 2 || { echo quit; return 1; }
   send_command "append /data/split.bin TEST_V1-suffix"; wait_for_serial "$serial" "ZENOV_GUARD_WRITE_BLOCKED path=/split.bin" || { echo quit; return 1; }
-  send_command "guard quarantine /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_OK" || { echo quit; return 1; }
-  send_command "guard quarantine list"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_LIST_OK entries=2" || { echo quit; return 1; }
   send_command "cp /data/apps/hello.zex /data/apps/untrusted.zex"; wait_for_serial "$serial" "COPY_OK" || { echo quit; return 1; }
   send_command "run UNTRUSTED.ZEX"; wait_for_serial "$serial" "ZENOV_GUARD_UNTRUSTED_BLOCKED" || { echo quit; return 1; }
   send_command "rm /data/apps/untrusted.zex"; wait_for_serial "$serial" "REMOVE_OK" || { echo quit; return 1; }
   send_command "guard scan all"; wait_for_serial "$serial" "ZENOV_GUARD_FULL_SCAN_OK" || { echo quit; return 1; }
+  # Keep the read-block evidence inside the bounded 64-record persistent ring
+  # even as compatibility fixtures add legitimate full-scan audit records.
+  send_command "cat /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_READ_BLOCKED path=/samples/ransomware-test.bin verdict=INFECTED signature=Pattern.Ransomware.Test" || { echo quit; return 1; }
+  send_command "guard quarantine /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_OK" || { echo quit; return 1; }
+  send_command "guard quarantine list"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_LIST_OK entries=2" || { echo quit; return 1; }
 
   echo "sendkey f1 10"; wait_for_serial "$serial" "COMMAND REFERENCE" || { echo quit; return 1; }; echo "sendkey f4 10"; sleep 0.2
   send_command "vm"; wait_for_serial "$serial" "VIRTUAL MEMORY" || { echo quit; return 1; }
@@ -143,6 +146,17 @@ controller_first() {
   send_command "echo $long_payload"; wait_for_serial "$serial" "$LONG_INPUT_MARKER" || { echo quit; return 1; }
   send_command "write PERSIST.TXT PERSISTENCE_0_1_1_OK"; wait_for_count "$serial" "WRITE_OK" 2 || { echo quit; return 1; }
   send_command "run HELLO"; wait_for_serial "$serial" "HELLO_ZEX_0_1_1_OK" || { echo quit; return 1; }
+  send_command "schedtest"
+  wait_for_serial "$serial" "SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata capabilities=console-write filesystem=unmodified" || { echo quit; return 1; }
+  wait_for_serial "$serial" "TASK_CREATED pid=1 app=/kernel/scheduler-probe-a" || { echo quit; return 1; }
+  wait_for_serial "$serial" "TASK_CREATED pid=2 app=/kernel/scheduler-probe-b" || { echo quit; return 1; }
+  wait_for_serial "$serial" "SCHED_BATCH_START tasks=2" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PREEMPT_A_START" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PREEMPT_B_START" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PREEMPT_A_DONE" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PREEMPT_B_DONE" || { echo quit; return 1; }
+  wait_for_serial "$serial" "PREEMPTIVE_MULTITASKING_OK isolation=per-address-space" || { echo quit; return 1; }
+  awk '/PREEMPT_B_START/ {b=NR} /PREEMPT_A_DONE/ {a=NR} END {exit !(b && a && b < a)}' "$serial" || { echo quit; return 1; }
   send_command "run FILEIO.ELF"; wait_for_serial "$serial" "FILEIO_ELF_OK" || { echo quit; return 1; }; wait_for_serial "$serial" "FILE_SYSCALL_PERSIST_OK" || { echo quit; return 1; }
   prompt_count="$(grep -c "$PROMPT" "$serial" || true)"
   send_command "run FILEIO.ELF"

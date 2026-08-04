@@ -67,6 +67,9 @@ jobs:
           ! grep -Fq 'once = "on"' tests/blkdebug/ata-read-eio-always.conf
           grep -Fq 'ATA_RECOVERY_RETRY_EXHAUSTED op=' kernel/parts/storage_ata_deadline_io.inc
           grep -Fq 'if (!block_retryable(failure.status))' kernel/parts/storage_ata_deadline_io.inc
+          grep -Fq 'Storage: attached ZenovFS mount failed status=io-error' tests/qemu_ata_read_faults.sh
+          grep -Fq 'ZENOVFS_EXTERNAL_FAIL_CLOSED' tests/qemu_ata_read_faults.sh
+          grep -Fq 'Persistent signed policy transaction recovery failed.' tests/qemu_ata_read_faults.sh
 
       - name: Build strict native system and host contracts
         shell: bash
@@ -90,15 +93,19 @@ jobs:
         run: |
           set -euo pipefail
           out=build/qemu/ata-read-faults
-          grep -Fq 'ATA_READ_FAULT_MATRIX_OK sector=8 recovered_attempts=2 exhausted_attempts=2 resets_each=1 ui_after_recovery=1 ui_after_exhaustion=0' "$out/summary.log"
+          grep -Fq 'ATA_READ_FAULT_MATRIX_OK sector=8 recovered_attempts=2 exhausted_attempts=2 resets_each=1 ui_after_recovery=1 ui_after_exhaustion=0 fail_closed=typed security_panic=1' "$out/summary.log"
           grep -Fq 'ATA_RECOVERY_RETRY_OK op=read attempts=2' "$out/recovered/serial.log"
           grep -Fq 'ZENOVFS_MOUNT_OK' "$out/recovered/serial.log"
           grep -Fq 'ZENOVFS_FSCK_OK' "$out/recovered/serial.log"
           grep -Fq 'ZENOVOS_UI_READY' "$out/recovered/serial.log"
           grep -Fq 'ATA_RECOVERY_RETRY_EXHAUSTED op=read attempts=2 status=command-aborted' "$out/exhausted/serial.log"
-          grep -Fq 'Storage: ZenovFS mount failed' "$out/exhausted/serial.log"
+          grep -Fq 'Storage: attached ZenovFS mount failed status=io-error' "$out/exhausted/serial.log"
+          grep -Fq 'ZENOVFS_EXTERNAL_FAIL_CLOSED' "$out/exhausted/serial.log"
+          grep -Fq 'ZENOVOS KERNEL PANIC' "$out/exhausted/serial.log"
+          grep -Fq 'Persistent signed policy transaction recovery failed.' "$out/exhausted/serial.log"
           ! grep -Fq 'ZENOVFS_MOUNT_OK' "$out/exhausted/serial.log"
           ! grep -Fq 'ZENOVOS_UI_READY' "$out/exhausted/serial.log"
+          ! grep -Fq 'ZENOVFS_LIVE_READY' "$out/exhausted/serial.log"
           test ! -s "$out/recovered/qemu.stderr"
           test ! -s "$out/exhausted/qemu.stderr"
 

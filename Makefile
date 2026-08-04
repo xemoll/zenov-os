@@ -264,12 +264,15 @@ $(BUILD)/interrupts.o: kernel/interrupts.S | $(BUILD)
 $(BUILD)/user-runtime.o: kernel/user.S | $(BUILD)
 	$(AS) --32 $< -o $@
 
+$(BUILD)/scheduler-probe.o: kernel/scheduler_probe.S | $(BUILD)
+	$(AS) --32 $< -o $@
+
 $(BUILD)/kernel.o: kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp security/zvrt_crypto_material.hpp $(BUILD)/generated/zenov_config.hpp | $(BUILD)
 	$(HOST_CXX) $(KERNEL_FLAGS) -c $< -o $@
 
-$(BUILD)/kernel.elf: $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/kernel.o kernel/linker.ld
+$(BUILD)/kernel.elf: $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/scheduler-probe.o $(BUILD)/kernel.o kernel/linker.ld
 	$(LD) -m elf_i386 -T kernel/linker.ld -Map=$(BUILD)/kernel.map \
-	  -o $@ $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/kernel.o
+	  -o $@ $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/scheduler-probe.o $(BUILD)/kernel.o
 	@test -z "$$(nm -u $@)"
 
 $(BUILD)/KERNEL.BIN: $(BUILD)/kernel.elf
@@ -292,6 +295,8 @@ $(BUILD)/console-user.o: user/console.S | $(BUILD)
 $(BUILD)/protect-user.o: user/protect.S | $(BUILD)
 	$(AS) --32 $< -o $@
 $(BUILD)/kaccess-user.o: user/kernel_access.S | $(BUILD)
+	$(AS) --32 $< -o $@
+$(BUILD)/linux-i386-hello.o: user/linux_i386_hello.S | $(BUILD)
 	$(AS) --32 $< -o $@
 
 $(BUILD)/hello-user.elf: $(BUILD)/hello-user.o user/linker.ld
@@ -326,15 +331,24 @@ $(BUILD)/KACCESS.ELF: $(BUILD)/kaccess-user.o user/linker.ld
 	$(LD) -m elf_i386 -T user/linker.ld -o $@ $<
 	@test -z "$$(nm -u $@)"
 
+$(BUILD)/LINUX-I386-HELLO.ELF: $(BUILD)/linux-i386-hello.o user/linux_i386_linker.ld
+	$(LD) -m elf_i386 -T user/linux_i386_linker.ld -o $@ $<
+	@test -z "$$(nm -u $@)"
+	@readelf -h $@ | grep -Eq 'Class:[[:space:]]+ELF32'
+	@readelf -h $@ | grep -Eq 'Machine:[[:space:]]+Intel 80386'
+	@! readelf -l $@ | grep -Eq 'INTERP|DYNAMIC'
+
 $(BUILD)/ZENOVAPP.ZEX: user/hello_zenov.zv $(BUILD)/zenov-app-compiler
 	$(BUILD)/zenov-app-compiler $< -o $@ --abi 0.1.1
 	@test "$$(od -An -tc -N4 $@ | tr -d ' \n')" = "ZEX1"
 	@printf '%s  %s\n' '$(ZENOV_APP_EXPECTED_SHA256)' '$@' | sha256sum -c -
 
 USER_APPS := $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF $(BUILD)/ARGS.ELF $(BUILD)/CONSOLE.ELF $(BUILD)/PROTECT.ELF $(BUILD)/KACCESS.ELF $(BUILD)/ZENOVAPP.ZEX
+COMPAT_FIXTURES := $(BUILD)/LINUX-I386-HELLO.ELF
+ZENOV_DATA_BASE := $(BUILD)/zenov-data-base.img
 
-$(BUILD)/zenov-data.img: $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $(ZVRT_FILES) $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
-	$(BUILD)/zenovfs-builder $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $(ZVRT_FILES) $@
+$(ZENOV_DATA_BASE): $(USER_APPS) $(COMPAT_FIXTURES) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $(ZVRT_FILES) $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
+	$(BUILD)/zenovfs-builder $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $(ZVRT_FILES) $(COMPAT_FIXTURES) $@
 	@test "$$(stat -c%s $@)" -eq 16777216
 	@test "$$(od -An -tc -N8 $@ | tr -d ' \n')" = "ZENOVFS1"
 	$(BUILD)/zenovfs-verify $@
@@ -380,7 +394,7 @@ $(ZVRT_DATA_CORRUPT_IMAGE): $(BUILD)/zenov-data.img $(BUILD)/zenovfs-zvrt-corrup
 	$(BUILD)/zenovfs-verify $@
 	@test -s $@
 
-$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp tools/zcap_builder.cpp tools/zcap_verify.cpp tools/zmid_builder.cpp tools/zmid_verify.cpp tools/zrwp_builder.cpp tools/zrwp_verify.cpp tools/zvrt_builder.cpp tools/zvrt_verify.cpp tools/zenovfs_zvrt_verify.cpp tools/zenovfs_zvrt_corrupt.cpp tools/zenovfs_audit_verify.cpp tools/zenovfs_audit_fault_test.cpp security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp security/zvrt_crypto_material.hpp security/zenovguard-root-public.pem security/zcap-root-public.pem security/zmid-root-public.pem security/zrwp-root-public.pem security/zvrt-root-public.pem
+$(BUILD)/build-manifest.json: $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(USER_APPS) $(COMPAT_FIXTURES) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) kernel/main.zv $(ZENOV_CONFIG_SRC) kernel/kernel.cpp kernel/entry.S kernel/interrupts.S kernel/user.S $(KERNEL_PARTS) tools/zenov_app_compiler.cpp tools/zgdb_builder.cpp tools/zcap_builder.cpp tools/zcap_verify.cpp tools/zmid_builder.cpp tools/zmid_verify.cpp tools/zrwp_builder.cpp tools/zrwp_verify.cpp tools/zvrt_builder.cpp tools/zvrt_verify.cpp tools/zenovfs_zvrt_verify.cpp tools/zenovfs_zvrt_corrupt.cpp tools/zenovfs_audit_verify.cpp tools/zenovfs_audit_fault_test.cpp security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp security/zvrt_crypto_material.hpp security/zenovguard-root-public.pem security/zcap-root-public.pem security/zmid-root-public.pem security/zrwp-root-public.pem security/zvrt-root-public.pem
 	@boot_hash="$$(sha256sum $(BUILD)/BOOT.BIN | cut -d' ' -f1)"; \
 	 kernel_hash="$$(sha256sum $(BUILD)/KERNEL.BIN | cut -d' ' -f1)"; \
 	 image_hash="$$(sha256sum $(BUILD)/zenov-os.img | cut -d' ' -f1)"; \

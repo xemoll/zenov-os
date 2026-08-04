@@ -78,8 +78,8 @@ std::vector<std::uint8_t> empty_audit_journal() {
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 28) {
-            std::cerr << "usage: zenovfs-builder <hello.zex> <fileio.elf> <args.elf> <console.elf> <protect.elf> <kaccess.elf> <zenovapp.zex> <zgdb-v3> <zgdb-v4> <zgdb-tampered> <zgdb-wrong-key> <zcap-v1> <zcap-v2> <zcap-tampered> <zcap-wrong-key> <zmid-v1> <zmid-v2> <zmid-tampered> <zmid-wrong-key> <zrwp-v1> <zrwp-v2> <zrwp-tampered> <zrwp-wrong-key> <zvrt-v1> <zvrt-tampered> <zvrt-wrong-key> <output.img>\n";
+        if (argc != 29) {
+            std::cerr << "usage: zenovfs-builder <hello.zex> <fileio.elf> <args.elf> <console.elf> <protect.elf> <kaccess.elf> <zenovapp.zex> <zgdb-v3> <zgdb-v4> <zgdb-tampered> <zgdb-wrong-key> <zcap-v1> <zcap-v2> <zcap-tampered> <zcap-wrong-key> <zmid-v1> <zmid-v2> <zmid-tampered> <zmid-wrong-key> <zrwp-v1> <zrwp-v2> <zrwp-tampered> <zrwp-wrong-key> <zvrt-v1> <zvrt-tampered> <zvrt-wrong-key> <linux-i386.elf> <output.img>\n";
             return 2;
         }
         const auto hello = read_all(argv[1]), fileio = read_all(argv[2]), args = read_all(argv[3]), console = read_all(argv[4]);
@@ -89,6 +89,7 @@ int main(int argc, char** argv) {
         const auto zmid_v1 = read_all(argv[16]), zmid_v2 = read_all(argv[17]), zmid_tampered = read_all(argv[18]), zmid_wrong_key = read_all(argv[19]);
         const auto zrwp_v1 = read_all(argv[20]), zrwp_v2 = read_all(argv[21]), zrwp_tampered = read_all(argv[22]), zrwp_wrong_key = read_all(argv[23]);
         const auto zvrt_v1 = read_all(argv[24]), zvrt_tampered = read_all(argv[25]), zvrt_wrong_key = read_all(argv[26]);
+        const auto linux_i386 = read_all(argv[27]);
         std::vector<std::uint8_t> disk(static_cast<std::size_t>(kTotalSectors) * kSectorSize, 0);
         std::array<Entry, kEntryCount> entries{};
         Superblock super{{'Z','E','N','O','V','F','S','1'}, 1u, kTotalSectors, kEntryCount, kEntrySectors, kDataStart, kSlotSectors, 1u,
@@ -152,14 +153,15 @@ int main(int argc, char** argv) {
         add_file(disk, entries, 48, "/security/updates/verified-reads-tampered.zvrt", zvrt_tampered);
         add_file(disk, entries, 49, "/security/updates/verified-reads-wrong-key.zvrt", zvrt_wrong_key);
         add_file(disk, entries, 50, "/security/policy-transaction.journal", {});
+        add_file(disk, entries, 51, "/samples/linux-i386-hello.elf", linux_i386);
         std::memcpy(disk.data(), &super, sizeof(super));
         std::memcpy(disk.data() + kSectorSize, entries.data(), sizeof(entries));
-        std::ofstream output(argv[27], std::ios::binary | std::ios::trunc);
+        std::ofstream output(argv[28], std::ios::binary | std::ios::trunc);
         if (!output) throw std::runtime_error("cannot open output image");
         output.write(reinterpret_cast<const char*>(disk.data()), static_cast<std::streamsize>(disk.size()));
         if (!output) throw std::runtime_error("cannot write output image");
         std::cout << "zenovfs-builder: OK version=0.1.1 entries=" << kEntryCount
-                  << " apps=7 zgdb=schema2-v3+v4+2-negative zcap=schema1-v1+v2+2-negative zmid=schema1-v1+v2+2-negative zrwp=schema1-v1-audit+v2-block+2-negative zvrt=schema1-v1+2-negative rules=hash+pattern audit=ZGAL1-8288B policy_journal=ZPTJ1-empty zenov_source_app=" << zenovapp.size() << "\n";
+                  << " apps=7 linux_i386_compat=1 zgdb=schema2-v3+v4+2-negative zcap=schema1-v1+v2+2-negative zmid=schema1-v1+v2+2-negative zrwp=schema1-v1-audit+v2-block+2-negative zvrt=schema1-v1+2-negative rules=hash+pattern audit=ZGAL1-8288B policy_journal=ZPTJ1-empty zenov_source_app=" << zenovapp.size() << "\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "zenovfs-builder: " << error.what() << "\n";
