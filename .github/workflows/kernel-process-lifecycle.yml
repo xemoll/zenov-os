@@ -1,0 +1,55 @@
+name: ZenovOS Kernel Process Lifecycle
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/kernel-process-lifecycle.yml'
+      - 'GNUmakefile'
+      - 'Makefile'
+      - 'docs/KERNEL_PROCESS_LIFECYCLE_0.1.1.md'
+      - 'kernel/**'
+      - 'tests/kernel_process_lifecycle_test.cpp'
+      - 'tests/qemu_kernel_process_lifecycle.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-process-lifecycle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact-source-snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
+      - name: Archive exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=zip --output=zenov-kernel-source.zip HEAD
+          sha256sum zenov-kernel-source.zip | tee zenov-kernel-source.sha256
+      - name: Upload exact source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zenov-kernel-source-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            zenov-kernel-source.zip
+            zenov-kernel-source.sha256
