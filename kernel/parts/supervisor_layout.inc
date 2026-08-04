@@ -16,28 +16,28 @@ constexpr uint32_t live_overlay_map_bytes = 0x00010000U;
 constexpr uintptr_t live_overlay_data = 0x00336000U;
 constexpr uint32_t live_overlay_data_bytes = 0x00080000U;
 constexpr uintptr_t live_storage_end = live_overlay_data + live_overlay_data_bytes;
-
-/* Linker-owned zero-initialized state remains in permanently reserved low RAM,
- * but it is no longer forced to end at the user virtual base. */
 constexpr uintptr_t kernel_static_start = live_storage_end;
 constexpr uintptr_t kernel_static_limit = 0x00480000U;
-
-/* Eight fixed kernel stacks use one unmapped guard page followed by four
- * mapped pages. They are outside the heap and never user-accessible. */
 constexpr uint32_t task_stack_count = 8U;
 constexpr uint32_t task_stack_guard_bytes = 0x00001000U;
 constexpr uint32_t task_stack_bytes = 0x00004000U;
 constexpr uint32_t task_stack_stride = task_stack_guard_bytes + task_stack_bytes;
 constexpr uintptr_t task_stack_region_start = 0x00500000U;
 constexpr uintptr_t task_stack_region_end = task_stack_region_start + task_stack_count * task_stack_stride;
-
-/* The legacy foreground ABI uses this reserved physical window. Scheduled
- * tasks instead receive PMM frames above pmm_reserved_end. */
 constexpr uintptr_t legacy_user_physical_start = 0x00600000U;
 constexpr uintptr_t legacy_user_physical_end = 0x00700000U;
-constexpr uintptr_t pmm_reserved_end = 0x00800000U;
+constexpr uintptr_t user_physical_end = legacy_user_physical_end;
 constexpr uintptr_t user_base = 0x40000000U;
-
+constexpr uint32_t user_window_bytes = 0x00100000U;
+constexpr uintptr_t zmid_workspace_physical_a = 0x00800000U;
+constexpr uintptr_t zmid_workspace_physical_b = 0x00810000U;
+constexpr uintptr_t zmid_workspace_virtual_a = 0x00800000U;
+constexpr uintptr_t zmid_workspace_virtual_b = 0x00810000U;
+constexpr uint32_t zmid_workspace_bytes = 0x00010000U;
+constexpr uintptr_t zmid_workspace_virtual_end = 0x00820000U;
+constexpr uintptr_t pmm_reserved_end = 0x00820000U;
+constexpr uintptr_t kernel_identity_hole_start = 0x00800000U;
+constexpr uintptr_t kernel_identity_hole_end = 0x00C00000U;
 static_assert(heap_start < heap_end);
 static_assert(heap_end == scan_workspace);
 static_assert(scan_workspace + scan_workspace_bytes == zvrt_records);
@@ -51,5 +51,12 @@ static_assert(kernel_static_start < kernel_static_limit);
 static_assert(kernel_static_limit <= task_stack_region_start);
 static_assert(task_stack_region_end <= legacy_user_physical_start);
 static_assert(legacy_user_physical_start < legacy_user_physical_end);
-static_assert(legacy_user_physical_end <= pmm_reserved_end);
+static_assert(user_physical_end <= zmid_workspace_physical_a);
+static_assert(zmid_workspace_physical_a + zmid_workspace_bytes == zmid_workspace_physical_b);
+static_assert(zmid_workspace_physical_b + zmid_workspace_bytes == pmm_reserved_end);
+static_assert(zmid_workspace_virtual_a == kernel_identity_hole_start);
+static_assert(zmid_workspace_virtual_a + zmid_workspace_bytes == zmid_workspace_virtual_b);
+static_assert(zmid_workspace_virtual_b + zmid_workspace_bytes == zmid_workspace_virtual_end);
+static_assert(zmid_workspace_virtual_end <= kernel_identity_hole_end);
+static_assert(kernel_identity_hole_end - kernel_identity_hole_start == 0x00400000U);
 } // namespace supervisor_layout

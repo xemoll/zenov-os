@@ -14,6 +14,8 @@ constexpr uint32_t error_invalid = 0xFFFFFFFFU, error_not_found = 0xFFFFFFFEU, e
 constexpr uint32_t error_io = 0xFFFFFFFCU, error_fault = 0xFFFFFFFBU, error_unsupported = 0xFFFFFFFAU, error_denied = 0xFFFFFFF9U;
 
 extern "C" uint8_t gdt_tss[];
+extern "C" uint8_t gdt_user_code[];
+extern "C" uint8_t gdt_user_data[];
 extern "C" char __stack_top;
 extern "C" void user_enter(uint32_t entry_offset, uint32_t stack_offset);
 
@@ -62,6 +64,31 @@ void descriptor_set_tss(uintptr_t base, uint32_t limit) {
     gdt_tss[0] = static_cast<uint8_t>(limit); gdt_tss[1] = static_cast<uint8_t>(limit >> 8U); gdt_tss[2] = static_cast<uint8_t>(base);
     gdt_tss[3] = static_cast<uint8_t>(base >> 8U); gdt_tss[4] = static_cast<uint8_t>(base >> 16U); gdt_tss[5] = 0x89;
     gdt_tss[6] = static_cast<uint8_t>((limit >> 16U) & 0x0FU); gdt_tss[7] = static_cast<uint8_t>(base >> 24U);
+}
+void descriptor_set_user(uint8_t descriptor[8], uintptr_t base, uint32_t limit, uint8_t access) {
+    uint32_t encoded_limit = limit;
+    uint8_t flags = 0x40U;
+    if (limit > 0x000FFFFFU) { encoded_limit = limit >> 12U; flags = 0xC0U; }
+    descriptor[0] = static_cast<uint8_t>(encoded_limit);
+    descriptor[1] = static_cast<uint8_t>(encoded_limit >> 8U);
+    descriptor[2] = static_cast<uint8_t>(base);
+    descriptor[3] = static_cast<uint8_t>(base >> 8U);
+    descriptor[4] = static_cast<uint8_t>(base >> 16U);
+    descriptor[5] = access;
+    descriptor[6] = static_cast<uint8_t>(flags | ((encoded_limit >> 16U) & 0x0FU));
+    descriptor[7] = static_cast<uint8_t>(base >> 24U);
+}
+bool configure_user_segments(uint32_t logical_bias) {
+    if (logical_bias > 0xFFFFFFFFU - user_limit || logical_bias > user_base) return false;
+    const uintptr_t base = user_base - logical_bias;
+    const uint32_t limit = logical_bias + user_limit - 1U;
+    descriptor_set_user(gdt_user_code, base, limit, 0xFAU);
+    descriptor_set_user(gdt_user_data, base, limit, 0xF2U);
+    return true;
+}
+void restore_native_user_segments() {
+    descriptor_set_user(gdt_user_code, user_base, user_limit - 1U, 0xFAU);
+    descriptor_set_user(gdt_user_data, user_base, user_limit - 1U, 0xF2U);
 }
 bool user_range(uint32_t offset, uint32_t length, bool write = false) { return offset < user_limit && length <= user_limit - offset && paging::user_access(offset, length, write); }
 uint8_t* user_bytes(uint32_t offset, uint32_t length, bool write = false) { return user_range(offset, length, write) ? reinterpret_cast<uint8_t*>(user_base + offset) : nullptr; }
@@ -167,6 +194,7 @@ extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
 }
 
 void init() {
+    restore_native_user_segments();
     memset(&kernel_tss, 0, sizeof(kernel_tss)); set_kernel_stack(reinterpret_cast<uintptr_t>(&__stack_top));
     kernel_tss.iomap_base = static_cast<uint16_t>(sizeof(Tss)); descriptor_set_tss(reinterpret_cast<uintptr_t>(&kernel_tss), sizeof(Tss) - 1U);
     const uint16_t selector = 0x28; asm volatile("ltr %w0" : : "r"(selector));

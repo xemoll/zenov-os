@@ -3,6 +3,10 @@ FsResult security_read_file_result(const char*, uint8_t*, uint32_t, uint32_t&);
 }
 
 namespace process {
+#include "linux_i386_abi.inc"
+
+enum class SyscallAbi : uint8_t { zenov, linux_i386 };
+
 constexpr uint32_t capability_console_write = 1U << 0U;
 constexpr uint32_t capability_ticks = 1U << 1U;
 constexpr uint32_t capability_file_read = 1U << 2U;
@@ -21,6 +25,8 @@ constexpr uint32_t syscall_error_corrupt = 0xFFFFFFF8U;
 using CapabilityProfile = zcap::Record;
 
 ActiveCapabilityProfile active_capabilities{};
+SyscallAbi active_syscall_abi = SyscallAbi::zenov;
+uint32_t linux_i386_image_bias = 0U;
 uint32_t capability_denials = 0, scope_denials = 0;
 bool capability_ready = false, capability_audit_failed = false;
 
@@ -94,7 +100,16 @@ bool activate_capability_profile(const char* input, const uint8_t* data, uint32_
 
 void clear_capability_profile() {
     memset(&active_capabilities, 0, sizeof(active_capabilities));
+    active_syscall_abi = SyscallAbi::zenov;
+    linux_i386_image_bias = 0U;
     capability_audit_failed = false;
+}
+
+bool linux_i386_pointer_offset(uint32_t address, uint32_t length, uint32_t& offset) {
+    if (!linux_i386_image_bias || address < linux_i386_image_bias ||
+        address - linux_i386_image_bias >= user_limit) return false;
+    offset = address - linux_i386_image_bias;
+    return length <= user_limit - offset;
 }
 
 bool active_security_actor(char path[48], uint8_t digest[32]) {
@@ -200,6 +215,36 @@ void print_capability_profiles() {
 
 extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
     if (!frame) return 1U;
+    if (active_syscall_abi == SyscallAbi::linux_i386) {
+        const uint32_t linux_number = frame->eax;
+        const linux_i386_abi::Translation translated =
+            linux_i386_abi::translate(linux_number, frame->ebx, frame->ecx, frame->edx);
+        if (translated.operation == linux_i386_abi::Operation::invalid_descriptor) {
+            frame->eax = linux_i386_abi::error_bad_file_descriptor;
+            serial::line("LINUX_I386_SYSCALL_DENIED syscall=write reason=fd");
+            return 0U;
+        }
+        if (translated.operation == linux_i386_abi::Operation::unsupported) {
+            frame->eax = linux_i386_abi::error_not_implemented;
+            serial::write("LINUX_I386_SYSCALL_ENOSYS number=");
+            serial_u32(linux_number);
+            serial::write("\r\n");
+            return 0U;
+        }
+        if (translated.operation == linux_i386_abi::Operation::exit) {
+            frame->eax = syscall_exit;
+            frame->ebx = translated.argument0;
+        } else {
+            uint32_t buffer_offset = 0U;
+            if (!linux_i386_pointer_offset(translated.argument1, translated.argument2, buffer_offset)) {
+                frame->eax = linux_i386_abi::error_fault;
+                return 0U;
+            }
+            frame->eax = syscall_console_write;
+            frame->ebx = buffer_offset;
+            frame->ecx = translated.argument2;
+        }
+    }
     const uint32_t number = frame->eax;
     if (number == syscall_exit || syscall_capability(number) == 0U) return syscall_dispatch_unrestricted(frame);
     if (!syscall_capability_allowed(number)) {
@@ -268,6 +313,9 @@ extern "C" uint32_t syscall_dispatch(SyscallFrame* frame) {
         frame->eax = result.ok() ? 0U : fs_status_to_syscall_error(result.status);
         return 0U;
     }
-    return syscall_dispatch_unrestricted(frame);
+    const uint32_t dispatch_result = syscall_dispatch_unrestricted(frame);
+    if (active_syscall_abi == SyscallAbi::linux_i386 && frame->eax == error_fault)
+        frame->eax = linux_i386_abi::error_fault;
+    return dispatch_result;
 }
 } // namespace process

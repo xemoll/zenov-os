@@ -187,7 +187,7 @@ void validate_descriptor(const Descriptor& descriptor) {
 
     const StringMap<StringSet> platform_runtime = {
         {"windows", {"wine", "proton", "qemu-system", "external"}},
-        {"linux", {"linux-abi", "qemu-user", "qemu-system", "external"}},
+        {"linux", {"linux-i386-minimal", "linux-abi", "qemu-user", "qemu-system", "external"}},
         {"macos", {"darling", "qemu-system", "external"}},
         {"playstation1", {"duckstation", "external"}},
         {"playstation-portable", {"ppsspp", "external"}},

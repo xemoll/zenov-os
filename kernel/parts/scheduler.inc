@@ -78,6 +78,8 @@ void serial_switch(uint32_t from_pid, uint32_t to_pid, const char* reason) {
 void expose_task(const Task& task, uint32_t index) {
     set_kernel_stack(task_stack_top(index));
     active_capabilities = task.capabilities;
+    active_syscall_abi = SyscallAbi::zenov;
+    linux_i386_image_bias = 0U;
     storage::path_copy(current_application, task.path, sizeof(current_application));
     string_copy(current_format, task.format, sizeof(current_format));
 }

@@ -17,8 +17,9 @@ grep -q '^artifact-bytes-limit=65536$' "$BUILD/host.log"
 grep -q '^process-limit=1$' "$BUILD/host.log"
 grep -q '^thread-limit=1$' "$BUILD/host.log"
 grep -q '^capability=loader.elf32-static$' "$BUILD/host.log"
+grep -q '^capability=abi.linux.i386.int80-minimal$' "$BUILD/host.log"
 ! grep -q '^capability=kernel.threads$' "$BUILD/host.log"
-grep -q '^ZENUNIVERSE_HOST_PROFILE_OK capabilities=9$' "$BUILD/host.log"
+grep -q '^ZENUNIVERSE_HOST_PROFILE_OK capabilities=10$' "$BUILD/host.log"
 
 "$BUILD/zenuniverse" runtime-status --input "$ROOT/packages/universe" \
   --runtime native --host-profile zenov-0.1.1-i686 > "$BUILD/native-status.log"
@@ -26,6 +27,12 @@ grep -q '^provider=org.zenov.runtime.native@1.0.0$' "$BUILD/native-status.log"
 grep -q '^provider-abi=zen-runtime-provider-1$' "$BUILD/native-status.log"
 grep -q '^launch-mode=builtin$' "$BUILD/native-status.log"
 grep -q '^ZENUNIVERSE_RUNTIME_READY package=org.zenov.runtime.native$' "$BUILD/native-status.log"
+
+"$BUILD/zenuniverse" runtime-status --input "$ROOT/packages/universe" \
+  --runtime linux-i386-minimal --host-profile zenov-0.1.1-i686 > "$BUILD/linux-i386-status.log"
+grep -q '^provider=org.zenov.runtime.linux-i386-minimal@1.0.0$' "$BUILD/linux-i386-status.log"
+grep -q '^launch-mode=builtin$' "$BUILD/linux-i386-status.log"
+grep -q '^ZENUNIVERSE_RUNTIME_READY package=org.zenov.runtime.linux-i386-minimal$' "$BUILD/linux-i386-status.log"
 
 set +e
 "$BUILD/zenuniverse" runtime-plan --input "$ROOT/packages/universe" \
@@ -79,6 +86,18 @@ grep -q '^provider=org.zenov.runtime.native@1.0.0$' "$BUILD/native-launch.log"
 grep -q '^entrypoint=@kernel-loader$' "$BUILD/native-launch.log"
 grep -q '^ZENUNIVERSE_LAUNCH_READY profile=org.zenov.profile.native-app reasons=0$' "$BUILD/native-launch.log"
 cmp "$BUILD/native-launch.log" "$BUILD/fixtures/hello.zlaunch"
+
+printf '\177ELF\001\001\001\000linux-i386-minimal-fixture\n' > "$BUILD/fixtures/linux-i386.elf"
+"$BUILD/zenuniverse" artifact-manifest --input "$ROOT/packages/universe" \
+  --profile org.zenov.profile.linux-i386-static --artifact elf32 --file "$BUILD/fixtures/linux-i386.elf" \
+  --ownership redistributable --output "$BUILD/fixtures/linux-i386.zartifact" > "$BUILD/linux-i386-manifest.log"
+"$BUILD/zenuniverse" launch-plan --input "$ROOT/packages/universe" \
+  --manifest "$BUILD/fixtures/linux-i386.zartifact" --file "$BUILD/fixtures/linux-i386.elf" \
+  --host-profile zenov-0.1.1-i686 --output "$BUILD/fixtures/linux-i386.zlaunch" > "$BUILD/linux-i386-launch.log"
+grep -q '^provider=org.zenov.runtime.linux-i386-minimal@1.0.0$' "$BUILD/linux-i386-launch.log"
+grep -q '^entrypoint=@kernel-loader$' "$BUILD/linux-i386-launch.log"
+grep -q '^ZENUNIVERSE_LAUNCH_READY profile=org.zenov.profile.linux-i386-static reasons=0$' "$BUILD/linux-i386-launch.log"
+cmp "$BUILD/linux-i386-launch.log" "$BUILD/fixtures/linux-i386.zlaunch"
 
 python3 - "$BUILD" <<'PY'
 from pathlib import Path
@@ -153,14 +172,20 @@ if "$BUILD/zenuniverse" validate "$BUILD/negative/unknown-capability.zsource" > 
 fi
 grep -q 'unknown or duplicate requires' "$BUILD/unknown-capability.log"
 
-"$CLANGXX" -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
-  -fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change \
+SANITIZER_CXX="$CLANGXX"
+SANITIZER_FLAGS=(-fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change)
+if ! command -v "$SANITIZER_CXX" >/dev/null 2>&1; then
+  SANITIZER_CXX="$CXX"
+  SANITIZER_FLAGS=(-fsanitize=address,undefined)
+fi
+"$SANITIZER_CXX" -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
+  "${SANITIZER_FLAGS[@]}" \
   -fno-sanitize-recover=all -fno-omit-frame-pointer \
   "$ROOT/tools/zenuniverse/main.cpp" -o "$BUILD/zenuniverse-sanitized"
-ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+ASAN_OPTIONS="detect_leaks=${ZENUNIVERSE_DETECT_LEAKS:-1}:halt_on_error=1" UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
   "$BUILD/zenuniverse-sanitized" launch-plan --input "$ROOT/packages/universe" \
   --manifest "$BUILD/fixtures/hello.zartifact" --file "$BUILD/fixtures/hello.zex" \
   --host-profile zenov-0.1.1-i686 > "$BUILD/sanitized.log"
 grep -q 'ZENUNIVERSE_LAUNCH_READY' "$BUILD/sanitized.log"
 
-printf 'ZENUNIVERSE_RUNTIME_PROVIDER_TESTS_OK schema=v1 host-profile=verified native=ready artifact-manifest=content-addressed launch-plan=verified alternatives=typed ps1=blocked-honestly assets=hashed tamper=blocked symlink=blocked sanitizers=yes\n'
+printf 'ZENUNIVERSE_RUNTIME_PROVIDER_TESTS_OK schema=v1 host-profile=verified native=ready linux-i386=ready artifact-manifest=content-addressed launch-plan=verified alternatives=typed ps1=blocked-honestly assets=hashed tamper=blocked symlink=blocked sanitizers=yes\n'

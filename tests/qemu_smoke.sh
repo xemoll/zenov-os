@@ -125,17 +125,19 @@ controller_first() {
   send_command "guard log verify"; wait_for_count "$serial" "ZENOV_GUARD_AUDIT_VERIFY_OK" 2 || { echo quit; return 1; }
   send_command "guard selftest"; wait_for_count "$serial" "ZENOV_GUARD_SELFTEST_OK" 2 || { echo quit; return 1; }
   send_command "cat /data/samples/pua-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_READ_AUDIT path=/samples/pua-test.bin verdict=SUSPICIOUS signature=PUA.Zenov.Test" || { echo quit; return 1; }
-  send_command "cat /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_READ_BLOCKED path=/samples/ransomware-test.bin verdict=INFECTED signature=Pattern.Ransomware.Test" || { echo quit; return 1; }
   send_command "write /data/ransomware-write.bin ZENOV_RANSOMWARE_TEST_V1"; wait_for_serial "$serial" "ZENOV_GUARD_WRITE_BLOCKED path=/ransomware-write.bin" || { echo quit; return 1; }
   send_command "write /data/pua-audit.bin ZENOV_PUA_TEST_V1"; wait_for_serial "$serial" "ZENOV_GUARD_WRITE_AUDIT path=/pua-audit.bin" || { echo quit; return 1; }; wait_for_serial "$serial" "WRITE_OK" || { echo quit; return 1; }
   send_command "write /data/split.bin prefix-ZENOV_RANSOMWARE_"; wait_for_count "$serial" "WRITE_OK" 2 || { echo quit; return 1; }
   send_command "append /data/split.bin TEST_V1-suffix"; wait_for_serial "$serial" "ZENOV_GUARD_WRITE_BLOCKED path=/split.bin" || { echo quit; return 1; }
-  send_command "guard quarantine /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_OK" || { echo quit; return 1; }
-  send_command "guard quarantine list"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_LIST_OK entries=2" || { echo quit; return 1; }
   send_command "cp /data/apps/hello.zex /data/apps/untrusted.zex"; wait_for_serial "$serial" "COPY_OK" || { echo quit; return 1; }
   send_command "run UNTRUSTED.ZEX"; wait_for_serial "$serial" "ZENOV_GUARD_UNTRUSTED_BLOCKED" || { echo quit; return 1; }
   send_command "rm /data/apps/untrusted.zex"; wait_for_serial "$serial" "REMOVE_OK" || { echo quit; return 1; }
   send_command "guard scan all"; wait_for_serial "$serial" "ZENOV_GUARD_FULL_SCAN_OK" || { echo quit; return 1; }
+  # Keep the read-block evidence inside the bounded 64-record persistent ring
+  # even as compatibility fixtures add legitimate full-scan audit records.
+  send_command "cat /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_READ_BLOCKED path=/samples/ransomware-test.bin verdict=INFECTED signature=Pattern.Ransomware.Test" || { echo quit; return 1; }
+  send_command "guard quarantine /data/samples/ransomware-test.bin"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_OK" || { echo quit; return 1; }
+  send_command "guard quarantine list"; wait_for_serial "$serial" "ZENOV_GUARD_QUARANTINE_LIST_OK entries=2" || { echo quit; return 1; }
 
   echo "sendkey f1 10"; wait_for_serial "$serial" "COMMAND REFERENCE" || { echo quit; return 1; }; echo "sendkey f4 10"; sleep 0.2
   send_command "vm"; wait_for_serial "$serial" "VIRTUAL MEMORY" || { echo quit; return 1; }

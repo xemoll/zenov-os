@@ -143,6 +143,7 @@ Implemented in this pass:
 - content-addressed artifact and asset hashing;
 - native ready plan;
 - foreign fail-closed plans;
+- built-in static Linux/i386 console provider with a fixed `write`/`exit`/`exit_group` syscall subset;
 - tamper, symlink, ownership, artifact-family and typo rejection;
 - GCC strict build plus Clang ASan/UBSan, unsigned-overflow and integer-conversion gates.
 
