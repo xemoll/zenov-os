@@ -44,6 +44,10 @@ bool zlib_header_valid(const uint8_t* data, uint32_t size) {
     return (static_cast<uint32_t>(cmf) * 256U + flg) % 31U == 0U;
 }
 
+uint32_t zlib_window_limit(const uint8_t* data) {
+    return 1U << (static_cast<uint32_t>(data[0] >> 4U) + 8U);
+}
+
 uint32_t load_be32(const uint8_t* data) {
     return (static_cast<uint32_t>(data[0]) << 24U) |
         (static_cast<uint32_t>(data[1]) << 16U) |
@@ -159,9 +163,10 @@ WrappedDeflateResult decode_zlib(const uint8_t* input,
     }
 
     uint32_t compressed_size = 0U;
+    const uint32_t window_limit = zlib_window_limit(input);
     if (!inflate_raw_prefix(input + 2U, input_size - 2U, output,
-            output_capacity, output_size, compressed_size) || !compressed_size ||
-        output_size > max_expanded_total ||
+            output_capacity, output_size, compressed_size, window_limit) ||
+        !compressed_size || output_size > max_expanded_total ||
         !expansion_within_limit(compressed_size, output_size) ||
         compressed_size > input_size - 2U) {
         return WrappedDeflateResult::unsupported;
