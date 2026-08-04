@@ -1,7 +1,6 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <vector>
 
 using uint8_t = std::uint8_t;
@@ -14,7 +13,13 @@ int main(int argc, char** argv) {
     if (argc != 2) return 2;
     std::ifstream input(argv[1], std::ios::binary);
     if (!input.is_open()) return 2;
-    std::vector<uint8_t> fixture((std::istreambuf_iterator<char>(input)), {});
+    input.seekg(0, std::ios::end);
+    const std::streamoff length = input.tellg();
+    if (length <= 0 || length > 64 * 1024) return 2;
+    input.seekg(0, std::ios::beg);
+    std::vector<uint8_t> fixture(static_cast<std::size_t>(length));
+    input.read(reinterpret_cast<char*>(fixture.data()), length);
+    if (!input || input.gcount() != length) return 2;
     linux_i386_elf::Layout layout{};
     if (fixture.empty() || !linux_i386_elf::validate(fixture.data(), fixture.size(), 0xFC000U, 4096U, layout) ||
         layout.image_bias != 0x08048000U || layout.entry_offset >= 0xFC000U || layout.load_count != 1U) return 1;
