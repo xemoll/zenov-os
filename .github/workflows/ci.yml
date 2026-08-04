@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/ci.yml'
       - '.agent/pr147-internal-probe.patch'
+      - '.agent/scheduler_probe.S'
   workflow_dispatch:
 
 permissions:
@@ -32,13 +33,17 @@ jobs:
           set -euo pipefail
           expected_head='bfde85b923674098e67c3c9c350a90739905b04e'
           expected_patch='0a4b24c51590afbf0b0cca3793413c7266dd895ee114f974aaba4eb128f6de73'
+          expected_probe='b8ac176864229cd14eab2a9b9a661667d982390ce1349b53f6cde3c3d218da63'
           test "$(git rev-parse HEAD)" = "$expected_head"
           test -z "$(git status --porcelain)"
           git fetch --no-tags --depth=1 origin agent/main-08ad-source-export
           git show FETCH_HEAD:.agent/pr147-internal-probe.patch > /tmp/pr147.patch
+          git show FETCH_HEAD:.agent/scheduler_probe.S > /tmp/scheduler_probe.S
           echo "$expected_patch  /tmp/pr147.patch" | sha256sum -c -
+          echo "$expected_probe  /tmp/scheduler_probe.S" | sha256sum -c -
           git apply --check /tmp/pr147.patch
           git apply /tmp/pr147.patch
+          install -m 0644 /tmp/scheduler_probe.S kernel/scheduler_probe.S
           git diff --check
           test -z "$(git diff --name-only -- .github/workflows)"
           grep -Fq 'SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata' kernel/parts/scheduler.inc
@@ -53,7 +58,7 @@ jobs:
           make -j2 all check | tee pr147-host-verification.log
           echo '2b7ba0114d5228825b30aca30e0e978f2faf9b798cf7f5494742d7a1d330956a  build/HELLO.ZEX' | sha256sum -c -
           test "$(stat -c%s build/KERNEL.BIN)" -le 524288
-          static_end="$(awk '/__kernel_static_end = \. / {print $1}' build/kernel.map | tail -1)"
+          static_end="$(awk '/__kernel_static_end = \./ {print $1}' build/kernel.map | tail -1)"
           [[ "$static_end" =~ ^0x[0-9a-fA-F]+$ ]]
           test $((static_end)) -le $((0x480000))
           grep -Fq 'SCHEDULER_POLICY_TEST_OK priority-levels=4 rr=equal aging=50 quantum=3-6' pr147-host-verification.log
