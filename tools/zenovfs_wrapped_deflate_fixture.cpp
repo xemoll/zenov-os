@@ -146,6 +146,31 @@ void require_absent(Entry* entries, const char* path) {
     if (find_entry(entries, path)) throw std::runtime_error(std::string("unexpected runtime file: ") + path);
 }
 
+bool starts_with(const std::string& text, const char* prefix) {
+    const std::size_t size = std::strlen(prefix);
+    return text.size() >= size && text.compare(0U, size, prefix) == 0;
+}
+
+bool ends_with(const std::string& text, const char* suffix) {
+    const std::size_t size = std::strlen(suffix);
+    return text.size() >= size && text.compare(text.size() - size, size, suffix) == 0;
+}
+
+void require_quarantine_pair(Entry* entries) {
+    std::uint32_t payloads = 0U;
+    std::uint32_t metadata = 0U;
+    for (std::uint32_t index = 0U; index < kEntryCount; ++index) {
+        if (!entries[index].used || entries[index].type != 1U) continue;
+        const std::string path = entry_path(entries[index]);
+        if (!starts_with(path, "/quarantine/q-")) continue;
+        if (ends_with(path, ".qtn.meta")) ++metadata;
+        else if (ends_with(path, ".qtn")) ++payloads;
+    }
+    if (payloads != 1U || metadata != 1U) {
+        throw std::runtime_error("wrapped quarantine pair is incomplete or ambiguous");
+    }
+}
+
 int build_fixture(const std::filesystem::path& base,
                   const std::filesystem::path& corpus,
                   const std::filesystem::path& output) {
@@ -168,8 +193,7 @@ int verify_runtime(const std::filesystem::path& image) {
     if (!valid_image(disk, super, entries)) throw std::runtime_error("invalid ZenovFS1 runtime image");
     require_absent(entries, "/samples/eicar-gzip.gz");
     require_absent(entries, "/wrapped-copy.zlib");
-    require_file(entries, "/quarantine/q-275a021bbfb6.qtn");
-    require_file(entries, "/quarantine/q-275a021bbfb6.qtn.meta");
+    require_quarantine_pair(entries);
     for (const auto& spec : kSpecs) {
         if (std::string(spec.image_path) == "/samples/eicar-gzip.gz") continue;
         require_file(entries, spec.image_path);
