@@ -1,0 +1,84 @@
+name: ZenovOS Preemptive Scheduler
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/scheduler.yml'
+      - 'GNUmakefile'
+      - 'Makefile'
+      - 'kernel/**'
+      - 'user/hello.S'
+      - 'tests/qemu_scheduler.sh'
+      - 'tests/scheduler_policy_test.cpp'
+      - 'tools/zenovfs_builder.cpp'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduler-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-preempt:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify exact scheduler source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
+          bash -n tests/qemu_scheduler.sh
+          grep -Fq 'user_virtual_base = 0x40000000U' kernel/parts/memory.inc
+          grep -Fq 'KERNEL_IDENTITY_MAP_OK bytes=134217728' kernel/parts/memory.inc
+          grep -Fq 'PREEMPTIVE_SCHEDULER_OK hz=100 tasks=8' kernel/parts/scheduler.inc
+          grep -Fq 'TASK_FAULT_ISOLATED' kernel/parts/scheduler.inc
+          grep -Fq 'syscall_yield = 9, syscall_sleep = 10, syscall_getpid = 11' kernel/parts/process.inc
+      - name: Install toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils qemu-system-x86
+      - name: Build and run host contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          make clean
+          make -j2 all check | tee scheduler-build.log
+          grep -Fq 'SCHEDULER_POLICY_TEST_OK priority-levels=4 rr=equal aging=50 quantum=3-6' scheduler-build.log
+          test "$(stat -c%s build/KERNEL.BIN)" -le 524288
+          static_end="$(awk '/__kernel_static_end = \./ {print $1}' build/kernel.map | tail -1)"
+          [[ "$static_end" =~ ^0x[0-9a-fA-F]+$ ]]
+          test $((static_end)) -le $((0x480000))
+      - name: Prove timer preemption and address-space isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/qemu_scheduler.sh build/zenov-os.img build/zenov-data.img build/qemu/scheduler
+          grep -Fq 'PREEMPTIVE_MULTITASKING_OK isolation=per-address-space' build/qemu/scheduler/serial.log
+          grep -Eq 'SCHED_BATCH_COMPLETE tasks=2 completed=2 faulted=0 switches=[1-9][0-9]* preemptions=[1-9][0-9]*' build/qemu/scheduler/serial.log
+      - name: Upload scheduler evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zenov-scheduler-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            build/KERNEL.BIN
+            build/kernel.elf
+            build/kernel.map
+            build/zenov-os.img
+            build/zenov-data.img
+            build/qemu/scheduler/
+            scheduler-build.log
