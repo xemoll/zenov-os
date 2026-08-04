@@ -22,13 +22,16 @@ constexpr uintptr_t kernel_static_start = live_storage_end;
 constexpr uintptr_t kernel_static_limit = 0x00400000U;
 constexpr uintptr_t user_base = kernel_static_limit;
 
-/* Ring-3 currently uses only the first 1 MiB of the 4-8 MiB page-table
- * window. The final 128 KiB remain inside the PMM permanent reservation and
- * are mapped only while the bounded ZMID decoder is running, with no user bit.
+/* Physical backing remains inside the PMM permanent 0-8 MiB reservation.
+ * ZMID receives a separate supervisor-only PDE at 8 MiB rather than sharing
+ * the 4-8 MiB ring-3 page table.
  */
-constexpr uintptr_t zmid_workspace_a = 0x007E0000U;
-constexpr uintptr_t zmid_workspace_b = 0x007F0000U;
+constexpr uintptr_t zmid_workspace_physical_a = 0x007E0000U;
+constexpr uintptr_t zmid_workspace_physical_b = 0x007F0000U;
+constexpr uintptr_t zmid_workspace_virtual_a = 0x00800000U;
+constexpr uintptr_t zmid_workspace_virtual_b = 0x00810000U;
 constexpr uint32_t zmid_workspace_bytes = 0x00010000U;
+constexpr uintptr_t zmid_workspace_virtual_end = 0x00820000U;
 constexpr uintptr_t pmm_reserved_end = 0x00800000U;
 
 static_assert(heap_start < heap_end);
@@ -42,7 +45,10 @@ static_assert(live_overlay_map + live_overlay_map_bytes == live_overlay_data);
 static_assert(live_storage_end == kernel_static_start);
 static_assert(kernel_static_start < kernel_static_limit);
 static_assert(kernel_static_limit == user_base);
-static_assert(user_base + 0x00100000U <= zmid_workspace_a);
-static_assert(zmid_workspace_a + zmid_workspace_bytes == zmid_workspace_b);
-static_assert(zmid_workspace_b + zmid_workspace_bytes == pmm_reserved_end);
+static_assert(user_base + 0x00100000U <= zmid_workspace_physical_a);
+static_assert(zmid_workspace_physical_a + zmid_workspace_bytes == zmid_workspace_physical_b);
+static_assert(zmid_workspace_physical_b + zmid_workspace_bytes == pmm_reserved_end);
+static_assert(zmid_workspace_virtual_a == paging::table_span * 2U);
+static_assert(zmid_workspace_virtual_a + zmid_workspace_bytes == zmid_workspace_virtual_b);
+static_assert(zmid_workspace_virtual_b + zmid_workspace_bytes == zmid_workspace_virtual_end);
 } // namespace supervisor_layout
