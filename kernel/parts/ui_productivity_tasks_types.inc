@@ -3,22 +3,25 @@ enum class ProductivityTaskFilter : uint8_t { today, overdue, planned, open, don
 constexpr uint32_t productivity_task_capacity = 24U;
 constexpr uint32_t productivity_task_visible_rows = 8U;
 constexpr uint32_t productivity_task_text_capacity = 65U;
+constexpr uint32_t productivity_task_snapshot_capacity = 96U;
 
 struct ProductivityTask {
     char source_path[48];
     char text[productivity_task_text_capacity];
+    char line_snapshot[productivity_task_snapshot_capacity];
     uint16_t line_start;
     uint16_t line_end;
     uint16_t payload_offset;
     uint16_t state_offset;
     uint16_t line_number;
+    uint16_t line_snapshot_size;
     uint16_t due_year;
     uint8_t due_month;
     uint8_t due_day;
     uint8_t priority;
-    uint32_t line_hash;
     bool done;
     bool waiting;
+    bool mutable_line;
 };
 
 ProductivityTask productivity_tasks[productivity_task_capacity]{};
@@ -38,14 +41,27 @@ bool productivity_task_tag_boundary(char value) {
     return value == ' ' || value == '\t';
 }
 
-uint32_t productivity_task_line_hash(const char* data, uint32_t start, uint32_t end) {
-    uint32_t hash = 2166136261U;
-    if (!data || end < start) return 0U;
-    for (uint32_t index = start; index < end; ++index) {
-        hash ^= static_cast<uint8_t>(data[index]);
-        hash = static_cast<uint32_t>(static_cast<uint64_t>(hash) * 16777619ULL);
-    }
-    return hash;
+bool productivity_task_capture_snapshot(ProductivityTask& task, const char* data, uint32_t start, uint32_t end) {
+    task.mutable_line = false;
+    task.line_snapshot_size = 0U;
+    task.line_snapshot[0] = 0;
+    if (!data || end <= start) return false;
+    const uint32_t size = end - start;
+    if (size + 1U > sizeof(task.line_snapshot) || size > 0xFFFFU) return false;
+    memcpy(task.line_snapshot, data + start, size);
+    task.line_snapshot[size] = 0;
+    task.line_snapshot_size = static_cast<uint16_t>(size);
+    task.mutable_line = true;
+    return true;
+}
+
+bool productivity_task_snapshot_matches(const ProductivityTask& task, const char* data, uint32_t start, uint32_t end) {
+    if (!task.mutable_line || !data || end < start) return false;
+    const uint32_t size = end - start;
+    if (size != task.line_snapshot_size || size + 1U > sizeof(task.line_snapshot)) return false;
+    for (uint32_t index = 0U; index < size; ++index)
+        if (data[start + index] != task.line_snapshot[index]) return false;
+    return true;
 }
 
 bool productivity_task_line_has_token_ci(const char* data, uint32_t start, uint32_t end, const char* token) {
