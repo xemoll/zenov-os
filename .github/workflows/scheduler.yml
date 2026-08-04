@@ -44,6 +44,9 @@ jobs:
           grep -Fq 'user_virtual_base = 0x40000000U' kernel/parts/memory.inc
           grep -Fq 'KERNEL_IDENTITY_MAP_OK bytes=134217728' kernel/parts/memory.inc
           grep -Fq 'PREEMPTIVE_SCHEDULER_OK hz=100 tasks=8' kernel/parts/scheduler.inc
+          grep -Fq 'SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata capabilities=console-write filesystem=unmodified' kernel/parts/scheduler.inc
+          grep -Fq 'scheduler_probe_start' kernel/scheduler_probe.S
+          grep -Fq 'schedtest' kernel/parts/commands.inc
           grep -Fq 'TASK_FAULT_ISOLATED' kernel/parts/scheduler.inc
           grep -Fq 'syscall_yield = 9, syscall_sleep = 10, syscall_getpid = 11' kernel/parts/process.inc
       - name: Install toolchain and QEMU
@@ -57,6 +60,7 @@ jobs:
           make clean
           make -j2 all check | tee scheduler-build.log
           grep -Fq 'SCHEDULER_POLICY_TEST_OK priority-levels=4 rr=equal aging=50 quantum=3-6' scheduler-build.log
+          test "$(sha256sum build/HELLO.ZEX | awk '{print $1}')" = '2b7ba0114d5228825b30aca30e0e978f2faf9b798cf7f5494742d7a1d330956a'
           test "$(stat -c%s build/KERNEL.BIN)" -le 524288
           static_end="$(awk '/__kernel_static_end = \./ {print $1}' build/kernel.map | tail -1)"
           [[ "$static_end" =~ ^0x[0-9a-fA-F]+$ ]]
