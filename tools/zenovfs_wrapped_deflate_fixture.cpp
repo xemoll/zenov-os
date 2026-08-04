@@ -113,6 +113,30 @@ std::uint32_t free_index(Entry* entries) {
     throw std::runtime_error("ZenovFS entry table is full");
 }
 
+std::vector<std::uint8_t> entry_bytes(const std::vector<std::uint8_t>& disk,
+                                      const Entry* entries,
+                                      const Entry& entry) {
+    const std::ptrdiff_t signed_index = &entry - entries;
+    if (signed_index < 0 || signed_index >= static_cast<std::ptrdiff_t>(kEntryCount) ||
+        entry.type != 1U || entry.size > kMaxFileBytes) {
+        throw std::runtime_error("invalid runtime file entry");
+    }
+    const std::size_t index = static_cast<std::size_t>(signed_index);
+    const std::size_t offset =
+        static_cast<std::size_t>(kDataStart) * kSectorSize +
+        index * static_cast<std::size_t>(kSlotSectors) * kSectorSize;
+    if (offset > disk.size() || entry.size > disk.size() - offset) {
+        throw std::runtime_error("runtime file bytes outside image");
+    }
+    std::vector<std::uint8_t> bytes(
+        disk.begin() + static_cast<std::ptrdiff_t>(offset),
+        disk.begin() + static_cast<std::ptrdiff_t>(offset + entry.size));
+    if (fnv1a(bytes.data(), bytes.size()) != entry.checksum) {
+        throw std::runtime_error("runtime file checksum mismatch: " + entry_path(entry));
+    }
+    return bytes;
+}
+
 void add_file(std::vector<std::uint8_t>& disk,
               Entry* entries,
               const std::string& path,
@@ -137,9 +161,17 @@ void add_file(std::vector<std::uint8_t>& disk,
     entries[index] = entry;
 }
 
-void require_file(Entry* entries, const char* path) {
+void require_file_bytes(const std::vector<std::uint8_t>& disk,
+                        Entry* entries,
+                        const char* path,
+                        const std::vector<std::uint8_t>& expected) {
     const Entry* entry = find_entry(entries, path);
-    if (!entry || entry->type != 1U) throw std::runtime_error(std::string("missing runtime file: ") + path);
+    if (!entry || entry->type != 1U) {
+        throw std::runtime_error(std::string("missing runtime file: ") + path);
+    }
+    if (entry_bytes(disk, entries, *entry) != expected) {
+        throw std::runtime_error(std::string("runtime bytes changed: ") + path);
+    }
 }
 
 void require_absent(Entry* entries, const char* path) {
@@ -156,19 +188,30 @@ bool ends_with(const std::string& text, const char* suffix) {
     return text.size() >= size && text.compare(text.size() - size, size, suffix) == 0;
 }
 
-void require_quarantine_pair(Entry* entries) {
-    std::uint32_t payloads = 0U;
-    std::uint32_t metadata = 0U;
+struct QuarantinePair {
+    const Entry* payload = nullptr;
+    const Entry* metadata = nullptr;
+};
+
+QuarantinePair require_quarantine_pair(Entry* entries) {
+    QuarantinePair pair{};
     for (std::uint32_t index = 0U; index < kEntryCount; ++index) {
         if (!entries[index].used || entries[index].type != 1U) continue;
         const std::string path = entry_path(entries[index]);
         if (!starts_with(path, "/quarantine/q-")) continue;
-        if (ends_with(path, ".qtn.meta")) ++metadata;
-        else if (ends_with(path, ".qtn")) ++payloads;
+        if (ends_with(path, ".qtn.meta")) {
+            if (pair.metadata) throw std::runtime_error("multiple wrapped quarantine metadata files");
+            pair.metadata = &entries[index];
+        } else if (ends_with(path, ".qtn")) {
+            if (pair.payload) throw std::runtime_error("multiple wrapped quarantine payload files");
+            pair.payload = &entries[index];
+        }
     }
-    if (payloads != 1U || metadata != 1U) {
-        throw std::runtime_error("wrapped quarantine pair is incomplete or ambiguous");
+    if (!pair.payload || !pair.metadata ||
+        entry_path(*pair.metadata) != entry_path(*pair.payload) + ".meta") {
+        throw std::runtime_error("wrapped quarantine pair is incomplete or mismatched");
     }
+    return pair;
 }
 
 int build_fixture(const std::filesystem::path& base,
@@ -186,20 +229,41 @@ int build_fixture(const std::filesystem::path& base,
     return 0;
 }
 
-int verify_runtime(const std::filesystem::path& image) {
+int verify_runtime(const std::filesystem::path& image,
+                   const std::filesystem::path& corpus) {
     auto disk = read_all(image);
     const Superblock* super = nullptr;
     Entry* entries = nullptr;
     if (!valid_image(disk, super, entries)) throw std::runtime_error("invalid ZenovFS1 runtime image");
     require_absent(entries, "/samples/eicar-gzip.gz");
     require_absent(entries, "/wrapped-copy.zlib");
-    require_quarantine_pair(entries);
+
     for (const auto& spec : kSpecs) {
         if (std::string(spec.image_path) == "/samples/eicar-gzip.gz") continue;
-        require_file(entries, spec.image_path);
+        require_file_bytes(disk, entries, spec.image_path,
+                           read_all(corpus / spec.source_name));
     }
+
+    const QuarantinePair pair = require_quarantine_pair(entries);
+    const std::vector<std::uint8_t> expected_payload = read_all(corpus / "eicar-gzip.gz");
+    if (entry_bytes(disk, entries, *pair.payload) != expected_payload) {
+        throw std::runtime_error("quarantine payload differs from original GZIP bytes");
+    }
+    static constexpr char kExpectedMetadata[] =
+        "ZQMD1\n"
+        "original=/samples/eicar-gzip.gz\n"
+        "signature=GZip:Eicar.Pattern\n"
+        "verdict=INFECTED\n";
+    const std::vector<std::uint8_t> metadata = entry_bytes(disk, entries, *pair.metadata);
+    if (metadata.size() != sizeof(kExpectedMetadata) - 1U ||
+        !std::equal(metadata.begin(), metadata.end(),
+                    reinterpret_cast<const std::uint8_t*>(kExpectedMetadata))) {
+        throw std::runtime_error("quarantine metadata is not canonical");
+    }
+
     std::cout << "ZENOV_WRAPPED_DEFLATE_RUNTIME_OK quarantine=2 blocked-copy=absent retained="
-              << (std::size(kSpecs) - 1U) << "\n";
+              << (std::size(kSpecs) - 1U)
+              << " bytes=exact metadata=canonical\n";
     return 0;
 }
 } // namespace
@@ -209,12 +273,12 @@ int main(int argc, char** argv) {
         if (argc == 5 && std::string(argv[1]) == "--build") {
             return build_fixture(argv[2], argv[3], argv[4]);
         }
-        if (argc == 3 && std::string(argv[1]) == "--verify") {
-            return verify_runtime(argv[2]);
+        if (argc == 4 && std::string(argv[1]) == "--verify") {
+            return verify_runtime(argv[2], argv[3]);
         }
         std::cerr << "usage:\n"
                      "  zenovfs-wrapped-deflate-fixture --build <base.img> <corpus-dir> <output.img>\n"
-                     "  zenovfs-wrapped-deflate-fixture --verify <runtime.img>\n";
+                     "  zenovfs-wrapped-deflate-fixture --verify <runtime.img> <corpus-dir>\n";
         return 2;
     } catch (const std::exception& error) {
         std::cerr << "zenovfs-wrapped-deflate-fixture: " << error.what() << "\n";
