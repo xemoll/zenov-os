@@ -46,7 +46,7 @@ bool path_has_zip_extension(const char* path) {
 }
 
 bool looks_like_zlib_stream(const uint8_t* data, uint32_t size) {
-    return data && size >= 6U && data[0] == 0x78U && zlib_header_valid(data, size);
+    return data && size >= 6U && zlib_header_valid(data, size);
 }
 
 struct ZipEntryView {
