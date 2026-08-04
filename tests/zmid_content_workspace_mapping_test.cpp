@@ -185,7 +185,8 @@ int run() {
         !zmid_content_workspace_allocator::mapping_active ||
         zmid_content_workspace_allocator::acquire_mapping()) return 27;
 
-    std::printf("ZMID_WORKSPACE_MAPPING_TEST_OK pages=%u pde=isolated supervisor-only=yes ad=accepted conflict=blocked active=verified release=cleared fault=latched allocations=bounded\n",
+    std::printf("ZMID_WORKSPACE_AD_BITS_TEST_OK pde=accessed pte=accessed-dirty policy=masked\n");
+    std::printf("ZMID_WORKSPACE_MAPPING_TEST_OK pages=%u pde=isolated supervisor-only=yes conflict=blocked active=verified release=cleared fault=latched allocations=bounded\n",
                 workspace_pages * 2U);
     return 0;
 }
