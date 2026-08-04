@@ -7,6 +7,7 @@ enum class Failure : uint8_t {
     directory_busy,
     table_busy,
     post_map_mismatch,
+    wipe_mismatch,
     allocation_arguments,
     allocation_limit,
     allocation_mapping,
@@ -59,6 +60,7 @@ const char* failure_name() {
         case Failure::directory_busy: return "directory-busy";
         case Failure::table_busy: return "table-busy";
         case Failure::post_map_mismatch: return "post-map-mismatch";
+        case Failure::wipe_mismatch: return "wipe-mismatch";
         case Failure::allocation_arguments: return "allocation-arguments";
         case Failure::allocation_limit: return "allocation-limit";
         case Failure::allocation_mapping: return "allocation-mapping";
@@ -148,6 +150,23 @@ void clear_range(uintptr_t virtual_address) {
     }
 }
 
+bool volatile_wipe(uintptr_t virtual_address, uint32_t bytes,
+                   uint32_t& mismatch_index, uint32_t& actual) {
+    volatile uint8_t* const data =
+        reinterpret_cast<volatile uint8_t*>(virtual_address);
+    for (uint32_t index = 0U; index < bytes; ++index) data[index] = 0U;
+    for (uint32_t index = 0U; index < bytes; ++index) {
+        const uint8_t value = data[index];
+        if (!value) continue;
+        mismatch_index = index;
+        actual = value;
+        return false;
+    }
+    mismatch_index = 0U;
+    actual = 0U;
+    return true;
+}
+
 bool mapping_exact(uint32_t& mismatch_index,
                    uint32_t& actual, uint32_t& expected) {
     expected = expected_directory_entry();
@@ -226,6 +245,16 @@ void release_mapping() {
     if (!mapping_exact(index, actual, expected)) {
         mapping_fault = true;
         record_failure(Failure::active_mismatch, index, actual, expected);
+        return;
+    }
+    if (!volatile_wipe(supervisor_layout::zmid_workspace_virtual_a,
+                       supervisor_layout::zmid_workspace_bytes,
+                       index, actual) ||
+        !volatile_wipe(supervisor_layout::zmid_workspace_virtual_b,
+                       supervisor_layout::zmid_workspace_bytes,
+                       index, actual)) {
+        mapping_fault = true;
+        record_failure(Failure::wipe_mismatch, index, actual, 0U);
         return;
     }
     clear_range(supervisor_layout::zmid_workspace_virtual_a);
