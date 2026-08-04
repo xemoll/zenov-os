@@ -116,8 +116,13 @@ jobs:
             --serial-log build/qemu/launcher-serial.log \
             --dry-run | tee build/qemu-launcher.txt
           grep -Fq 'accel=tcg' build/qemu-launcher.txt
-          grep -Fq -- '-boot order=d,strict=on' build/qemu-launcher.txt
-          grep -Fq -- '-drive file=' build/qemu-launcher.txt
+          grep -Fq -- ' -boot ' build/qemu-launcher.txt
+          grep -Fq 'order=d' build/qemu-launcher.txt
+          grep -Fq 'strict=on' build/qemu-launcher.txt
+          grep -Fq -- ' -drive ' build/qemu-launcher.txt
+          grep -Fq 'file=' build/qemu-launcher.txt
+          grep -Fq 'media=cdrom' build/qemu-launcher.txt
+          grep -Fq 'readonly=on' build/qemu-launcher.txt
 
           test ! -e dist-vm
           sha256sum build/ZenovOS-0.1.1-x86.iso | tee build/live-iso.sha256
