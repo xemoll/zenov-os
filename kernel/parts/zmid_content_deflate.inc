@@ -172,10 +172,12 @@ bool inflate_raw_prefix(const uint8_t* input,
                         uint8_t* output,
                         uint32_t output_capacity,
                         uint32_t& output_size,
-                        uint32_t& input_consumed) {
+                        uint32_t& input_consumed,
+                        uint32_t window_limit = 32768U) {
     output_size = 0U;
     input_consumed = 0U;
-    if ((!input && input_size) || !output || !output_capacity) return false;
+    if ((!input && input_size) || !output || !output_capacity ||
+        !window_limit || window_limit > 32768U) return false;
     BitReader reader{input, input_size};
     bool final_block = false;
     uint32_t blocks = 0U;
@@ -231,7 +233,8 @@ bool inflate_raw_prefix(const uint8_t* input,
             if (distance_extra[distance_symbol] &&
                 !reader.read(distance_extra[distance_symbol], extra)) return false;
             const uint32_t distance = distance_base[distance_symbol] + extra;
-            if (!distance || distance > output_size || length > output_capacity - output_size) return false;
+            if (!distance || distance > output_size || distance > window_limit ||
+                length > output_capacity - output_size) return false;
             for (uint32_t i = 0U; i < length; ++i) {
                 output[output_size] = output[output_size - distance];
                 ++output_size;
