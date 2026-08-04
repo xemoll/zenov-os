@@ -82,14 +82,14 @@ void command_help() {
     console::line("  Navigation   home  help  clear  pwd  cd <path>");
     console::line("  Storage      ls  mkdir  touch  write  append  rm  fsck  sync");
     console::line("  File tools   cat  cp  mv  stat  mount  df");
-    console::line("  Applications apps  run <name|path>  [ZEX1 or static ELF32]");
+    console::line("  Applications apps  run <app> [& <app>...]  ps  schedtest");
     console::line("  Memory       mem  pmm  vm  memmap");
     console::line("  System       info  status  devices  disk  cpu");
     console::line("  Session      uptime  date  time  history  bootlog");
     console::line("  Tools        echo  calc  theme  color");
     console::line("  Power        reboot  halt");
     console::line("");
-    console::line("  0.1.1 syscalls: exit, console, ticks, file read/write/stat, version, sync.");
+    console::line("  Syscalls: exit, console, ticks, files, version, sync, yield, sleep, getpid.");
 }
 void command_info() {
     begin_view("SYSTEM DETAILS");
@@ -109,11 +109,12 @@ void command_status() {
     console::success("  READY         Core services are running.");
     console::write("  Paging        "); console::line(paging::enabled ? "enabled; kernel/user permissions active" : "offline");
     console::write("  PMM           "); console::line(pmm::initialized ? "E820 frame allocator active" : "unavailable");
-    console::line("  Interrupts    IDT active; user syscall gate 0x80 active");
+    console::line("  Interrupts    IDT active; syscall gate 0x80; timer preemption");
     console::line("  Timer         PIT channel 0 at 100 Hz");
     console::line("  Keyboard      PS/2 controller on IRQ1");
     console::write("  Persistent    "); console::line(storage::ready() ? "ZenovFS mounted read-write" : "unavailable");
-    console::line("  Applications  ZEX1 + ELF32 foreground runtime");
+    console::line("  Applications  isolated ZEX1/ELF32 tasks; foreground batches");
+    process::print_scheduler_status();
     console::write("  Uptime        "); console::unsigned_dec(timer_ticks / 100U); console::line(" seconds");
 }
 void command_devices() {
@@ -159,7 +160,7 @@ void command_mem() {
     console::write("  Kernel heap   "); console::unsigned_dec(heap::used_bytes()); console::write(" / ");
     console::unsigned_dec(heap::capacity_bytes()); console::line(" bytes");
     console::write("  PMM free      "); console::unsigned_dec(pmm::free_bytes() >> 10U); console::line(" KiB");
-    console::line("  User window   0x00400000-0x004FFFFF");
+    console::line("  User window   0x40000000-0x400FFFFF (per task)");
 }
 void command_pmm() {
     begin_view("PHYSICAL MEMORY MANAGER");
@@ -181,7 +182,7 @@ void command_vm() {
     console::write("  Directory     "); console::hex(paging::directory_address()); console::put('\n');
     console::write("  Kernel map    "); console::unsigned_dec(paging::kernel_mapped_bytes() >> 20U); console::line(" MiB supervisor");
     console::write("  User map      "); console::unsigned_dec(paging::user_mapped_bytes() >> 20U); console::line(" MiB user-accessible");
-    console::line("  Segmentation  ring-3 window limited to 1 MiB at 0x00400000");
+    console::line("  Segmentation  ring-3 offsets map at 0x40000000 per task");
 }
 void command_memmap() {
     begin_view("MEMORY MAP");
@@ -363,6 +364,13 @@ void execute(char* line) {
     else if (string_equal(command, "apps")) { begin_view("APPLICATIONS"); storage::list("/data/apps"); }
     else if (string_equal(command, "run")) {
         if (!process::run(args)) console::warning("Application could not be loaded. Use validated ZEX1 or static ELF32.");
+    }
+    else if (string_equal(command, "ps") || string_equal(command, "tasks")) {
+        begin_view("TASK SCHEDULER");
+        process::print_scheduler_status();
+    }
+    else if (string_equal(command, "schedtest")) {
+        if (!process::run_scheduler_probe()) console::warning("Scheduler diagnostic could not start.");
     }
     else if (string_equal(command, "history")) command_history();
     else if (string_equal(command, "bootlog")) command_bootlog();

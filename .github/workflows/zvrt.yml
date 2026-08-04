@@ -74,7 +74,7 @@ jobs:
           grep -Fq 'constexpr uintptr_t pmm_bitmap = 0x00311000U;' kernel/parts/supervisor_layout.inc
           grep -Fq 'constexpr uintptr_t kernel_static_start = live_storage_end;' kernel/parts/supervisor_layout.inc
           grep -Fq 'ASSERT(__kernel_low_end <= 0x000A0000' kernel/linker.ld
-          grep -Fq 'ASSERT(__kernel_static_end <= 0x00400000' kernel/linker.ld
+          grep -Fq 'ASSERT(__kernel_static_end <= 0x00480000' kernel/linker.ld
           grep -Fq '"zvrt_root_key_id": "d28215ec62269ffc"' build/build-manifest.json
           grep -Fq 'ZENOV_ZVRT_QEMU_OK valid=yes manifest_fail_closed=yes data_blocked=yes payload_disclosure=no multichunk=2 audit=durable' build/qemu/zvrt/summary.log
           grep -Fq 'SECURITY_POLICY_FORMAT_TEST_OK decimal=10 path=16 declared-length=5 version-wrap=blocked' ci-logs/security-policy-format-test.log

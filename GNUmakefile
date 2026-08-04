@@ -214,3 +214,18 @@ $(BLOCK_STATUS_QEMU_STAMP): all tests/qemu_block_status.sh $(BUILD)/zenovfs-veri
 block-status-qemu: $(BLOCK_STATUS_QEMU_STAMP)
 
 include fs_surface.mk
+
+SCHEDULER_POLICY_TEST := $(BUILD)/scheduler-policy-test
+$(SCHEDULER_POLICY_TEST): tests/scheduler_policy_test.cpp kernel/parts/scheduler_policy.inc | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+	$@
+check: $(SCHEDULER_POLICY_TEST)
+
+SCHEDULER_QEMU_OUT := $(BUILD)/qemu/scheduler
+SCHEDULER_QEMU_STAMP := $(SCHEDULER_QEMU_OUT)/.stamp
+$(SCHEDULER_QEMU_STAMP): all tests/qemu_scheduler.sh
+	@rm -rf $(SCHEDULER_QEMU_OUT)
+	@mkdir -p $(SCHEDULER_QEMU_OUT)
+	bash tests/qemu_scheduler.sh $(BUILD)/zenov-os.img $(BUILD)/zenov-data.img $(SCHEDULER_QEMU_OUT)
+	@touch $@
+scheduler-qemu: $(SCHEDULER_QEMU_STAMP)

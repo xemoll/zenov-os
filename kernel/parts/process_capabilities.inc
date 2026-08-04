@@ -24,15 +24,6 @@ constexpr uint32_t syscall_error_corrupt = 0xFFFFFFF8U;
 
 using CapabilityProfile = zcap::Record;
 
-struct ActiveCapabilityProfile {
-    bool valid = false;
-    uint32_t mask = 0;
-    char path[48]{};
-    char read_scope[48]{};
-    char write_scope[48]{};
-    uint8_t digest[security_guard::sha256_bytes]{};
-};
-
 ActiveCapabilityProfile active_capabilities{};
 SyscallAbi active_syscall_abi = SyscallAbi::zenov;
 uint32_t linux_i386_image_bias = 0U;
