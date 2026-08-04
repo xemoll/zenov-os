@@ -1,4 +1,4 @@
-name: Agent Main Source Export
+name: Sync Scheduler Branch From Current Main
 
 on:
   pull_request:
@@ -7,28 +7,92 @@ on:
       - '.github/workflows/agent-main-export.yml'
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: sync-scheduler-from-main
+  cancel-in-progress: false
 
 jobs:
-  export:
+  sync:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: agent/kernel-preemptive-scheduler-0.1.1
           fetch-depth: 0
-          persist-credentials: false
-      - name: Export exact source
+          persist-credentials: true
+
+      - name: Merge exact main and preserve both kernel paths
+        shell: bash
+        env:
+          MAIN_SHA: 08ad8e6caec8f4818147b7961c809afdc9911558
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$MAIN_SHA"
+          branch_head="$(git rev-parse HEAD)"
+
+          set +e
+          git merge --no-ff --no-commit "$MAIN_SHA"
+          merge_rc=$?
+          set -e
+          if ((merge_rc != 0)); then
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            test "${#conflicts[@]}" -eq 1
+            test "${conflicts[0]}" = 'kernel/parts/hardware.inc'
+
+            git checkout --ours kernel/parts/hardware.inc
+            python3 - <<'PY'
+from pathlib import Path
+path = Path('kernel/parts/hardware.inc')
+text = path.read_text()
+old_namespace = 'namespace graphics { void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons); }'
+new_namespace = '''namespace graphics {
+void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons);
+void background_tick();
+}'''
+old_wait = '''uint16_t key_pop_blocking() {
+    for (;;) { disable_interrupts(); if (key_tail != key_head) { const uint16_t key = key_queue[key_tail]; key_tail = (key_tail + 1) % key_queue_capacity; enable_interrupts(); return key; } asm volatile("sti; hlt; cli"); }
+}'''
+new_wait = '''uint16_t key_pop_blocking() {
+    for (;;) {
+        disable_interrupts();
+        if (key_tail != key_head) {
+            const uint16_t key = key_queue[key_tail];
+            key_tail = (key_tail + 1) % key_queue_capacity;
+            enable_interrupts();
+            return key;
+        }
+        asm volatile("sti; hlt; cli");
+        enable_interrupts();
+        graphics::background_tick();
+    }
+}'''
+if old_namespace not in text or old_wait not in text:
+    raise SystemExit('expected hardware merge anchors are missing')
+path.write_text(text.replace(old_namespace, new_namespace).replace(old_wait, new_wait))
+PY
+            git add kernel/parts/hardware.inc
+          fi
+
+          test -z "$(git diff --name-only --diff-filter=U)"
+          grep -Fq 'uint32_t timer_interrupt(InterruptFrame* frame);' kernel/parts/hardware.inc
+          grep -Fq 'return process::timer_interrupt(frame);' kernel/parts/hardware.inc
+          grep -Fq 'return process::user_exception(frame);' kernel/parts/hardware.inc
+          grep -Fq 'graphics::background_tick();' kernel/parts/hardware.inc
+
+          # Preserve branch workflow files because GITHUB_TOKEN cannot update
+          # workflows. Connector-authorized writes synchronize them afterward.
+          git restore --source="$branch_head" --staged --worktree -- .github/workflows
+          git diff --cached --check
+          git status --short
+
+      - name: Publish two-parent merge commit
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          test "$(git rev-parse origin/main)" = '08ad8e6caec8f4818147b7961c809afdc9911558'
-          git archive --format=tar.gz --output=main-source.tar.gz origin/main
-          test -s main-source.tar.gz
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: main-source-08ad
-          if-no-files-found: error
-          retention-days: 1
-          path: main-source.tar.gz
+          git config user.name 'ZenovOS Kernel Agent'
+          git config user.email 'actions@users.noreply.github.com'
+          git commit -m 'merge: synchronize preemptive scheduler with current main'
+          git push origin HEAD:refs/heads/agent/kernel-preemptive-scheduler-0.1.1
