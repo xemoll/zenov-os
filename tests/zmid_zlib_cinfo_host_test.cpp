@@ -84,7 +84,7 @@ int run(const char* undersized_window_path, const char* full_window_path) {
                 static_cast<std::uint32_t>(stream.size()), 0U,
                 decoded.data(), alternate.data(), result) != InspectionResult::matched ||
             result.verdict != security_guard::Verdict::infected ||
-            std::strcmp(result.signature, "Zlib:Eicar.Pattern") != 0) {
+            std::strcmp(result.signature, "Zlib:Pattern.Ransomware.Test") != 0) {
             return 30 + cinfo;
         }
     }
