@@ -44,9 +44,10 @@ controller() {
   wait_for "USER_HIGH_HALF_WINDOW_OK base=0x40000000 bytes=1048576" || { echo quit; return 1; }
   wait_for "ZENOVOS_UI_READY" || { echo quit; return 1; }
   wait_for "zenov> " || { echo quit; return 1; }
-  send_command "run HELLO preempt-a & HELLO preempt-b"
-  wait_for "TASK_CREATED pid=1 app=/apps/hello.zex" || { echo quit; return 1; }
-  wait_for "TASK_CREATED pid=2 app=/apps/hello.zex" || { echo quit; return 1; }
+  send_command "schedtest"
+  wait_for "SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata capabilities=console-write filesystem=unmodified" || { echo quit; return 1; }
+  wait_for "TASK_CREATED pid=1 app=/kernel/scheduler-probe-a" || { echo quit; return 1; }
+  wait_for "TASK_CREATED pid=2 app=/kernel/scheduler-probe-b" || { echo quit; return 1; }
   wait_for "SCHED_BATCH_START tasks=2" || { echo quit; return 1; }
   wait_for "PREEMPT_A_START" || { echo quit; return 1; }
   wait_for "PREEMPT_B_START" || { echo quit; return 1; }
@@ -82,4 +83,6 @@ grep -Eq 'SCHED_BATCH_COMPLETE tasks=2 completed=2 faulted=0 switches=[1-9][0-9]
 grep -Fq 'SCHED_CONTEXT_SWITCH from=1 to=2 reason=timer' "$SERIAL"
 ! grep -Fq 'ZENOVOS KERNEL PANIC' "$SERIAL"
 ! grep -Fq 'SCHED_BATCH_CREATE_FAILED' "$SERIAL"
+! grep -Fq 'SCHED_PROBE_CREATE_FAILED' "$SERIAL"
+! grep -Fq 'ZENOV_GUARD_TRUST_BASELINE_FAILED' "$SERIAL"
 printf 'qemu-scheduler: OK tasks=2 policy=priority-rr preemption=timer address-space=per-task\n'

@@ -1,5 +1,8 @@
 #include "scheduler_policy.inc"
 
+extern "C" const uint8_t scheduler_probe_start[];
+extern "C" const uint8_t scheduler_probe_end[];
+
 namespace process {
 enum class TaskState : uint8_t { unused, ready, running, sleeping, zombie };
 
@@ -267,6 +270,85 @@ void reset_task_table() {
     scheduler_ending = false;
 }
 
+bool configure_task(uint32_t slot, paging::AddressSpace space, uint32_t entry,
+                    uint32_t initial_stack, uint32_t initial_eax,
+                    const ActiveCapabilityProfile& capabilities,
+                    const char* path, const char* format) {
+    if (slot >= task_capacity || !space.table_physical || !path || !format) return false;
+    char normalized_path[sizeof(Task::path)]{};
+    if (!storage::path_copy(normalized_path, path, sizeof(normalized_path))) return false;
+    Task& task = tasks[slot];
+    task = Task{};
+    task.state = TaskState::ready;
+    task.pid = next_pid++;
+    task.base_priority = scheduler_policy::default_priority;
+    task.dynamic_priority = task.base_priority;
+    task.quantum_remaining = scheduler_policy::quantum_ticks(task.dynamic_priority);
+    task.context.gs = task.context.fs = task.context.es = task.context.ds = 0x23U;
+    task.context.eax = initial_eax;
+    task.context.eip = entry;
+    task.context.cs = 0x1BU;
+    task.context.eflags = 0x202U;
+    task.context.useresp = initial_stack;
+    task.context.ss = 0x23U;
+    task.address_space = space;
+    task.capabilities = capabilities;
+    storage::path_copy(task.path, normalized_path, sizeof(task.path));
+    string_copy(task.format, format, sizeof(task.format));
+    memset(reinterpret_cast<void*>(task_stack_bottom(slot)), 0,
+           supervisor_layout::task_stack_bytes);
+    return true;
+}
+
+void log_task_created(const Task& task) {
+    serial::write("TASK_CREATED pid="); serial_u32(task.pid);
+    serial::write(" app="); serial::write(task.path);
+    serial::write(" pages="); serial_u32(task.address_space.mapped_pages);
+    serial::write(" priority="); serial_u32(task.base_priority);
+    serial::write("\r\n");
+}
+
+bool prepare_scheduler_probe_task(uint32_t slot, uint32_t variant) {
+    const uint32_t image_size = static_cast<uint32_t>(scheduler_probe_end - scheduler_probe_start);
+    if (slot >= task_capacity || image_size == 0U || image_size >= stack_base) return false;
+    paging::AddressSpace space{};
+    if (!paging::address_space_create(space) || !paging::address_space_activate(&space)) {
+        paging::address_space_destroy(space);
+        return false;
+    }
+    const bool mapped = paging::map_user(0U, image_size, true) && map_stack();
+    if (mapped) {
+        memcpy(reinterpret_cast<void*>(user_base), scheduler_probe_start, image_size);
+    }
+    const bool protected_image = mapped && paging::protect_user(0U, image_size, false);
+    if (!protected_image) {
+        paging::address_space_activate(nullptr);
+        paging::address_space_destroy(space);
+        return false;
+    }
+
+    ActiveCapabilityProfile capabilities{};
+    capabilities.valid = true;
+    capabilities.mask = capability_console_write;
+    const char* const path = variant == 0U ?
+        "/kernel/scheduler-probe-a" : "/kernel/scheduler-probe-b";
+    if (!storage::path_copy(capabilities.path, path, sizeof(capabilities.path))) {
+        paging::address_space_activate(nullptr);
+        paging::address_space_destroy(space);
+        return false;
+    }
+    security_guard::sha256(scheduler_probe_start, image_size, capabilities.digest);
+    const bool configured = configure_task(slot, space, 0U, stack_top, variant,
+                                            capabilities, path, "KPROBE");
+    paging::address_space_activate(nullptr);
+    if (!configured) {
+        paging::address_space_destroy(space);
+        return false;
+    }
+    log_task_created(tasks[slot]);
+    return true;
+}
+
 bool prepare_task(uint32_t slot, char* command) {
     if (slot >= task_capacity || !command || !*command) return false;
     char* arguments[max_arguments]{};
@@ -292,32 +374,16 @@ bool prepare_task(uint32_t slot, char* command) {
         clear_capability_profile();
         return false;
     }
-    Task& task = tasks[slot];
-    task = Task{};
-    task.state = TaskState::ready;
-    task.pid = next_pid++;
-    task.base_priority = scheduler_policy::default_priority;
-    task.dynamic_priority = task.base_priority;
-    task.quantum_remaining = scheduler_policy::quantum_ticks(task.dynamic_priority);
-    task.context.gs = task.context.fs = task.context.es = task.context.ds = 0x23U;
-    task.context.eip = entry;
-    task.context.cs = 0x1BU;
-    task.context.eflags = 0x202U;
-    task.context.useresp = initial_stack;
-    task.context.ss = 0x23U;
-    task.address_space = space;
-    task.capabilities = capability_snapshot;
-    storage::path_copy(task.path, requested, sizeof(task.path));
-    string_copy(task.format, zex ? "ZEX1" : "ELF32", sizeof(task.format));
-    memset(reinterpret_cast<void*>(task_stack_bottom(slot)), 0,
-           supervisor_layout::task_stack_bytes);
+    const bool configured = configure_task(slot, space, entry, initial_stack, 0U,
+                                           capability_snapshot, requested,
+                                           zex ? "ZEX1" : "ELF32");
     paging::address_space_activate(nullptr);
     clear_capability_profile();
-    serial::write("TASK_CREATED pid="); serial_u32(task.pid);
-    serial::write(" app="); serial::write(task.path);
-    serial::write(" pages="); serial_u32(task.address_space.mapped_pages);
-    serial::write(" priority="); serial_u32(task.base_priority);
-    serial::write("\r\n");
+    if (!configured) {
+        paging::address_space_destroy(space);
+        return false;
+    }
+    log_task_created(tasks[slot]);
     return true;
 }
 
@@ -366,10 +432,40 @@ bool run_task_batch(char* input) {
     const int32_t first = select_ready(-1);
     if (first < 0 || !activate_task(static_cast<uint32_t>(first))) {
         scheduler_running = false;
+        paging::address_space_activate(nullptr);
+        for (uint32_t i = 0U; i < task_capacity; ++i) destroy_task_address_space(i);
+        reset_task_table();
+        serial::line("SCHED_BATCH_START_FAILED");
         return false;
     }
     serial::write("SCHED_BATCH_START tasks="); serial_u32(batch_task_count);
     serial::write(" policy=priority-rr quantum=3-6 aging=50\r\n");
+    user_enter(tasks[first].context.eip, tasks[first].context.useresp);
+    return true;
+}
+
+bool run_scheduler_probe() {
+    if (!scheduler_ready || scheduler_running) return false;
+    reset_task_table();
+    if (!prepare_scheduler_probe_task(0U, 0U) ||
+        !prepare_scheduler_probe_task(1U, 1U)) {
+        paging::address_space_activate(nullptr);
+        for (uint32_t i = 0U; i < task_capacity; ++i) destroy_task_address_space(i);
+        reset_task_table();
+        serial::line("SCHED_PROBE_CREATE_FAILED");
+        return false;
+    }
+    batch_task_count = 2U;
+    scheduler_running = true;
+    const int32_t first = select_ready(-1);
+    if (first < 0 || !activate_task(static_cast<uint32_t>(first))) {
+        scheduler_running = false;
+        for (uint32_t i = 0U; i < task_capacity; ++i) destroy_task_address_space(i);
+        reset_task_table();
+        return false;
+    }
+    serial::line("SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata capabilities=console-write filesystem=unmodified");
+    serial::write("SCHED_BATCH_START tasks=2 policy=priority-rr quantum=3-6 aging=50 kind=kernel-probe\r\n");
     user_enter(tasks[first].context.eip, tasks[first].context.useresp);
     return true;
 }

@@ -61,3 +61,19 @@ The scheduler is uniprocessor. Console input remains a kernel-blocking operation
 there is no process tree, signals, handles, user-space services, SMP balancing,
 demand paging or persistent process state. The shell launches a foreground batch
 with `run APP args & APP args`; it regains control after all tasks exit or fault.
+
+## Trust-preserving preemption diagnostic
+
+The `schedtest` command does not modify or replace a signed ZenovFS application.
+It copies a bounded position-independent workload from kernel read-only storage
+into two fresh PMM-backed ring-3 address spaces. Each task receives only the
+`console-write` capability. The diagnostic therefore proves timer preemption and
+per-task mappings without expanding the signed application trust set.
+
+Required runtime evidence:
+
+- `SCHED_PROBE_TRUST_BOUNDARY_OK ... filesystem=unmodified`
+- two `/kernel/scheduler-probe-*` task creation records
+- task B starts before task A completes
+- at least one `reason=timer` context switch
+- a successful batch with non-zero preemptions

@@ -82,7 +82,7 @@ void command_help() {
     console::line("  Navigation   home  help  clear  pwd  cd <path>");
     console::line("  Storage      ls  mkdir  touch  write  append  rm  fsck  sync");
     console::line("  File tools   cat  cp  mv  stat  mount  df");
-    console::line("  Applications apps  run <app> [& <app>...]  ps");
+    console::line("  Applications apps  run <app> [& <app>...]  ps  schedtest");
     console::line("  Memory       mem  pmm  vm  memmap");
     console::line("  System       info  status  devices  disk  cpu");
     console::line("  Session      uptime  date  time  history  bootlog");
@@ -368,6 +368,9 @@ void execute(char* line) {
     else if (string_equal(command, "ps") || string_equal(command, "tasks")) {
         begin_view("TASK SCHEDULER");
         process::print_scheduler_status();
+    }
+    else if (string_equal(command, "schedtest")) {
+        if (!process::run_scheduler_probe()) console::warning("Scheduler diagnostic could not start.");
     }
     else if (string_equal(command, "history")) command_history();
     else if (string_equal(command, "bootlog")) command_bootlog();

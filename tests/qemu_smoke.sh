@@ -144,7 +144,10 @@ controller_first() {
   send_command "echo $long_payload"; wait_for_serial "$serial" "$LONG_INPUT_MARKER" || { echo quit; return 1; }
   send_command "write PERSIST.TXT PERSISTENCE_0_1_1_OK"; wait_for_count "$serial" "WRITE_OK" 2 || { echo quit; return 1; }
   send_command "run HELLO"; wait_for_serial "$serial" "HELLO_ZEX_0_1_1_OK" || { echo quit; return 1; }
-  send_command "run HELLO preempt-a & HELLO preempt-b"
+  send_command "schedtest"
+  wait_for_serial "$serial" "SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata capabilities=console-write filesystem=unmodified" || { echo quit; return 1; }
+  wait_for_serial "$serial" "TASK_CREATED pid=1 app=/kernel/scheduler-probe-a" || { echo quit; return 1; }
+  wait_for_serial "$serial" "TASK_CREATED pid=2 app=/kernel/scheduler-probe-b" || { echo quit; return 1; }
   wait_for_serial "$serial" "SCHED_BATCH_START tasks=2" || { echo quit; return 1; }
   wait_for_serial "$serial" "PREEMPT_A_START" || { echo quit; return 1; }
   wait_for_serial "$serial" "PREEMPT_B_START" || { echo quit; return 1; }
