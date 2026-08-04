@@ -1,5 +1,7 @@
 #include "ui/style.hpp"
 
+#include <algorithm>
+
 #include <QApplication>
 #include <QFont>
 #include <QFontDatabase>
