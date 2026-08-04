@@ -5,10 +5,18 @@ void background_tick() {
     const uint32_t current_tick = timer_ticks;
     if (current_tick - productivity_background_last_tick < 100U) return;
     productivity_background_last_tick = current_tick;
-    if (!productivity_reminders_check_due()) return;
+    const bool clock_changed = productivity_clock_v2_background_tick();
+    bool clock_live = productivity_overlay_open && productivity_app == ProductivityApp::clock && productivity_stopwatch_running;
+    if (productivity_overlay_open && productivity_app == ProductivityApp::clock) {
+        for (uint8_t index = 0U; index < productivity_clock_v2_timer_capacity; ++index)
+            if (productivity_clock_v2_timers[index].running) clock_live = true;
+    }
+    const bool reminder_changed = productivity_reminders_check_due();
+    if (!clock_changed && !clock_live && !reminder_changed) return;
     render_scene();
     present_full();
-    serial::line("UI_BACKGROUND_REMINDER_REFRESH_OK");
+    if (clock_changed || clock_live) serial::line("UI_BACKGROUND_CLOCK_REFRESH_OK");
+    if (reminder_changed) serial::line("UI_BACKGROUND_REMINDER_REFRESH_OK");
 }
 
 void productivity_open_utility_launcher_result(ProductivityUtilityApp app) {
@@ -23,7 +31,7 @@ void productivity_open_utility_launcher_result(ProductivityUtilityApp app) {
 void render_scene() {
     (void)productivity_reminders_check_due();
     if (productivity_utility_app == ProductivityUtilityApp::none) {
-        render_scene_tasks_base();
+        render_scene_calendar_clock_base();
         productivity_reminder_render_banner();
         return;
     }
@@ -38,11 +46,12 @@ void render_scene() {
     draw_taskbar();
     draw_quick_settings();
     draw_status_center();
+    productivity_clock_v2_render_banner();
     productivity_reminder_render_banner();
 }
 
 bool init() {
-    const bool initialized = init_tasks_base();
+    const bool initialized = init_calendar_clock_base();
     if (!initialized) return false;
     (void)productivity_utilities_ensure_storage();
     productivity_calculator_load_state();
@@ -75,12 +84,12 @@ bool handle_navigation_key(uint16_t key) {
             return true;
         }
     }
-    return handle_navigation_key_tasks_base(key);
+    return handle_navigation_key_calendar_clock_base(key);
 }
 
 void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons) {
     const ProductivityUtilityApp previous = productivity_utility_app;
-    on_mouse_packet_tasks_base(delta_x, delta_y, buttons);
+    on_mouse_packet_calendar_clock_base(delta_x, delta_y, buttons);
     if (previous != ProductivityUtilityApp::none && !productivity_overlay_open)
         productivity_utility_app = ProductivityUtilityApp::none;
 }
