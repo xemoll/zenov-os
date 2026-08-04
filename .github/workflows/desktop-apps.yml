@@ -27,7 +27,7 @@ jobs:
             artifact: linux-ubuntu
           - os: windows-2022
             artifact: windows
-          - os: macos-14
+          - os: macos-15-intel
             artifact: macos
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
@@ -77,8 +77,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m pip install --disable-pip-version-check 'aqtinstall==3.3.0' 'py7zr==1.0.0'
-          python3 -m aqt install-qt -O "$GITHUB_WORKSPACE/Qt" mac desktop 6.8.3 clang_64
+          python3 -m venv "$RUNNER_TEMP/zen-apps-aqt"
+          source "$RUNNER_TEMP/zen-apps-aqt/bin/activate"
+          python -m pip install --disable-pip-version-check 'aqtinstall==3.3.0' 'py7zr==1.0.0'
+          python -m aqt install-qt -O "$GITHUB_WORKSPACE/Qt" mac desktop 6.8.3 clang_64
           qt_config="$(find "$GITHUB_WORKSPACE/Qt" -path '*/lib/cmake/Qt6/Qt6Config.cmake' -print -quit)"
           test -n "$qt_config"
           qt_prefix="$(cd "$(dirname "$qt_config")/../../.." && pwd)"
@@ -155,12 +157,15 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force build/runtime-data, build/screenshots | Out-Null
           $env:QT_QPA_PLATFORM = 'offscreen'
+          $env:QT_PLUGIN_PATH = "$env:QT_PREFIX\plugins"
+          $data = "$env:GITHUB_WORKSPACE\build\runtime-data"
           foreach ($app in @('notes','tasks','calendar','clock','calculator','reminders')) {
             $exe = "$env:GITHUB_WORKSPACE\build\desktop\Release\zen-$app.exe"
-            & $exe --smoke-test --data-dir "$env:GITHUB_WORKSPACE\build\runtime-data"
-            if ($LASTEXITCODE -ne 0) { throw "Smoke test failed: $app" }
-            & $exe --data-dir "$env:GITHUB_WORKSPACE\build\runtime-data" --screenshot "$env:GITHUB_WORKSPACE\build\screenshots\zen-$app.png"
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path "build/screenshots/zen-$app.png")) { throw "Screenshot failed: $app" }
+            $smoke = Start-Process -FilePath $exe -ArgumentList @('--smoke-test','--data-dir',$data) -Wait -PassThru
+            if ($smoke.ExitCode -ne 0) { throw "Smoke test failed: $app exit=$($smoke.ExitCode)" }
+            $shot = "$env:GITHUB_WORKSPACE\build\screenshots\zen-$app.png"
+            $capture = Start-Process -FilePath $exe -ArgumentList @('--data-dir',$data,'--screenshot',$shot) -Wait -PassThru
+            if ($capture.ExitCode -ne 0 -or -not (Test-Path $shot)) { throw "Screenshot failed: $app exit=$($capture.ExitCode)" }
           }
           if (-not (Test-Path build/runtime-data/workspace.sqlite)) { throw 'Shared SQLite workspace missing' }
           Write-Host 'ZEN_APPS_RUNTIME_OK platform=windows apps=6 sqlite=shared screenshots=6'
