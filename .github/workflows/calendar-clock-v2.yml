@@ -1,0 +1,142 @@
+name: ZenovOS 0.1.1 Calendar Clock V2
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  calendar-clock-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ZENOV_SOURCE_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.ZENOV_SOURCE_REVISION }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact tested revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ZENOV_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Install strict toolchain and QEMU
+        run: sudo apt-get update && sudo apt-get install -y build-essential binutils clang openssl qemu-system-x86
+
+      - name: Validate Calendar and Clock model with GCC
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/calendar-clock-v2-model
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tests/productivity_calendar_clock_v2_model.cpp -o build/calendar-clock-v2-model/model-gcc
+          build/calendar-clock-v2-model/model-gcc | tee build/calendar-clock-v2-model/model-gcc.log
+          grep -Fqx 'PRODUCTIVITY_CALENDAR_CLOCK_V2_MODEL_OK calendar=timed+duration+daily+weekly+monthly alarms=daily+weekdays+weekends+once stopwatch=laps timers=three bounds=closed' \
+            build/calendar-clock-v2-model/model-gcc.log
+
+      - name: Validate Calendar and Clock model with Clang sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sanitizer=(-std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic
+            -fsanitize=address,undefined,unsigned-integer-overflow,implicit-unsigned-integer-truncation,implicit-signed-integer-truncation,implicit-integer-sign-change
+            -fno-sanitize-recover=all -fno-omit-frame-pointer)
+          clang++ "${sanitizer[@]}" tests/productivity_calendar_clock_v2_model.cpp \
+            -o build/calendar-clock-v2-model/model-clang
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            build/calendar-clock-v2-model/model-clang | tee build/calendar-clock-v2-model/model-clang.log
+          grep -Fqx 'PRODUCTIVITY_CALENDAR_CLOCK_V2_MODEL_OK calendar=timed+duration+daily+weekly+monthly alarms=daily+weekdays+weekends+once stopwatch=laps timers=three bounds=closed' \
+            build/calendar-clock-v2-model/model-clang.log
+
+      - name: Build strict native image
+        run: make clean check
+
+      - name: Compile runtime image verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
+            tools/zenovfs_calendar_clock_v2_verify.cpp -o build/zenovfs-calendar-clock-v2-verify
+
+      - name: Verify Calendar and Clock source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '#include "ui_productivity_calendar_clock_v2.inc"' kernel/parts/graphics.inc
+          grep -Fq 'render_scene_calendar_clock_base' kernel/parts/ui_productivity_utilities_runtime.inc
+          grep -Fq 'productivity_clock_v2_background_tick' kernel/parts/ui_productivity_utilities_runtime.inc
+          grep -Fq 'storage::security_read_file("/calendar/events-v2.db"' kernel/parts/ui_productivity_calendar_v2_storage.inc
+          grep -Fq 'storage::guarded_write_file("/calendar/events-v2.db"' kernel/parts/ui_productivity_calendar_v2_storage.inc
+          grep -Fq 'storage::guarded_write_file("/calendar/events.db"' kernel/parts/ui_productivity_calendar_v2_storage.inc
+          grep -Fq 'productivity_calendar_v2_occurs_on' kernel/parts/ui_productivity_calendar_clock_v2_common.inc
+          grep -Fq 'storage::security_read_file("/clock/alarms.db"' kernel/parts/ui_productivity_clock_v2.inc
+          grep -Fq 'storage::guarded_write_file("/clock/alarms.db"' kernel/parts/ui_productivity_clock_v2.inc
+          grep -Fq 'UI_CALENDAR_CLOCK_V2_READY calendar=timed+duration+recurrence+edit alarms=persistent timers=three stopwatch=laps' kernel/parts/ui_productivity_calendar_clock_v2_runtime.inc
+          echo 'CALENDAR_CLOCK_V2_SOURCE_CONTRACT_OK calendar=E2+legacy-projection recurrence=bounded clock=alarms+laps+three-timers background=shared reads=guarded writes=guarded'
+
+      - name: Exercise Calendar and Clock in two QEMU phases
+        run: bash tests/qemu_calendar_clock_v2.sh build/zenov-os.img build/zenov-data.img build/qemu-calendar-clock-v2
+
+      - name: Verify persistent Calendar and Clock state
+        shell: bash
+        run: |
+          set -euo pipefail
+          build/zenovfs-verify build/qemu-calendar-clock-v2/zenov-data-calendar-clock-v2.img | tee build/qemu-calendar-clock-v2/zenovfs-verify.log
+          build/zenovfs-calendar-clock-v2-verify build/qemu-calendar-clock-v2/zenov-data-calendar-clock-v2.img | tee build/qemu-calendar-clock-v2/calendar-clock-v2-verify.log
+          grep -Fq 'ZENOV_CALENDAR_CLOCK_V2_RUNTIME_IMAGE_OK calendar=E2+timed+duration+weekly projection=agenda-compatible clock=alarm-once+disabled-after-fire checksum=valid' \
+            build/qemu-calendar-clock-v2/calendar-clock-v2-verify.log
+          grep -Fq 'UI_CALENDAR_V2_ADD_OK' build/qemu-calendar-clock-v2/serial-phase1.log
+          grep -Fq 'UI_CALENDAR_V2_EDIT_OK' build/qemu-calendar-clock-v2/serial-phase1.log
+          grep -Fq 'UI_CLOCK_V2_LAP_OK' build/qemu-calendar-clock-v2/serial-phase1.log
+          grep -Fq 'UI_CLOCK_V2_TIMER_RUNNING' build/qemu-calendar-clock-v2/serial-phase1.log
+          grep -Fq 'UI_CLOCK_V2_ALARM_DUE' build/qemu-calendar-clock-v2/serial-phase1.log
+          grep -Fq 'UI_CALENDAR_V2_LOAD_OK' build/qemu-calendar-clock-v2/serial-phase2.log
+          grep -Fq 'UI_CLOCK_V2_ALARMS_LOAD_OK' build/qemu-calendar-clock-v2/serial-phase2.log
+          test ! -s build/qemu-calendar-clock-v2/qemu-phase1.stderr
+          test ! -s build/qemu-calendar-clock-v2/qemu-phase2.stderr
+
+      - name: Verify deterministic rebuild
+        run: make deterministic
+
+      - name: Upload Calendar and Clock evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-0.1.1-calendar-clock-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          path: |
+            build/zenov-os.img
+            build/zenov-data.img
+            build/KERNEL.BIN
+            build/zenovfs-calendar-clock-v2-verify
+            build/calendar-clock-v2-model/*
+            build/qemu-calendar-clock-v2/*.img
+            build/qemu-calendar-clock-v2/*.log
+            build/qemu-calendar-clock-v2/*.stderr
+            build/qemu-calendar-clock-v2/*.ppm
+            kernel/parts/graphics.inc
+            kernel/parts/ui_productivity_calendar_clock_v2*.inc
+            kernel/parts/ui_productivity_calendar_v2*.inc
+            kernel/parts/ui_productivity_clock_v2*.inc
+            kernel/parts/ui_productivity_utilities_runtime.inc
+            tests/productivity_calendar_clock_v2_model.cpp
+            tests/qemu_calendar_clock_v2.sh
+            tools/zenovfs_calendar_clock_v2_verify.cpp
