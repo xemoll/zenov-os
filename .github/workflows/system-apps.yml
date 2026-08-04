@@ -52,7 +52,7 @@ jobs:
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
             tests/productivity_tasks_model.cpp -o build/system-apps-model/productivity-tasks-gcc
           build/system-apps-model/productivity-tasks-gcc | tee build/system-apps-model/productivity-tasks-gcc.log
-          grep -Fqx 'PRODUCTIVITY_TASKS_MODEL_OK markdown=checkbox metadata=priority+due+waiting toggle=bounded leap=yes' \
+          grep -Fqx 'PRODUCTIVITY_TASKS_MODEL_OK markdown=checkbox metadata=priority+due+waiting views=today+overdue+planned crud=guarded-edit+toggle+delete stale=fail-closed leap=yes' \
             build/system-apps-model/productivity-tasks-gcc.log
 
       - name: Validate Markdown task model with Clang sanitizers
@@ -67,7 +67,7 @@ jobs:
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
           UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
             build/system-apps-model/productivity-tasks-clang | tee build/system-apps-model/productivity-tasks-clang.log
-          grep -Fqx 'PRODUCTIVITY_TASKS_MODEL_OK markdown=checkbox metadata=priority+due+waiting toggle=bounded leap=yes' \
+          grep -Fqx 'PRODUCTIVITY_TASKS_MODEL_OK markdown=checkbox metadata=priority+due+waiting views=today+overdue+planned crud=guarded-edit+toggle+delete stale=fail-closed leap=yes' \
             build/system-apps-model/productivity-tasks-clang.log
 
       - name: Build strict native image
@@ -85,16 +85,22 @@ jobs:
         run: |
           set -euo pipefail
           grep -Fq 'constexpr uint32_t productivity_task_capacity = 24U;' kernel/parts/ui_productivity_tasks_types.inc
+          grep -Fq 'uint32_t productivity_task_line_hash' kernel/parts/ui_productivity_tasks_types.inc
+          grep -Fq 'ProductivityTaskFilter::today' kernel/parts/ui_productivity_tasks_index.inc
+          grep -Fq 'ProductivityTaskFilter::overdue' kernel/parts/ui_productivity_tasks_index.inc
+          grep -Fq 'ProductivityTaskFilter::planned' kernel/parts/ui_productivity_tasks_index.inc
           grep -Fq 'storage::security_read_file' kernel/parts/ui_productivity_tasks_index.inc
           grep -Fq 'storage::security_read_file' kernel/parts/ui_productivity_tasks_storage.inc
           grep -Fq 'const int32_t existing_index = storage::find_entry(path);' kernel/parts/ui_productivity_tasks_storage.inc
           grep -Fq 'storage::zfs_entries[existing_index].type != storage::zfs_type_file' kernel/parts/ui_productivity_tasks_storage.inc
           ! grep -Fq 'productivity_tasks_source_exists' kernel/parts/ui_productivity_tasks*.inc
           grep -Fq 'storage::guarded_write_file' kernel/parts/ui_productivity_tasks_storage.inc
-          grep -Fq "data[offset] = data[offset] == ' ' ? 'x' : ' ';" kernel/parts/ui_productivity_tasks_storage.inc
+          grep -Fq 'productivity_tasks_edit_selected' kernel/parts/ui_productivity_tasks_storage.inc
+          grep -Fq 'productivity_tasks_delete_selected' kernel/parts/ui_productivity_tasks_storage.inc
+          grep -Fq 'UI_TASKS_STALE_REJECTED' kernel/parts/ui_productivity_tasks_storage.inc
           grep -Fq 'productivity_launcher_query_is("tasks")' kernel/parts/ui_productivity_tasks_runtime.inc
-          grep -Fq 'UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting' kernel/parts/ui_productivity_tasks_runtime.inc
-          echo 'SYSTEM_APPS_SOURCE_CONTRACT_OK tasks=bounded existence=zenovfs reads=guarded writes=guarded launcher=indexed'
+          grep -Fq 'UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting views=today+overdue+planned crud=add+edit+toggle+delete' kernel/parts/ui_productivity_tasks_runtime.inc
+          echo 'SYSTEM_APPS_SOURCE_CONTRACT_OK tasks=bounded views=smart mutations=hash-revalidated reads=guarded writes=guarded launcher=indexed'
 
       - name: Exercise Notes, Tasks, Calendar and Clock
         run: bash tests/qemu_productivity_ui.sh build/zenov-os.img build/zenov-data.img build/qemu-productivity-ui
@@ -105,15 +111,21 @@ jobs:
           set -euo pipefail
           build/zenovfs-verify build/qemu-productivity-ui/zenov-data-productivity.img | tee build/qemu-productivity-ui/zenovfs-verify.log
           build/zenovfs-productivity-verify build/qemu-productivity-ui/zenov-data-productivity.img | tee build/qemu-productivity-ui/productivity-verify.log
-          grep -Fq 'ZENOV_PRODUCTIVITY_RUNTIME_IMAGE_OK notes=markdown+scratch+daily tasks=checkbox+metadata+toggle calendar=events checksum=valid geometry=bounded' build/qemu-productivity-ui/productivity-verify.log
+          grep -Fq 'ZENOV_PRODUCTIVITY_RUNTIME_IMAGE_OK notes=markdown+scratch+daily tasks=smart-views+guarded-crud calendar=events checksum=valid geometry=bounded' build/qemu-productivity-ui/productivity-verify.log
           grep -Fq 'UI_PRODUCTIVITY_APPS_READY notes=yes calendar=yes clock=yes scratchpad=yes' build/qemu-productivity-ui/serial.log
-          grep -Fq 'UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting' build/qemu-productivity-ui/serial.log
+          grep -Fq 'UI_PRODUCTIVITY_TASKS_READY markdown=yes metadata=priority+due+waiting views=today+overdue+planned crud=add+edit+toggle+delete' build/qemu-productivity-ui/serial.log
+          grep -Fq 'UI_TASKS_FILTER_OK' build/qemu-productivity-ui/serial.log
           grep -Fq 'UI_TASKS_ADD_OK' build/qemu-productivity-ui/serial.log
+          grep -Fq 'UI_TASKS_EDIT_OK' build/qemu-productivity-ui/serial.log
           grep -Fq 'UI_TASKS_TOGGLE_OK' build/qemu-productivity-ui/serial.log
+          grep -Fq 'UI_TASKS_DELETE_OK' build/qemu-productivity-ui/serial.log
+          ! grep -Fq 'UI_TASKS_STALE_REJECTED' build/qemu-productivity-ui/serial.log
           grep -Fq 'UI_CLOCK_TIMER_RUNNING' build/qemu-productivity-ui/serial.log
           test -s build/qemu-productivity-ui/notes-editor.ppm
-          test -s build/qemu-productivity-ui/tasks-open.ppm
+          test -s build/qemu-productivity-ui/tasks-planned.ppm
+          test -s build/qemu-productivity-ui/tasks-edited.ppm
           test -s build/qemu-productivity-ui/tasks-done.ppm
+          test -s build/qemu-productivity-ui/tasks-delete-persisted.ppm
           test -s build/qemu-productivity-ui/calendar-event.ppm
           test -s build/qemu-productivity-ui/clock-running.ppm
           test ! -s build/qemu-productivity-ui/qemu.stderr
