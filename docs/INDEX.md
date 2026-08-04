@@ -20,6 +20,8 @@
 - [`ZENREPO_OFFLINE_0.1.1.md`](ZENREPO_OFFLINE_0.1.1.md) — signed offline repository roles, rotation, delegation, expiry and anti-rollback state.
 - [`ZENPKG_CACHE_0.1.1.md`](ZENPKG_CACHE_0.1.1.md) — protected staging, target verification and atomic cache commit.
 - [`NATIVE_PACKAGE_MANAGER_0.1.1.md`](NATIVE_PACKAGE_MANAGER_0.1.1.md) — transactional install, repair, rollback and removal.
+- [`LINUX_I386_COMPAT_0.1.1.md`](LINUX_I386_COMPAT_0.1.1.md) — minimal static Linux/i386 loader, syscall subset, sandbox and verification markers.
+- [`PACKAGE_COMPATIBILITY_PREFLIGHT_0.1.1.md`](PACKAGE_COMPATIBILITY_PREFLIGHT_0.1.1.md) — exact ZenPkg validators for Linux/i386, PE32, PS-X EXE, PS2 ELF and XBE.
 - [`PACKAGE_COMPATIBILITY_ARCHITECTURE.md`](PACKAGE_COMPATIBILITY_ARCHITECTURE.md) — provider boundaries and foreign-runtime roadmap.
 - [`ZENUNIVERSE_REPOSITORY_0.1.1.md`](ZENUNIVERSE_REPOSITORY_0.1.1.md) — platform-neutral artifact catalog.
 - [`RUNTIME_PROVIDER_ABI_0.1.1.md`](RUNTIME_PROVIDER_ABI_0.1.1.md) — runtime architecture and capability gates.

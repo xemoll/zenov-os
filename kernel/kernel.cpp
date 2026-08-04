@@ -35,7 +35,7 @@ extern uint32_t active_record_count;
 bool classify(const char*, const uint8_t*, uint32_t, const uint8_t[32], security_guard::ScanResult&);
 bool self_test();
 }
-namespace process { bool active_security_actor(char[48], uint8_t[32]); }
+namespace process { bool active_security_actor(char[48], uint8_t[32]); bool run_linux_i386(char*); }
 namespace zrwp {
 bool authorize_write(const char*, uint32_t);
 bool authorize_copy(const char*, uint32_t);
@@ -93,6 +93,7 @@ bool sha256_self_test() { return security_guard::sha256_self_test(); }
 }
 #include "parts/rsa_pss.inc"
 #include "parts/package_format.inc"
+#include "parts/linux_i386_elf.inc"
 #define package_write_file package_write_file_recorded
 #define package_cache_write_partial package_cache_write_partial_recorded
 #define package_remove package_remove_recorded
@@ -112,6 +113,7 @@ bool sha256_self_test() { return security_guard::sha256_self_test(); }
 #include "parts/security_io.inc"
 #include "parts/storage_result_commands.inc"
 #include "parts/process_policy.inc"
+#include "parts/process_linux_i386.inc"
 #include "parts/graphics.inc"
 #include "parts/mouse_regression.inc"
 #include "parts/input_v2.inc"

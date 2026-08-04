@@ -15,7 +15,27 @@ signed offline ZenRepo target
   -> native ring-3 loader
 ```
 
-The native path supports bounded ZEX1 and static ELF32/i386 applications, deterministic package creation, search, planning, verified cache fetch, installation by name or file, upgrade, repair, explicit rollback, removal and persistent state.
+The native path supports bounded ZEX1 and static ELF32/i386 applications, deterministic package creation, search, planning, verified cache fetch, installation by name or file, upgrade, repair, explicit rollback, removal and persistent state. A separate unsigned compatibility command can run the documented minimal Linux/i386 console sandbox; it cannot authorize or replace a signed native package.
+
+## Implemented Linux/i386 compatibility slice
+
+`pkg compat run-linux` accepts a bounded static ELF32/i386 `ET_EXEC` from `/samples` or `/downloads`. It maps conventional i386 virtual addresses into the isolated process window and translates only Linux `int 0x80` calls 1 (`exit`), 4 (`write` to fd 1 or 2) and 252 (`exit_group`). All other syscall numbers return `-ENOSYS`; other descriptors return `-EBADF`.
+
+The runtime rejects dynamic/interpreted ELF, W+X or overlapping segments, non-i386 machines, protected paths and oversized inputs. It reads through the existing unchanged on-access security path, requires ZenPkg's own exact preflight, binds the capability profile to SHA-256 and clears the ABI, mappings and capability state after return. This does not provide libc, POSIX, files, networking, signals, threads or general Linux application compatibility.
+
+## Exact compatibility preflight
+
+`pkg compat check <file>` is read-only and never launches the inspected artifact. The package-manager-owned validators fail closed and report four independent facts: recognition, structural validity, foreign trust and runtime availability.
+
+| Target | Exact checks | Result when valid |
+| --- | --- | --- |
+| Linux/i386 ELF | Static `ET_EXEC`, load ranges, entry, overlap, page permissions and W^X | Runnable only in the minimal ring-3 sandbox |
+| Windows PE32 | DOS/PE/COFF headers, i386 executable type, bounded sections, entry, overlap and W^X | Inspect-only; Win32 and Authenticode are absent |
+| PS-X EXE | Header/payload size and two-MiB RAM load, entry, fill and stack ranges | Inspect-only; R3000A and console services are absent |
+| PS2 ELF | Little-endian R5900/MIPS III `ET_EXEC`, static segments, ranges, entry, overlap and W^X | Inspect-only; Emotion Engine runtime is absent |
+| Original Xbox XBE | Header/image/section-table bounds, raw/virtual sections, overlap and W^X | Inspect-only; signature trust and Xbox runtime are absent |
+
+This subsystem does not modify ZenovGuard's classifier. Foreign signature trust remains `unverified`; structural validity alone never grants executable authority.
 
 ## Intake is not execution
 
@@ -64,7 +84,7 @@ PS5-specific support is not asserted without a stable public format contract tha
 
 ## Runtime-provider boundary
 
-Metadata profiles exist for Proton, Darling, PCSX2, RPCS3, xemu and Xenia. They are planning records, not runnable components in the current kernel.
+Metadata profiles exist for Proton, Darling, PCSX2, RPCS3, xemu and Xenia. They are planning records, not runnable components in the current kernel. The built-in minimal Linux/i386 slice is the sole foreign execution path in this release line.
 
 A functional provider requires substantially more than a package parser:
 
@@ -82,11 +102,15 @@ Current expected evidence:
 
 ```text
 PACKAGE_FOREIGN_FORMAT_TEST_OK cases=46 generations=legacy-current
+PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=33 truncations=4492 validators=5 runtime-ready=1 fail-closed=1
+ZENPKG_DATA_RETRY_TEST_OK atomic=1 idempotent=1 staging-clean=1
 ZENPKG_FOREIGN_TEST_OK probes=39 native-import=zex1,elf32 deterministic=2 rejection=7 generations=legacy-current streaming=1
-ZENPKG_FOREIGN_QEMU_OK formats=1 probe=zenpkg install=1 run=1 fsck=1
+LINUX_I386_ABI_TEST_OK syscalls=write,exit,exit_group fail_closed=1
+LINUX_I386_ELF_TEST_OK bias=0x08048000 negatives=wx,machine,dynamic,entry
+ZENPKG_FOREIGN_QEMU_OK formats=1 preflight=linux-i386 linux-i386=write+exit+enosys+sandbox probe=zenpkg install=1 run=1 fsck=1
 ```
 
-These markers prove recognition and native-path isolation. They do not prove that foreign applications or games run.
+The Linux/i386 QEMU marker additionally proves the narrow console-only foreign fixture. The remaining markers prove recognition and native-path isolation; they do not prove that general foreign applications or games run.
 
 ## Staged roadmap within the 0.1.1 line
 
@@ -97,8 +121,10 @@ These markers prove recognition and native-path isolation. They do not prove tha
 - Shared historical/current package probing — implemented.
 - Bounded large-file probing with streaming SHA-256 — implemented.
 - Strict ZEX1 and ELF32/i386 native import — implemented.
+- Exact fail-closed PE32, PS-X EXE, PS2/R5900 ELF and Original Xbox XBE structural preflight — implemented.
 - Network mirrors and TLS repository download — not implemented.
 - General dependency solver, multi-architecture native packages and dynamic linking — not implemented.
-- Foreign application and game runtimes — not implemented.
+- Minimal static Linux/i386 console runtime — implemented.
+- General Linux, Windows, macOS and console application/game runtimes — not implemented.
 
 The system version remains 0.1.1 while these changes harden and expand the same release line.

@@ -72,6 +72,18 @@ controller() {
   send_command 'pkg formats'
   wait_for_serial "$serial" 'ZENPKG_FORMATS_OK' || { echo quit; return 1; }
 
+  send_command 'pkg compat status'
+  wait_for_serial "$serial" 'ZENPKG_COMPAT_READY validators=5 runtimes=1 fail-closed=1 antivirus-unchanged=1' || { echo quit; return 1; }
+
+  send_command 'pkg compat check /samples/linux-i386-hello.elf'
+  wait_for_serial "$serial" 'ZENPKG_COMPAT_PREFLIGHT_OK format=elf structural=1 runtime=1 trust=0 verdict=runnable-sandbox' || { echo quit; return 1; }
+
+  send_command 'pkg compat run-linux /samples/linux-i386-hello.elf'
+  wait_for_serial "$serial" 'LINUX_I386_SYSCALL_ENOSYS number=5' || { echo quit; return 1; }
+  wait_for_serial "$serial" 'LINUX_I386_SYSCALL_DENIED syscall=write reason=fd' || { echo quit; return 1; }
+  wait_for_serial "$serial" 'LINUX_I386_COMPAT_WRITE_OK' || { echo quit; return 1; }
+  wait_for_serial "$serial" 'LINUX_I386_COMPAT_EXIT code=0' || { echo quit; return 1; }
+
   send_command 'pkg probe /data/packages/hello-native-0.1.0.zpk'
   wait_for_serial "$serial" 'ZENPKG_PROBE_OK format=zenpkg support=installable extension=0' || { echo quit; return 1; }
 
@@ -122,6 +134,12 @@ fi
 
 for marker in \
   ZENPKG_FORMATS_OK \
+  'ZENPKG_COMPAT_READY validators=5 runtimes=1 fail-closed=1 antivirus-unchanged=1' \
+  'ZENPKG_COMPAT_PREFLIGHT_OK format=elf structural=1 runtime=1 trust=0 verdict=runnable-sandbox' \
+  'LINUX_I386_SYSCALL_ENOSYS number=5' \
+  'LINUX_I386_SYSCALL_DENIED syscall=write reason=fd' \
+  LINUX_I386_COMPAT_WRITE_OK \
+  'LINUX_I386_COMPAT_EXIT code=0' \
   'ZENPKG_PROBE_OK format=zenpkg support=installable extension=0' \
   ZENPKG_INSTALL_COMMIT_OK \
   'ZENPKG_EXEC_ALLOWED name=hello-native version=0.1.0' \
@@ -138,4 +156,4 @@ if grep -Eq 'KERNEL PANIC|DOUBLE FAULT|ASSERT' "$OUT/serial.log"; then
   exit 1
 fi
 
-printf 'ZENPKG_FOREIGN_QEMU_OK formats=1 probe=zenpkg install=1 run=1 fsck=1\n' | tee "$OUT/summary.log"
+printf 'ZENPKG_FOREIGN_QEMU_OK formats=1 preflight=linux-i386 linux-i386=write+exit+enosys+sandbox probe=zenpkg install=1 run=1 fsck=1\n' | tee "$OUT/summary.log"
