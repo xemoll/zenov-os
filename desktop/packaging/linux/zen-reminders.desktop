@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Reminders
+Comment=Recurring reminders and snooze
+Exec=zen-reminders
+Icon=zen-reminders
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true

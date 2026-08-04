@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Calendar
+Comment=Events, tasks and reminders in one view
+Exec=zen-calendar
+Icon=zen-calendar
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true

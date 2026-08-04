@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Clock
+Comment=Focus, stopwatch and timer
+Exec=zen-clock
+Icon=zen-clock
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true

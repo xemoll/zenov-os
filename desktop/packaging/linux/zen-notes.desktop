@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Notes
+Comment=Local notes and connected actions
+Exec=zen-notes
+Icon=zen-notes
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true
