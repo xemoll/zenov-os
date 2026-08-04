@@ -68,11 +68,10 @@ jobs:
 
       - name: Install Qt
         if: steps.payload.outputs.present == 'true'
-        uses: jurplel/install-qt-action@26d6394617249cc034008e532a6d07cf77e19ff7
+        uses: jurplel/install-qt-action/action@26d6394617249cc034008e532a6d07cf77e19ff7
         with:
           version: '6.8.3'
           cache: true
-          setup-python: false
 
       - name: Build with strict warnings
         if: steps.payload.outputs.present == 'true'
@@ -81,7 +80,7 @@ jobs:
           set -euo pipefail
           cmake -S desktop -B build/desktop -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DZEN_APPS_STRICT=ON
+            -DZEN_APPS_WARNINGS_AS_ERRORS=ON
           cmake --build build/desktop --parallel 2
 
       - name: Run core and application smoke tests
