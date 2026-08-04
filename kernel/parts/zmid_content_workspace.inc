@@ -28,6 +28,10 @@ constexpr uint32_t directory_index = static_cast<uint32_t>(
     supervisor_layout::zmid_workspace_virtual_a / paging::table_span);
 constexpr uintptr_t virtual_table_base =
     static_cast<uintptr_t>(directory_index) * paging::table_span;
+constexpr uint32_t hardware_accessed = 0x020U;
+constexpr uint32_t hardware_dirty = 0x040U;
+constexpr uint32_t pde_hardware_mask = hardware_accessed;
+constexpr uint32_t pte_hardware_mask = hardware_accessed | hardware_dirty;
 static_assert(supervisor_layout::zmid_workspace_bytes % paging::page_size == 0U);
 static_assert(directory_index == 2U);
 static_assert(supervisor_layout::zmid_workspace_virtual_a == virtual_table_base);
@@ -78,6 +82,15 @@ uint32_t expected_directory_entry() {
         paging::present | paging::writable;
 }
 
+bool entry_matches(uint32_t actual, uint32_t expected,
+                   uint32_t hardware_mask) {
+    return (actual & ~hardware_mask) == expected;
+}
+
+bool directory_entry_matches(uint32_t actual) {
+    return entry_matches(actual, expected_directory_entry(), pde_hardware_mask);
+}
+
 bool table_empty(uint32_t& occupied_index, uint32_t& occupied_value) {
     for (uint32_t index = 0U; index < 1024U; ++index) {
         if (!supervisor_table[index]) continue;
@@ -104,7 +117,7 @@ bool range_mapped_exact(uintptr_t virtual_address,
     for (uint32_t page = 0U; page < workspace_pages; ++page) {
         expected = expected_entry(physical_address + page * paging::page_size);
         actual = supervisor_table[first + page];
-        if (actual == expected) continue;
+        if (entry_matches(actual, expected, pte_hardware_mask)) continue;
         mismatch_index = first + page;
         return false;
     }
@@ -139,7 +152,7 @@ bool mapping_exact(uint32_t& mismatch_index,
                    uint32_t& actual, uint32_t& expected) {
     expected = expected_directory_entry();
     actual = paging::page_directory[directory_index];
-    if (actual != expected) {
+    if (!directory_entry_matches(actual)) {
         mismatch_index = directory_index;
         return false;
     }
@@ -218,12 +231,13 @@ void release_mapping() {
     clear_range(supervisor_layout::zmid_workspace_virtual_a);
     clear_range(supervisor_layout::zmid_workspace_virtual_b);
     uint32_t occupied_index = 0U, occupied_value = 0U;
+    const uint32_t directory_value = paging::page_directory[directory_index];
     if (!table_empty(occupied_index, occupied_value) ||
-        paging::page_directory[directory_index] != expected_directory_entry()) {
+        !directory_entry_matches(directory_value)) {
         mapping_fault = true;
         record_failure(Failure::active_mismatch,
                        occupied_value ? occupied_index : directory_index,
-                       occupied_value ? occupied_value : paging::page_directory[directory_index],
+                       occupied_value ? occupied_value : directory_value,
                        occupied_value ? 0U : expected_directory_entry());
         return;
     }
