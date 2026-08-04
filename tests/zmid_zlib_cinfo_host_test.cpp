@@ -31,7 +31,22 @@ std::vector<std::uint8_t> make_stream(std::uint8_t cinfo) {
     return output;
 }
 
-int run() {
+std::vector<std::uint8_t> read_all(const char* path) {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input) throw std::runtime_error(std::string("cannot open: ") + path);
+    const std::streamoff length = input.tellg();
+    if (length < 6 || length > 128 * 1024) {
+        throw std::runtime_error(std::string("invalid size: ") + path);
+    }
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(length));
+    input.seekg(0, std::ios::beg);
+    input.read(reinterpret_cast<char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+    if (!input) throw std::runtime_error(std::string("cannot read: ") + path);
+    return bytes;
+}
+
+int run(const char* undersized_window_path) {
     using InspectionResult = zmid::content_inspection::InspectionResult;
     using WrappedResult = zmid::content_inspection::WrappedDeflateResult;
     std::array<std::uint8_t, 64U * 1024U> decoded{};
@@ -42,7 +57,9 @@ int run() {
         if (!zmid::content_inspection::zlib_header_valid(
                 stream.data(), static_cast<std::uint32_t>(stream.size())) ||
             !zmid::content_inspection::looks_like_zlib_stream(
-                stream.data(), static_cast<std::uint32_t>(stream.size()))) {
+                stream.data(), static_cast<std::uint32_t>(stream.size())) ||
+            zmid::content_inspection::zlib_window_limit(stream.data()) !=
+                (1U << (static_cast<std::uint32_t>(cinfo) + 8U))) {
             return 10 + cinfo;
         }
 
@@ -78,10 +95,36 @@ int run() {
         return 50;
     }
 
+    const auto undersized = read_all(undersized_window_path);
+    if (!zmid::content_inspection::zlib_header_valid(
+            undersized.data(), static_cast<std::uint32_t>(undersized.size())) ||
+        zmid::content_inspection::zlib_window_limit(undersized.data()) != 256U) {
+        return 51;
+    }
+    std::uint32_t decoded_size = 0U;
+    if (zmid::content_inspection::decode_zlib(
+            undersized.data(), static_cast<std::uint32_t>(undersized.size()),
+            decoded.data(), static_cast<std::uint32_t>(decoded.size()),
+            decoded_size) != WrappedResult::unsupported) {
+        return 52;
+    }
+
     std::cout << "ZMID_ZLIB_CINFO_OK windows=0-7 magic=cmf-flg"
-                 " decode=8/8 inspect=8/8 invalid=blocked\n";
+                 " decode=8/8 inspect=8/8 invalid=blocked"
+                 " window=declared-distance-blocked\n";
     return 0;
 }
 } // namespace
 
-int main() { return run(); }
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        std::cerr << "usage: zmid-zlib-cinfo-host-test <undersized-window.zlib>\n";
+        return 2;
+    }
+    try {
+        return run(argv[1]);
+    } catch (const std::exception& error) {
+        std::cerr << "zmid-zlib-cinfo-host-test: " << error.what() << "\n";
+        return 1;
+    }
+}
