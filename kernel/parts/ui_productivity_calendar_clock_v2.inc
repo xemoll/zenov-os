@@ -1,0 +1,7 @@
+#include "ui_productivity_calendar_clock_v2_types.inc"
+#include "ui_productivity_calendar_clock_v2_common.inc"
+#include "ui_productivity_calendar_v2_storage.inc"
+#include "ui_productivity_calendar_v2_ui.inc"
+#include "ui_productivity_clock_v2.inc"
+#include "ui_productivity_clock_v2_ui.inc"
+#include "ui_productivity_calendar_clock_v2_runtime.inc"
