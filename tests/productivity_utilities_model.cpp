@@ -86,6 +86,23 @@ int main() {
     range_item.done = true;
     assert(!in_seven_day_range(range_item, now));
 
-    std::puts("PRODUCTIVITY_UTILITIES_MODEL_OK calc=precedence+programmer+overflow date=gregorian reminders=v2+backward+recurrence+quick-add agenda=minute-order+seven-day");
+    {
+        constexpr std::size_t capacity = 48U;
+        std::vector<std::uint32_t> earliest;
+        const auto consider = [&earliest](std::uint32_t stamp) {
+            if (earliest.size() < capacity) {
+                earliest.push_back(stamp);
+                return;
+            }
+            const auto latest = std::max_element(earliest.begin(), earliest.end());
+            if (stamp < *latest) *latest = stamp;
+        };
+        for (std::uint32_t stamp = 100U; stamp < 148U; ++stamp) consider(stamp);
+        consider(1U);
+        std::sort(earliest.begin(), earliest.end());
+        assert(earliest.size() == capacity && earliest.front() == 1U && earliest.back() == 146U);
+    }
+
+    std::puts("PRODUCTIVITY_UTILITIES_MODEL_OK calc=precedence+programmer+overflow date=gregorian reminders=v2+backward+recurrence+quick-add agenda=minute-order+seven-day+earliest-capacity");
     return 0;
 }
