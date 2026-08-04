@@ -45,6 +45,10 @@ bool path_has_zip_extension(const char* path) {
         (b == 'i' || b == 'I') && (c == 'p' || c == 'P');
 }
 
+bool looks_like_zlib_stream(const uint8_t* data, uint32_t size) {
+    return data && size >= 6U && data[0] == 0x78U && zlib_header_valid(data, size);
+}
+
 struct ZipEntryView {
     uint32_t local_offset = 0U;
     uint32_t payload_offset = 0U;
@@ -192,7 +196,8 @@ InspectionResult inspect_decoded_payload(const char* path,
                                          security_guard::ScanResult& result,
                                          const char* layer) {
     if (classify_decoded(path, decoded, decoded_size, result, layer)) return InspectionResult::matched;
-    if (looks_like_zip(decoded, decoded_size)) {
+    if (looks_like_zip(decoded, decoded_size) || looks_like_gzip(decoded, decoded_size) ||
+        looks_like_zlib_stream(decoded, decoded_size)) {
         const InspectionResult archive = inspect_payload(path, decoded, decoded_size,
             archive_depth + 1U, decoded, alternate, result);
         if (archive != InspectionResult::clean) return archive;
@@ -232,6 +237,39 @@ InspectionResult inspect_embedded_base64(const char* path,
     return InspectionResult::clean;
 }
 
+InspectionResult inspect_wrapped_deflate_payload(const char* path,
+                                                 const uint8_t* data,
+                                                 uint32_t size,
+                                                 uint32_t archive_depth,
+                                                 uint8_t* scratch,
+                                                 uint8_t* alternate,
+                                                 security_guard::ScanResult& result,
+                                                 bool gzip) {
+    if (archive_depth >= max_archive_depth) return InspectionResult::unsupported;
+    uint8_t* output = scratch;
+    uint8_t* nested_alternate = alternate;
+    if (!output || output == data) {
+        output = alternate;
+        nested_alternate = scratch;
+    }
+    if (!output || output == data) return InspectionResult::unsupported;
+
+    uint32_t decoded_size = 0U;
+    const WrappedDeflateResult decoded = gzip
+        ? decode_gzip(data, size, output, workspace_bytes, decoded_size)
+        : decode_zlib(data, size, output, workspace_bytes, decoded_size);
+    if (decoded != WrappedDeflateResult::decoded) return InspectionResult::unsupported;
+
+    const char* layer = gzip
+        ? (archive_depth ? "GZip2" : "GZip")
+        : (archive_depth ? "Zlib2" : "Zlib");
+    if (classify_decoded(path, output, decoded_size, result, layer)) {
+        return InspectionResult::matched;
+    }
+    return inspect_payload(path, output, decoded_size, archive_depth + 1U,
+        output, nested_alternate, result);
+}
+
 InspectionResult inspect_payload(const char* path,
                                  const uint8_t* data,
                                  uint32_t size,
@@ -247,6 +285,17 @@ InspectionResult inspect_payload(const char* path,
         }
         if (!scratch) return InspectionResult::unsupported;
         return inspect_zip(path, data, size, archive_depth, scratch, alternate, result);
+    }
+
+    if (looks_like_gzip(data, size) ||
+        (archive_depth == 0U && path_has_gzip_extension(path))) {
+        return inspect_wrapped_deflate_payload(path, data, size, archive_depth,
+            scratch, alternate, result, true);
+    }
+    if (looks_like_zlib_stream(data, size) ||
+        (archive_depth == 0U && path_has_zlib_extension(path))) {
+        return inspect_wrapped_deflate_payload(path, data, size, archive_depth,
+            scratch, alternate, result, false);
     }
 
     uint32_t decoded_size = 0U;
