@@ -62,7 +62,7 @@ jobs:
           grep -Fq 'external-disks=0' tests/qemu_iso_persistence.sh
           grep -Fq 'SELECTED_ACCEL=tcg' run-zenovos.sh
           grep -Fq 'kernel_static_start = live_storage_end' kernel/parts/supervisor_layout.inc
-          grep -Fq 'ASSERT(__kernel_static_end <= 0x00400000' kernel/linker.ld
+          grep -Fq 'ASSERT(__kernel_static_end <= 0x00480000' kernel/linker.ld
           ! grep -Fq 'vm-appliances' iso.mk
 
       - name: Install native toolchain, QEMU and ISO tooling
@@ -99,7 +99,7 @@ jobs:
           [[ "$kernel_static_start" =~ ^0x[0-9a-fA-F]+$ ]]
           [[ "$kernel_static_end" =~ ^0x[0-9a-fA-F]+$ ]]
           low_headroom=$((0xA0000 - kernel_low_end))
-          static_headroom=$((0x400000 - kernel_static_end))
+          static_headroom=$((0x480000 - kernel_static_end))
           test "$kernel_static_start" = '0x00000000003b6000' -o \
                "$kernel_static_start" = '0x003b6000' -o \
                "$kernel_static_start" = '0x3b6000'
