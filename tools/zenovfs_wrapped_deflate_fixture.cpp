@@ -252,7 +252,7 @@ int verify_runtime(const std::filesystem::path& image,
     static constexpr char kExpectedMetadata[] =
         "ZQMD1\n"
         "original=/samples/eicar-gzip.gz\n"
-        "signature=GZip:Eicar.Pattern\n"
+        "signature=GZip:Eicar.Test.File\n"
         "verdict=INFECTED\n";
     const std::vector<std::uint8_t> metadata = entry_bytes(disk, entries, *pair.metadata);
     if (metadata.size() != sizeof(kExpectedMetadata) - 1U ||
