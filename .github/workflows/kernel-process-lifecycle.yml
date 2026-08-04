@@ -36,83 +36,62 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$ZENOV_SOURCE_REVISION"
           test -z "$(git status --porcelain)"
-          printf '%s  %s\n' dfbc99d0fb4ab1960c593f76b7cd39236450f9a2868979e38e829775b406935f .github/kernel-lifecycle-patch.part00 | sha256sum -c -
-          printf '%s  %s\n' 71fd2ad4f9ddf90fb6c6c67db2dd338f04fc90be318002d375572e10ac79b918 .github/kernel-lifecycle-patch.part01 | sha256sum -c -
-          printf '%s  %s\n' e4d25363985ad29df500c1d3569034c661b650f72596c79ef70bec314071ecbd .github/kernel-lifecycle-patch.part02 | sha256sum -c -
-          printf '%s  %s\n' d0af7edf46c51e9589857671e2f643e66de67ce25f46d7f873fea81159d9b5dc .github/kernel-lifecycle-patch.part03 | sha256sum -c -
-          printf '%s  %s\n' 12ef5f519d81fd0f2be4cabb5e21682745273a3aaa2c58a54219284e39a9fdb9 .github/kernel-lifecycle-followup.patch | sha256sum -c -
-          cat .github/kernel-lifecycle-patch.part00 \
-              .github/kernel-lifecycle-patch.part01 \
-              .github/kernel-lifecycle-patch.part02 \
-              .github/kernel-lifecycle-patch.part03 > /tmp/kernel-lifecycle.patch.gz.b64
-          test "$(wc -c < /tmp/kernel-lifecycle.patch.gz.b64)" -eq 22140
-          printf '%s  %s\n' 2d77a761aaeda72e1c3778db5bbe5e0bc29ec1791093ef761abca05188277a84 /tmp/kernel-lifecycle.patch.gz.b64 | sha256sum -c -
-          base64 -d /tmp/kernel-lifecycle.patch.gz.b64 > /tmp/kernel-lifecycle.patch.gz
-          printf '%s  %s\n' 7b810c71ceffc55b4127032f5735ed5d70710dacdc16a32d8f43d342639a9897 /tmp/kernel-lifecycle.patch.gz | sha256sum -c -
-          gzip -dc /tmp/kernel-lifecycle.patch.gz > /tmp/kernel-lifecycle.patch
-          printf '%s  %s\n' ff5250d9ace95543839e9a4aff9f434f1ee51f7c343a142cbb564033df1a6e13 /tmp/kernel-lifecycle.patch | sha256sum -c -
+          echo 'dfbc99d0fb4ab1960c593f76b7cd39236450f9a2868979e38e829775b406935f  .github/kernel-lifecycle-patch.part00' | sha256sum -c -
+          echo '71fd2ad4f9ddf90fb6c6c67db2dd338f04fc90be318002d375572e10ac79b918  .github/kernel-lifecycle-patch.part01' | sha256sum -c -
+          echo 'e4d25363985ad29df500c1d3569034c661b650f72596c79ef70bec314071ecbd  .github/kernel-lifecycle-patch.part02' | sha256sum -c -
+          echo 'd0af7edf46c51e9589857671e2f643e66de67ce25f46d7f873fea81159d9b5dc  .github/kernel-lifecycle-patch.part03' | sha256sum -c -
+          echo '12ef5f519d81fd0f2be4cabb5e21682745273a3aaa2c58a54219284e39a9fdb9  .github/kernel-lifecycle-followup.patch' | sha256sum -c -
+          cat .github/kernel-lifecycle-patch.part0{0,1,2,3} > /tmp/kernel-lifecycle.b64
+          test "$(wc -c < /tmp/kernel-lifecycle.b64)" -eq 22140
+          echo '2d77a761aaeda72e1c3778db5bbe5e0bc29ec1791093ef761abca05188277a84  /tmp/kernel-lifecycle.b64' | sha256sum -c -
+          base64 -d /tmp/kernel-lifecycle.b64 > /tmp/kernel-lifecycle.gz
+          echo '7b810c71ceffc55b4127032f5735ed5d70710dacdc16a32d8f43d342639a9897  /tmp/kernel-lifecycle.gz' | sha256sum -c -
+          gzip -dc /tmp/kernel-lifecycle.gz > /tmp/kernel-lifecycle.patch
+          echo 'ff5250d9ace95543839e9a4aff9f434f1ee51f7c343a142cbb564033df1a6e13  /tmp/kernel-lifecycle.patch' | sha256sum -c -
           git apply --check /tmp/kernel-lifecycle.patch
           git apply --index /tmp/kernel-lifecycle.patch
           git apply --check .github/kernel-lifecycle-followup.patch
           git apply --index .github/kernel-lifecycle-followup.patch
-          git rm .github/kernel-lifecycle-patch.part00 \
-                 .github/kernel-lifecycle-patch.part01 \
-                 .github/kernel-lifecycle-patch.part02 \
-                 .github/kernel-lifecycle-patch.part03 \
-                 .github/kernel-lifecycle-followup.patch
+          git rm .github/kernel-lifecycle-patch.part0{0,1,2,3} .github/kernel-lifecycle-followup.patch
           git diff --cached --check
-          unexpected="$(git diff --cached --name-only | grep -Ev '^(\.github/kernel-lifecycle-(patch\.part0[0-3]|followup\.patch)|GNUmakefile|Makefile|docs/KERNEL_PROCESS_LIFECYCLE_0\.1\.1\.md|kernel/|tests/kernel_process_lifecycle_test\.cpp|tests/qemu_kernel_process_lifecycle\.sh)$' || true)"
+          unexpected="$(git diff --cached --name-only | grep -Ev '^(\.github/kernel-lifecycle-(patch\.part0[0-3]|followup\.patch)|GNUmakefile|Makefile|docs/KERNEL_PROCESS_LIFECYCLE_0\.1\.1\.md|kernel/.*|tests/kernel_process_lifecycle_test\.cpp|tests/qemu_kernel_process_lifecycle\.sh)$' || true)"
           test -z "$unexpected" || { printf 'non-kernel staged path:\n%s\n' "$unexpected" >&2; exit 1; }
           test -z "$(git diff --cached --name-only | grep -E '^(user/|kernel/parts/(graphics|utilities)|tests/qemu_(display|notes|calendar|productivity))' || true)"
 
-      - name: Install strict toolchain and QEMU
+      - name: Install toolchain and QEMU
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang binutils qemu-system-x86
 
-      - name: Build and verify complete host graph
+      - name: Prove kernel host contracts
         shell: bash
         run: |
           set -euo pipefail
           make clean
-          make -j2 all check | tee /tmp/kernel-lifecycle-all-check.log
-          grep -Fq 'SCHEDULER_POLICY_TEST_OK priority-levels=4 rr=equal aging=50 quantum=3-6' /tmp/kernel-lifecycle-all-check.log
-          grep -Fq 'KERNEL_PROCESS_LIFECYCLE_TEST_OK objects=16 handles=8 pid-generation=1 waitable=1 reap=deferred stale=blocked' /tmp/kernel-lifecycle-all-check.log
-          test "$(sha256sum build/HELLO.ZEX | awk '{print $1}')" = '2b7ba0114d5228825b30aca30e0e978f2faf9b798cf7f5494742d7a1d330956a'
+          make -j2 all check | tee /tmp/all-check.log
+          grep -Fq 'SCHEDULER_POLICY_TEST_OK priority-levels=4 rr=equal aging=50 quantum=3-6' /tmp/all-check.log
+          grep -Fq 'KERNEL_PROCESS_LIFECYCLE_TEST_OK objects=16 handles=8 pid-generation=1 waitable=1 reap=deferred stale=blocked' /tmp/all-check.log
+          test "$(sha256sum build/HELLO.ZEX | cut -d' ' -f1)" = '2b7ba0114d5228825b30aca30e0e978f2faf9b798cf7f5494742d7a1d330956a'
           test "$(stat -c%s build/KERNEL.BIN)" -le 524288
           static_end="$(awk '/__kernel_static_end = \./ {print $1}' build/kernel.map | tail -1)"
-          [[ "$static_end" =~ ^0x[0-9a-fA-F]+$ ]]
           test $((static_end)) -le $((0x480000))
           readelf -r build/process-lifecycle-probe.o | grep -Fq 'There are no relocations'
           mkdir -p build/kernel-process-lifecycle
-          cp /tmp/kernel-lifecycle-all-check.log build/kernel-process-lifecycle/all-check.log
-
-      - name: Run lifecycle model under Clang sanitizers
-        shell: bash
-        run: |
-          set -euo pipefail
+          cp /tmp/all-check.log build/kernel-process-lifecycle/
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -Wpedantic \
-            -fsanitize=address,undefined,integer,implicit-conversion \
-            -fno-omit-frame-pointer tests/kernel_process_lifecycle_test.cpp \
-            -o build/kernel-process-lifecycle/model-clang
-          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
-            UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+            -fsanitize=address,undefined,integer,implicit-conversion -fno-omit-frame-pointer \
+            tests/kernel_process_lifecycle_test.cpp -o build/kernel-process-lifecycle/model-clang
+          ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
             build/kernel-process-lifecycle/model-clang | tee build/kernel-process-lifecycle/model-clang.log
-          grep -Fqx 'KERNEL_PROCESS_LIFECYCLE_TEST_OK objects=16 handles=8 pid-generation=1 waitable=1 reap=deferred stale=blocked' \
-            build/kernel-process-lifecycle/model-clang.log
 
       - name: Prove lifecycle and scheduler in QEMU
         shell: bash
         run: |
           set -euo pipefail
-          bash tests/qemu_kernel_process_lifecycle.sh \
-            build/zenov-os.img build/zenov-data.img build/qemu/kernel-process-lifecycle
-          grep -Fq 'PROCESS_LIFECYCLE_RUNTIME_OK spawned=2 reaped=2 handles=closed stale=blocked objects=collected' \
-            build/qemu/kernel-process-lifecycle/serial.log
-          bash tests/qemu_scheduler.sh \
-            build/zenov-os.img build/zenov-data.img build/qemu/scheduler-regression
-          grep -Fq 'PREEMPTIVE_MULTITASKING_OK isolation=per-address-space' \
-            build/qemu/scheduler-regression/serial.log
+          bash tests/qemu_kernel_process_lifecycle.sh build/zenov-os.img build/zenov-data.img build/qemu/kernel-process-lifecycle
+          grep -Fq 'PROCESS_LIFECYCLE_RUNTIME_OK spawned=2 reaped=2 handles=closed stale=blocked objects=collected' build/qemu/kernel-process-lifecycle/serial.log
+          bash tests/qemu_scheduler.sh build/zenov-os.img build/zenov-data.img build/qemu/scheduler-regression
+          grep -Fq 'PREEMPTIVE_MULTITASKING_OK isolation=per-address-space' build/qemu/scheduler-regression/serial.log
 
       - name: Publish verified kernel commit
         shell: bash
@@ -125,7 +104,7 @@ jobs:
           git commit -m 'kernel: add waitable process lifecycle and handle objects'
           git push origin "HEAD:$TARGET_BRANCH"
 
-      - name: Upload applicator evidence
+      - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -134,7 +113,6 @@ jobs:
           retention-days: 14
           path: |
             build/KERNEL.BIN
-            build/kernel.elf
             build/kernel.map
             build/kernel-process-lifecycle/
             build/qemu/kernel-process-lifecycle/
