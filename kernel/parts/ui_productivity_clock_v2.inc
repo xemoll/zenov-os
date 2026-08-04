@@ -246,8 +246,9 @@ bool productivity_clock_v2_delete_alarm() {
         productivity_clock_v2_alarms[index - 1U] = productivity_clock_v2_alarms[index];
     --productivity_clock_v2_alarm_count;
     if (productivity_clock_v2_alarm_focus >= productivity_clock_v2_alarm_count) productivity_clock_v2_alarm_focus = 0U;
-    if (productivity_clock_v2_banner_index == static_cast<int8_t>(removed)) productivity_clock_v2_banner_index = -1;
-    else if (productivity_clock_v2_banner_index > static_cast<int8_t>(removed)) --productivity_clock_v2_banner_index;
+    const int32_t removed_index = static_cast<int32_t>(removed);
+    if (productivity_clock_v2_banner_index == removed_index) productivity_clock_v2_banner_index = -1;
+    else if (productivity_clock_v2_banner_index > removed_index) --productivity_clock_v2_banner_index;
     const bool saved = productivity_clock_v2_save_alarms();
     serial::line(saved ? "UI_CLOCK_V2_ALARM_DELETE_OK" : "UI_CLOCK_V2_ALARM_DELETE_FAILED");
     return saved;
@@ -273,7 +274,7 @@ bool productivity_clock_v2_background_tick() {
         if (!alarm.enabled || alarm.hour != hour || alarm.minute != minute || alarm.last_fired_stamp == stamp) continue;
         if (alarm.day_mask && (alarm.day_mask & static_cast<uint8_t>(1U << weekday)) == 0U) continue;
         alarm.last_fired_stamp = stamp;
-        productivity_clock_v2_banner_index = static_cast<int8_t>(index);
+        productivity_clock_v2_banner_index = static_cast<int32_t>(index);
         productivity_clock_v2_banner_until = timer_ticks + 1200U;
         serial::line("UI_CLOCK_V2_ALARM_DUE");
         changed = true;
@@ -296,8 +297,8 @@ void productivity_clock_v2_render_banner() {
         draw_text(x + 16, y + 34, "ZEN CLOCK", current_theme.text_muted, 1);
         return;
     }
+    if (productivity_clock_v2_banner_index < 0 || productivity_clock_v2_banner_index >= productivity_clock_v2_alarm_count) return;
     const uint8_t index = static_cast<uint8_t>(productivity_clock_v2_banner_index);
-    if (index >= productivity_clock_v2_alarm_count) return;
     const ProductivityClockAlarmV2& alarm = productivity_clock_v2_alarms[index];
     draw_text(x + 16, y + 14, "ALARM", current_theme.warning, 1);
     draw_two_digits(x + 68, y + 14, alarm.hour, current_theme.accent);
