@@ -103,6 +103,6 @@ int main() {
         assert(earliest.size() == capacity && earliest.front() == 1U && earliest.back() == 146U);
     }
 
-    std::puts("PRODUCTIVITY_UTILITIES_MODEL_OK calc=precedence+programmer+overflow date=gregorian reminders=v2+backward+recurrence+quick-add agenda=minute-order+seven-day+earliest-capacity");
+    std::puts("PRODUCTIVITY_UTILITIES_MODEL_OK calc=precedence+programmer+overflow date=gregorian reminders=v2+backward+recurrence+quick-add agenda=minute-order+seven-day");
     return 0;
 }
