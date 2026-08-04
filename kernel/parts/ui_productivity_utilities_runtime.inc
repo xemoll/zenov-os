@@ -13,7 +13,7 @@ void background_tick() {
     }
     const bool reminder_changed = productivity_reminders_check_due();
     if (!clock_changed && !clock_live && !reminder_changed) return;
-    render_scene();
+    render_scene_top();
     present_full();
     if (clock_changed || clock_live) serial::line("UI_BACKGROUND_CLOCK_REFRESH_OK");
     if (reminder_changed) serial::line("UI_BACKGROUND_REMINDER_REFRESH_OK");
