@@ -52,25 +52,29 @@ void compat_command(char* input) {
     char* action = nullptr;
     char* arguments = nullptr;
     if (!compat_split_subcommand(input, action, arguments)) {
-        console::line("Usage: pkg compat status|check <file>|run-linux <file> [arguments]");
+        console::line("Usage: pkg compat status|check <file>|run-linux <file> [args]|run-psx <file>");
         return;
     }
     if (string_equal(action, "status")) {
         console::line("  FORMAT        EXACT PREFLIGHT                      EXECUTION");
         console::line("  Linux/i386    static/segments/entry/W^X/ranges     ring-3 minimal");
         console::line("  Windows PE32  headers/sections/entry/W^X/i386      inspect only");
-        console::line("  PS-X EXE      payload/load/entry/fill/stack/RAM     inspect only");
+        console::line("  PS-X EXE      payload/load/entry/fill/stack/RAM     R3000A diagnostic");
         console::line("  PS2 R5900     static/segments/entry/W^X/ranges     inspect only");
         console::line("  Xbox XBE      headers/sections/image/W^X/ranges    inspect only");
         console::line("  Linux ABI     write(fd 1/2), exit, exit_group; all else denied");
+        console::line("  PS1 ABI       R3000A integer core, delay slots, bounded A0/B0 console HLE");
         console::line("  Trust         raw foreign signatures remain unverified");
-        serial::line("ZENPKG_COMPAT_READY validators=5 runtimes=1 fail-closed=1 antivirus-unchanged=1");
+        serial::line("ZENPKG_COMPAT_READY validators=5 runtimes=2 fail-closed=1 antivirus-unchanged=1");
     } else if (string_equal(action, "check")) {
         if (!*arguments) console::warning("Usage: pkg compat check <file>");
         else if (!compat_check(arguments)) console::warning("Compatibility preflight rejected the file.");
     } else if (string_equal(action, "run-linux")) {
         if (!*arguments) console::warning("Usage: pkg compat run-linux <file> [arguments]");
         else if (!process::run_linux_i386(arguments)) console::warning("Linux/i386 launch rejected.");
+    } else if (string_equal(action, "run-psx")) {
+        if (!*arguments) console::warning("Usage: pkg compat run-psx <file>");
+        else if (!process::run_psx(arguments)) console::warning("PS1 R3000A launch rejected.");
     } else {
         console::warning("Unknown pkg compat action.");
     }

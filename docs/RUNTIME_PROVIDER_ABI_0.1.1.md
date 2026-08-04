@@ -155,4 +155,4 @@ Not implemented:
 - large-file storage inside ZenovFS;
 - OpenGL/Vulkan, streaming audio or gamepad APIs;
 - bundled emulator/provider binaries;
-- PS1/PSP/PS2 foreign execution.
+- complete PS1/PSP/PS2 foreign execution (the built-in PS-X EXE R3000A diagnostic subset remains intentionally separate).

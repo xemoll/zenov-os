@@ -65,7 +65,7 @@ This unsigned sandbox does not weaken the signed ZenRepo installation and native
 `make zenpkg-foreign-qemu` additionally boots ZenovOS and requires evidence that the guest receives `-ENOSYS` for `open`, `-EBADF` for `write` to fd 3, successfully writes to stdout and exits through `exit_group(0)`:
 
 ```text
-ZENPKG_COMPAT_READY validators=5 runtimes=1 fail-closed=1 antivirus-unchanged=1
+ZENPKG_COMPAT_READY validators=5 runtimes=2 fail-closed=1 antivirus-unchanged=1
 ZENPKG_COMPAT_PREFLIGHT_OK format=elf structural=1 runtime=1 trust=0 verdict=runnable-sandbox
 LINUX_I386_SYSCALL_ENOSYS number=5
 LINUX_I386_SYSCALL_DENIED syscall=write reason=fd

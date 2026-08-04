@@ -52,7 +52,8 @@ void formats() {
     console::line("  PKG/DMG/Mach-O                runtime-required; Darwin ABI is absent");
     console::line("  XBE/XEX/STFS                  legacy Xbox runtime-required");
     console::line("  XVC/MSIXVC/MSIXVC2            partner-only; GDK identity/keys required");
-    console::line("  PS-X/R5900 ELF/PBP/discs      legacy console runtime-required");
+    console::line("  PS-X EXE diagnostic subset    built-in bounded R3000A interpreter");
+    console::line("  R5900 ELF/PBP/discs           legacy console runtime-required");
     console::line("  Generic MIPS ELF              foreign runtime; not assumed to be PS2");
     console::line("  PlayStation PKG/PUP/SELF      signed/encrypted partner boundary");
     console::line("");

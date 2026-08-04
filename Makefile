@@ -64,6 +64,9 @@ $(BUILD)/zex-pack: tools/zex_pack.cpp | $(BUILD)
 $(BUILD)/zenovfs-builder: tools/zenovfs_builder.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
+$(BUILD)/psx-exe-fixture: tools/psx_exe_fixture.cpp | $(BUILD)
+	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
+
 $(BUILD)/zenovfs-verify: tools/zenovfs_verify.cpp | $(BUILD)
 	$(HOST_CXX) $(HOST_FLAGS) $< -o $@
 
@@ -335,13 +338,17 @@ $(BUILD)/LINUX-I386-HELLO.ELF: $(BUILD)/linux-i386-hello.o user/linux_i386_linke
 	@readelf -h $@ | grep -Eq 'Machine:[[:space:]]+Intel 80386'
 	@! readelf -l $@ | grep -Eq 'INTERP|DYNAMIC'
 
+$(BUILD)/PSX-R3000A-HELLO.EXE: $(BUILD)/psx-exe-fixture
+	$(BUILD)/psx-exe-fixture $@
+	@test "$$(od -An -tc -N8 $@ | tr -d ' \n')" = "PS-XEXE"
+
 $(BUILD)/ZENOVAPP.ZEX: user/hello_zenov.zv $(BUILD)/zenov-app-compiler
 	$(BUILD)/zenov-app-compiler $< -o $@ --abi 0.1.1
 	@test "$$(od -An -tc -N4 $@ | tr -d ' \n')" = "ZEX1"
 	@printf '%s  %s\n' '$(ZENOV_APP_EXPECTED_SHA256)' '$@' | sha256sum -c -
 
 USER_APPS := $(BUILD)/HELLO.ZEX $(BUILD)/FILEIO.ELF $(BUILD)/ARGS.ELF $(BUILD)/CONSOLE.ELF $(BUILD)/PROTECT.ELF $(BUILD)/KACCESS.ELF $(BUILD)/ZENOVAPP.ZEX
-COMPAT_FIXTURES := $(BUILD)/LINUX-I386-HELLO.ELF
+COMPAT_FIXTURES := $(BUILD)/LINUX-I386-HELLO.ELF $(BUILD)/PSX-R3000A-HELLO.EXE
 ZENOV_DATA_BASE := $(BUILD)/zenov-data-base.img
 
 $(ZENOV_DATA_BASE): $(USER_APPS) $(COMPAT_FIXTURES) $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $(ZVRT_FILES) $(BUILD)/zenovfs-builder $(BUILD)/zenovfs-verify
@@ -559,8 +566,9 @@ deterministic: all
 	@diff -u $(BUILD)/build-manifest.json /tmp/zenov-os-deterministic/build-manifest.json
 	@cmp $(BUILD)/zenov-data.img /tmp/zenov-os-deterministic/zenov-data.img
 	@for app in $(USER_APPS); do cmp $$app /tmp/zenov-os-deterministic/$$(basename $$app); done
+	@for fixture in $(COMPAT_FIXTURES); do cmp $$fixture /tmp/zenov-os-deterministic/$$(basename $$fixture); done
 	@for policy in $(ZGDB_FILES) $(ZCAP_FILES) $(ZMID_FILES) $(ZRWP_FILES) $(ZVRT_FILES); do cmp $$policy /tmp/zenov-os-deterministic/$$(basename $$policy); done
-	@echo 'deterministic rebuild: OK (system, ZGDB2/ZCAP1/ZMID1/ZRWP1/ZVRT1 RSA-PSS policies, empty ZGAL1 seed, data volume and seven apps are byte-identical)'
+	@echo 'deterministic rebuild: OK (system, policies, empty audit seed, data volume, seven apps and two foreign fixtures are byte-identical)'
 
 inspect: all
 	readelf -h $(BUILD)/kernel.elf

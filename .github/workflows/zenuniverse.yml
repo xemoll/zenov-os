@@ -76,7 +76,7 @@ jobs:
           make --no-print-directory BUILD=/tmp/zenuniverse-rebuild universe-check
           cmp build/zenuniverse.zuc /tmp/zenuniverse-rebuild/zenuniverse.zuc
           grep -q '^ZENUNIVERSE1$' build/zenuniverse.zuc
-          grep -q '^count=24$' build/zenuniverse.zuc
+          grep -q '^count=26$' build/zenuniverse.zuc
           grep -q '^provider-abi=zen-runtime-provider-1$' build/zenuniverse.zuc
           grep -q '^requires-any=graphics.opengl3.1|graphics.vulkan1.0$' build/zenuniverse.zuc
           ! grep -q -- '-or-vulkan' build/zenuniverse.zuc
@@ -117,7 +117,7 @@ jobs:
           test -s "$provider_dir/fixtures/hello.zlaunch"
           cmp "$provider_dir/native-launch.log" "$provider_dir/fixtures/hello.zlaunch"
           sha256sum "$provider_dir/fixtures/hello.zex" "$provider_dir/fixtures/game.chd" "$provider_dir/fixtures/ps1-bios.bin" > build/runtime-fixture-sha256.txt
-          echo 'ZENUNIVERSE_PROVIDER_GATE_OK schema=v1 catalog=22 native=ready foreign=fail-closed artifact=content-addressed assets=hashed alternatives=typed sanitizers=yes'
+          echo 'ZENUNIVERSE_PROVIDER_GATE_OK schema=v1 catalog=26 native=ready foreign=fail-closed artifact=content-addressed assets=hashed alternatives=typed sanitizers=yes'
       - name: Upload provider ABI v1 evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.6.2

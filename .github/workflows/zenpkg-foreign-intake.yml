@@ -14,6 +14,7 @@ on:
       - 'tests/package_compatibility_preflight_test.cpp'
       - 'tests/linux_i386_abi_test.cpp'
       - 'tests/linux_i386_elf_test.cpp'
+      - 'tests/psx_r3000a_test.cpp'
       - 'tests/zenpkg_data_image_retry_test.sh'
       - 'tests/zenpkg_foreign_test.sh'
       - 'tests/zenpkg_streaming_test.sh'
@@ -26,11 +27,18 @@ on:
       - 'kernel/parts/linux_i386_abi.inc'
       - 'kernel/parts/linux_i386_elf.inc'
       - 'kernel/parts/process_linux_i386.inc'
+      - 'kernel/parts/psx_exe.inc'
+      - 'kernel/parts/psx_r3000a.inc'
+      - 'kernel/parts/psx_guest_memory.inc'
+      - 'kernel/parts/process_psx.inc'
       - 'kernel/parts/package_manager.inc'
       - 'kernel/parts/package_manager/**'
       - 'user/linux_i386_hello.S'
       - 'user/linux_i386_linker.ld'
+      - 'tools/psx_exe_fixture.cpp'
       - 'packages/universe/*linux-i386*'
+      - 'packages/universe/profile-playstation1-diagnostic.zsource'
+      - 'packages/universe/runtime-psx-r3000a-diagnostic.zsource'
       - '.github/workflows/zenpkg-foreign-intake.yml'
   pull_request:
     branches:
@@ -45,6 +53,7 @@ on:
       - 'tests/package_compatibility_preflight_test.cpp'
       - 'tests/linux_i386_abi_test.cpp'
       - 'tests/linux_i386_elf_test.cpp'
+      - 'tests/psx_r3000a_test.cpp'
       - 'tests/zenpkg_data_image_retry_test.sh'
       - 'tests/zenpkg_foreign_test.sh'
       - 'tests/zenpkg_streaming_test.sh'
@@ -57,11 +66,18 @@ on:
       - 'kernel/parts/linux_i386_abi.inc'
       - 'kernel/parts/linux_i386_elf.inc'
       - 'kernel/parts/process_linux_i386.inc'
+      - 'kernel/parts/psx_exe.inc'
+      - 'kernel/parts/psx_r3000a.inc'
+      - 'kernel/parts/psx_guest_memory.inc'
+      - 'kernel/parts/process_psx.inc'
       - 'kernel/parts/package_manager.inc'
       - 'kernel/parts/package_manager/**'
       - 'user/linux_i386_hello.S'
       - 'user/linux_i386_linker.ld'
+      - 'tools/psx_exe_fixture.cpp'
       - 'packages/universe/*linux-i386*'
+      - 'packages/universe/profile-playstation1-diagnostic.zsource'
+      - 'packages/universe/runtime-psx-r3000a-diagnostic.zsource'
       - '.github/workflows/zenpkg-foreign-intake.yml'
   merge_group:
     types:
@@ -130,9 +146,10 @@ jobs:
           grep -Fq 'ZENPKG_FOREIGN_TEST_OK' /tmp/zenpkg-foreign-check.log
           grep -Fq 'ZENPKG_STREAMING_TEST_OK' /tmp/zenpkg-foreign-check.log
           grep -Fq 'ZENPKG_NATIVE_SNAPSHOT_TEST_OK' /tmp/zenpkg-foreign-check.log
-          grep -Fq 'PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=33 truncations=4492 validators=5 runtime-ready=1 fail-closed=1' /tmp/zenpkg-foreign-check.log
+          grep -Fq 'PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=35 truncations=4492 validators=5 runtime-ready=2 fail-closed=1' /tmp/zenpkg-foreign-check.log
           grep -Fq 'LINUX_I386_ABI_TEST_OK syscalls=write,exit,exit_group fail_closed=1' /tmp/zenpkg-foreign-check.log
           grep -Fq 'LINUX_I386_ELF_TEST_OK bias=0x08048000 negatives=wx,machine,dynamic,entry' /tmp/zenpkg-foreign-check.log
+          grep -Fq 'PSX_R3000A_TEST_OK cases=15 cpu=integer+branch-delay+load-delay+hi-lo memory=2MiB hle=A0+B0 fail-closed=1' /tmp/zenpkg-foreign-check.log
           grep -Fq 'ZENPKG_DATA_RETRY_TEST_OK' /tmp/zenpkg-foreign-check.log
           test -s build/kernel.map
           kernel_end="$(awk '$2 == "__kernel_end" {print $1}' build/kernel.map | tail -n 1)"
@@ -165,6 +182,8 @@ jobs:
               -o build/clang-sanitized/linux-i386-abi-test
             clang++ "${flags[@]}" tests/linux_i386_elf_test.cpp \
               -o build/clang-sanitized/linux-i386-elf-test
+            clang++ "${flags[@]}" tests/psx_r3000a_test.cpp \
+              -o build/clang-sanitized/psx-r3000a-test
             clang++ "${flags[@]}" tests/zenpkg_native_snapshot_test.cpp \
               -o build/clang-sanitized/zenpkg-native-snapshot-test
             clang++ "${flags[@]}" tools/zenpkg/main.cpp \
@@ -186,6 +205,8 @@ jobs:
             2>&1 | tee build/ci-logs/linux-i386-abi-sanitized.log
           build/clang-sanitized/linux-i386-elf-test build/LINUX-I386-HELLO.ELF \
             2>&1 | tee build/ci-logs/linux-i386-elf-sanitized.log
+          build/clang-sanitized/psx-r3000a-test build/PSX-R3000A-HELLO.EXE \
+            2>&1 | tee build/ci-logs/psx-r3000a-sanitized.log
           build/clang-sanitized/zenpkg-native-snapshot-test \
             build/HELLO.ZEX build/clang-sanitized/native-snapshot \
             2>&1 | tee build/ci-logs/native-snapshot-sanitized.log
@@ -197,14 +218,15 @@ jobs:
             2>&1 | tee build/ci-logs/streaming-sanitized.log
           grep -Fqx 'ZENPKG_SHA256_TEST_OK vectors=3 streaming=1 explicit_mod32=1' build/ci-logs/sha256-sanitized.log
           grep -Fq 'PACKAGE_FOREIGN_FORMAT_TEST_OK' build/ci-logs/foreign-format-sanitized.log
-          grep -Fq 'PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=33 truncations=4492 validators=5 runtime-ready=1 fail-closed=1' build/ci-logs/compat-preflight-sanitized.log
+          grep -Fq 'PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=35 truncations=4492 validators=5 runtime-ready=2 fail-closed=1' build/ci-logs/compat-preflight-sanitized.log
           grep -Fq 'LINUX_I386_ABI_TEST_OK' build/ci-logs/linux-i386-abi-sanitized.log
           grep -Fq 'LINUX_I386_ELF_TEST_OK' build/ci-logs/linux-i386-elf-sanitized.log
+          grep -Fq 'PSX_R3000A_TEST_OK' build/ci-logs/psx-r3000a-sanitized.log
           grep -Fq 'ZENPKG_NATIVE_SNAPSHOT_TEST_OK' build/ci-logs/native-snapshot-sanitized.log
           grep -Fq 'ZENPKG_FOREIGN_TEST_OK' build/ci-logs/foreign-intake-sanitized.log
           grep -Fq 'ZENPKG_STREAMING_TEST_OK' build/ci-logs/streaming-sanitized.log
 
-      - name: Prove package preflight and Linux i386 sandbox in QEMU
+      - name: Prove Linux i386 and PS1 R3000A sandboxes in QEMU
         run: |
           set -euo pipefail
           if ! make zenpkg-foreign-qemu > /tmp/zenpkg-foreign-qemu.log 2>&1; then
@@ -215,9 +237,11 @@ jobs:
           fi
           cp /tmp/zenpkg-foreign-qemu.log build/ci-logs/foreign-qemu.log
           tail -n 200 /tmp/zenpkg-foreign-qemu.log
-          grep -Fq 'ZENPKG_FOREIGN_QEMU_OK formats=1 preflight=linux-i386 linux-i386=write+exit+enosys+sandbox probe=zenpkg install=1 run=1 fsck=1' build/qemu/zenpkg-foreign/summary.log
-          grep -Fq 'ZENPKG_COMPAT_READY validators=5 runtimes=1 fail-closed=1 antivirus-unchanged=1' build/qemu/zenpkg-foreign/serial.log
+          grep -Fq 'ZENPKG_FOREIGN_QEMU_OK formats=2 preflight=linux-i386+psx linux-i386=write+exit+enosys+sandbox psx=r3000a+delay+hle-console+budget+wipe+reuse probe=zenpkg install=1 run=1 fsck=1' build/qemu/zenpkg-foreign/summary.log
+          grep -Fq 'ZENPKG_COMPAT_READY validators=5 runtimes=2 fail-closed=1 antivirus-unchanged=1' build/qemu/zenpkg-foreign/serial.log
           grep -Fq 'ZENPKG_COMPAT_PREFLIGHT_OK format=elf structural=1 runtime=1 trust=0 verdict=runnable-sandbox' build/qemu/zenpkg-foreign/serial.log
+          grep -Fq 'ZENPKG_COMPAT_PREFLIGHT_OK format=playstation-psx-exe structural=1 runtime=1 trust=0 verdict=runnable-sandbox' build/qemu/zenpkg-foreign/serial.log
+          test "$(grep -Fc 'PSX_GUEST_RAM_WIPED pages=512 bytes=2097152' build/qemu/zenpkg-foreign/serial.log)" -eq 2
 
       - name: Upload foreign intake evidence
         if: always()

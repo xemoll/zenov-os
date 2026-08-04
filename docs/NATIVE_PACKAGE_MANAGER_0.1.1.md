@@ -2,7 +2,7 @@
 
 ZenovOS 0.1.1 contains a bounded transactional manager for native ZEX1 and static ELF32/i386 applications. Container integrity, repository authorization, executable appraisal and syscall authority are separate gates; no successful gate bypasses another.
 
-Foreign intake is deliberately separate from native installation. ZenPkg identifies historical and current Windows, Linux, macOS, Xbox and PlayStation package, executable and media families, but identification does not make their binaries executable on ZenovOS. The only foreign execution path is the separately constrained minimal Linux/i386 console sandbox.
+Foreign intake is deliberately separate from native installation. ZenPkg identifies historical and current Windows, Linux, macOS, Xbox and PlayStation package, executable and media families, but identification does not make arbitrary binaries executable on ZenovOS. Two exact subsets have separate sandboxes: minimal static Linux/i386 console programs and bounded PS-X EXE R3000A diagnostics.
 
 ## Shell commands
 
@@ -12,6 +12,7 @@ pkg formats
 pkg compat status
 pkg compat check <file>
 pkg compat run-linux <file> [arguments]
+pkg compat run-psx <file>
 pkg probe <file>
 pkg list
 pkg search <query>
@@ -54,6 +55,8 @@ Probe is read-only. It never runs setup directives, package scripts, custom acti
 `pkg compat check` goes beyond signature classification. It applies a format-specific bounded structural validator to Linux/i386 ELF, Windows PE32, PS-X EXE, PlayStation 2 R5900 ELF or Original Xbox XBE. Its result separates recognition, structural validity, foreign signature trust and runtime availability. A structurally valid foreign file remains `inspect-only` unless an implemented sandbox exists; raw foreign trust is never inferred from format bytes.
 
 `pkg compat run-linux` is not a probe or install shortcut. It accepts only the [documented static Linux/i386 subset](LINUX_I386_COMPAT_0.1.1.md) from `/samples` or `/downloads` and activates a compiled console-only capability mask.
+
+`pkg compat run-psx` accepts only the [documented PS-X EXE diagnostic subset](PSX_R3000A_COMPAT_0.1.1.md) from the same untrusted-input directories. It uses a bounded interpreter and supervisor-only guest RAM; it does not run MIPS code natively and does not provide a retail-game console.
 
 ## Host intake commands
 
@@ -100,7 +103,7 @@ The output is a deterministic ZenPkg container. Import does not add the package 
 | Xbox 360 | XEX2 and STFS `CON`/`LIVE`/`PIRS` content | Runtime-required; Xenon/PowerPC and Xbox services are absent; license metadata is not bypassed |
 | Xbox One / Series | XVC | Partner-only; official GDK identity, licenses and package keys are required |
 | Xbox / Windows PC | MSIXVC and the newer PC-only MSIXVC2 generation | Partner-only; official GDK packaging and identity remain required |
-| PlayStation / PS1 | PS-X EXE and ISO/BIN/CUE media candidates | Runtime-required; MIPS R3000A and console services are absent |
+| PlayStation / PS1 | PS-X EXE and ISO/BIN/CUE media candidates | Exact PS-X EXE diagnostics can use the bounded R3000A sandbox; media and general games remain runtime-required |
 | PlayStation 2 | little-endian MIPS ELF carrying `EF_MIPS_ARCH_3` and `EF_MIPS_MACH_5900` flags | Runtime-required; Emotion Engine/IOP and console services are absent |
 | PSP / PlayStation Vita | PBP, platform-tagged PKG and ZIP-based VPK | PBP/VPK are runtime-required; protected PKG remains partner-only |
 | PlayStation 3 | platform-tagged PKG, SELF and PUP update package | Partner-only; encryption, licenses, firmware validation and signatures are not bypassed |
@@ -182,7 +185,7 @@ The expanded foreign-intake suite adds:
 - false-positive regressions for bare MZ, Java `CAFEBABE` and generic MIPS misclassification;
 - ASan/UBSan execution of the classifier, complete host intake suite and native-snapshot regression;
 - exact Linux/i386 syscall and ELF-policy host tests, including fail-closed negative vectors;
-- a QEMU lifecycle proving the minimal Linux/i386 sandbox plus `pkg formats`, `pkg probe`, signed installation, execution and ZenovFS `fsck`.
+- a QEMU lifecycle proving the minimal Linux/i386 sandbox, two PS1 guest-memory allocation/wipe/reuse cycles, `pkg formats`, `pkg probe`, signed installation, execution and ZenovFS `fsck`.
 
 Expected evidence markers:
 
@@ -193,7 +196,8 @@ ZENPKG_STREAMING_TEST_OK cases=2 hash=full probe=head65536+tail512 overlap=none
 ZENPKG_NATIVE_SNAPSHOT_TEST_OK cases=11 bounded=1 digest=1 path-independent=1 checksum=fnv1a32
 LINUX_I386_ABI_TEST_OK syscalls=write,exit,exit_group fail_closed=1
 LINUX_I386_ELF_TEST_OK bias=0x08048000 negatives=wx,machine,dynamic,entry
-ZENPKG_FOREIGN_QEMU_OK formats=1 linux-i386=write+exit+enosys+sandbox probe=zenpkg install=1 run=1 fsck=1
+PSX_R3000A_TEST_OK cases=15 cpu=integer+branch-delay+load-delay+hi-lo memory=2MiB hle=A0+B0 fail-closed=1
+ZENPKG_FOREIGN_QEMU_OK formats=2 preflight=linux-i386+psx linux-i386=write+exit+enosys+sandbox psx=r3000a+delay+hle-console+budget+wipe+reuse probe=zenpkg install=1 run=1 fsck=1
 ```
 
 ## Explicit limits
@@ -203,6 +207,6 @@ ZENPKG_FOREIGN_QEMU_OK formats=1 linux-i386=write+exit+enosys+sandbox probe=zenp
 - ZenovFS1 limits each package and installed payload to 64 KiB.
 - Guest-side `pkg probe` is limited to a 64 KiB ZenovFS file; host-side `zenpkg probe` supports large files through streaming and bounded sampling.
 - Only one foreground userspace process is supported.
-- Dynamic linking, x86_64 native execution, a general Linux syscall ABI, Win32/UWP, Darwin/Mach-O execution and console emulation are not implemented.
+- Dynamic linking, x86_64 native execution, a general Linux syscall ABI, Win32/UWP, Darwin/Mach-O execution and complete console emulation are not implemented. The PS1 slice is interpreter-only diagnostics without GPU, SPU, disc, BIOS or input support.
 - Xbox and PlayStation encrypted or signed content remains subject to official platform access, licensing, identities and key material; ZenovOS does not bypass those controls.
 - A recognized historical package or game image is not equivalent to a working emulator. Runtime providers remain separate future components.

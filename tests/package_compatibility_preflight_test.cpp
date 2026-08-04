@@ -5,6 +5,7 @@
 #include "../kernel/parts/package_foreign_format.inc"
 #include "../kernel/parts/package_foreign_policy.inc"
 #include "../kernel/parts/linux_i386_elf.inc"
+#include "../kernel/parts/psx_exe.inc"
 #include "../kernel/parts/package_compatibility_preflight.inc"
 
 using package_compatibility::Verdict;
@@ -134,12 +135,16 @@ int main() {
     pe = pe32_fixture(); put32(pe, 0x178U + 20U, 0x300U); check("pe-raw-align", pe, "game.exe", false);
     pe = pe32_fixture(); pe.resize(0x300U); check("pe-truncated", pe, "game.exe", false);
 
-    check("psx-valid", psx_fixture(), "GAME.EXE", true, false, Verdict::inspect_only);
+    check("psx-valid", psx_fixture(), "GAME.EXE", true, true, Verdict::runnable_sandbox);
     auto psx = psx_fixture(); put32(psx, 0x10U, 0x80020000U); check("psx-entry", psx, "GAME.EXE", false);
     psx = psx_fixture(); put32(psx, 0x1cU, 0x200000U); check("psx-payload", psx, "GAME.EXE", false);
     psx = psx_fixture(); put32(psx, 0x18U, 0x80200000U); check("psx-load", psx, "GAME.EXE", false);
+    psx = psx_fixture(); put32(psx, 0x10U, 0xE0010000U); put32(psx, 0x18U, 0xE0010000U);
+    check("psx-invalid-alias", psx, "GAME.EXE", false);
     psx = psx_fixture(); put32(psx, 0x28U, 0x80010000U); put32(psx, 0x2cU, 4U);
     check("psx-fill-overlap", psx, "GAME.EXE", false);
+    psx = psx_fixture(); put32(psx, 0x30U, 0x801FFFF0U); put32(psx, 0x34U, 32U);
+    check("psx-stack-range", psx, "GAME.EXE", false);
     psx = psx_fixture(); psx.resize(0x700U); check("psx-truncated", psx, "GAME.EXE", false);
 
     check("ps2-valid", ps2_fixture(), "game.elf", true, false, Verdict::inspect_only);
@@ -171,7 +176,7 @@ int main() {
     reject_truncated_prefixes("xbe-prefixes", xbe_fixture(), "default.xbe", 0x400U);
     reject_truncated_prefixes("linux-prefixes", linux_fixture(), "hello.elf", 0x84U);
     if (!okay) return 1;
-    std::printf("PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=%u truncations=%u validators=5 runtime-ready=1 fail-closed=1\n",
+    std::printf("PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=%u truncations=%u validators=5 runtime-ready=2 fail-closed=1\n",
                 cases, truncations);
     return 0;
 }

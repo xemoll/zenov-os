@@ -34,6 +34,18 @@ grep -q '^provider=org.zenov.runtime.linux-i386-minimal@1.0.0$' "$BUILD/linux-i3
 grep -q '^launch-mode=builtin$' "$BUILD/linux-i386-status.log"
 grep -q '^ZENUNIVERSE_RUNTIME_READY package=org.zenov.runtime.linux-i386-minimal$' "$BUILD/linux-i386-status.log"
 
+"$BUILD/zenuniverse" runtime-status --input "$ROOT/packages/universe" \
+  --runtime psx-r3000a-diagnostic --host-profile zenov-0.1.1-i686 > "$BUILD/psx-diagnostic-status.log"
+grep -q '^provider=org.zenov.runtime.psx-r3000a-diagnostic@0.1.1$' "$BUILD/psx-diagnostic-status.log"
+grep -q '^launch-mode=builtin$' "$BUILD/psx-diagnostic-status.log"
+grep -q '^ZENUNIVERSE_RUNTIME_READY package=org.zenov.runtime.psx-r3000a-diagnostic$' "$BUILD/psx-diagnostic-status.log"
+
+"$BUILD/zenuniverse" runtime-plan --input "$ROOT/packages/universe" \
+  --package org.zenov.profile.playstation1-diagnostic --host-profile zenov-0.1.1-i686 \
+  --artifact psx-exe > "$BUILD/psx-diagnostic-plan.log"
+grep -q 'install org.zenov.runtime.psx-r3000a-diagnostic@0.1.1' "$BUILD/psx-diagnostic-plan.log"
+grep -q '^ZENUNIVERSE_RUNTIME_READY package=org.zenov.profile.playstation1-diagnostic$' "$BUILD/psx-diagnostic-plan.log"
+
 set +e
 "$BUILD/zenuniverse" runtime-plan --input "$ROOT/packages/universe" \
   --package org.zenov.profile.playstation1-game --host-profile zenov-0.1.1-i686 --artifact chd \
@@ -188,4 +200,4 @@ ASAN_OPTIONS="detect_leaks=${ZENUNIVERSE_DETECT_LEAKS:-1}:halt_on_error=1" UBSAN
   --host-profile zenov-0.1.1-i686 > "$BUILD/sanitized.log"
 grep -q 'ZENUNIVERSE_LAUNCH_READY' "$BUILD/sanitized.log"
 
-printf 'ZENUNIVERSE_RUNTIME_PROVIDER_TESTS_OK schema=v1 host-profile=verified native=ready linux-i386=ready artifact-manifest=content-addressed launch-plan=verified alternatives=typed ps1=blocked-honestly assets=hashed tamper=blocked symlink=blocked sanitizers=yes\n'
+printf 'ZENUNIVERSE_RUNTIME_PROVIDER_TESTS_OK schema=v1 host-profile=verified native=ready linux-i386=ready psx-diagnostic=ready artifact-manifest=content-addressed launch-plan=verified alternatives=typed ps1-games=blocked-honestly assets=hashed tamper=blocked symlink=blocked sanitizers=yes\n'

@@ -31,7 +31,7 @@ The runtime rejects dynamic/interpreted ELF, W+X or overlapping segments, non-i3
 | --- | --- | --- |
 | Linux/i386 ELF | Static `ET_EXEC`, load ranges, entry, overlap, page permissions and W^X | Runnable only in the minimal ring-3 sandbox |
 | Windows PE32 | DOS/PE/COFF headers, i386 executable type, bounded sections, entry, overlap and W^X | Inspect-only; Win32 and Authenticode are absent |
-| PS-X EXE | Header/payload size and two-MiB RAM load, entry, fill and stack ranges | Inspect-only; R3000A and console services are absent |
+| PS-X EXE | Header/payload size and two-MiB RAM load, entry, fill and stack ranges | Runnable only in the bounded R3000A diagnostic sandbox |
 | PS2 ELF | Little-endian R5900/MIPS III `ET_EXEC`, static segments, ranges, entry, overlap and W^X | Inspect-only; Emotion Engine runtime is absent |
 | Original Xbox XBE | Header/image/section-table bounds, raw/virtual sections, overlap and W^X | Inspect-only; signature trust and Xbox runtime are absent |
 
@@ -84,7 +84,7 @@ PS5-specific support is not asserted without a stable public format contract tha
 
 ## Runtime-provider boundary
 
-Metadata profiles exist for Proton, Darling, PCSX2, RPCS3, xemu and Xenia. They are planning records, not runnable components in the current kernel. The built-in minimal Linux/i386 slice is the sole foreign execution path in this release line.
+Metadata profiles exist for Proton, Darling, DuckStation, PCSX2, RPCS3, xemu and Xenia. They remain planning records. The kernel has two independent built-in foreign slices: minimal static Linux/i386 console execution and PS-X EXE R3000A diagnostics. The latter does not replace a complete PS1 emulator provider.
 
 A functional provider requires substantially more than a package parser:
 
@@ -102,15 +102,16 @@ Current expected evidence:
 
 ```text
 PACKAGE_FOREIGN_FORMAT_TEST_OK cases=46 generations=legacy-current
-PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=33 truncations=4492 validators=5 runtime-ready=1 fail-closed=1
+PACKAGE_COMPATIBILITY_PREFLIGHT_TEST_OK cases=35 truncations=4492 validators=5 runtime-ready=2 fail-closed=1
+PSX_R3000A_TEST_OK cases=15 cpu=integer+branch-delay+load-delay+hi-lo memory=2MiB hle=A0+B0 fail-closed=1
 ZENPKG_DATA_RETRY_TEST_OK atomic=1 idempotent=1 staging-clean=1
 ZENPKG_FOREIGN_TEST_OK probes=39 native-import=zex1,elf32 deterministic=2 rejection=7 generations=legacy-current streaming=1
 LINUX_I386_ABI_TEST_OK syscalls=write,exit,exit_group fail_closed=1
 LINUX_I386_ELF_TEST_OK bias=0x08048000 negatives=wx,machine,dynamic,entry
-ZENPKG_FOREIGN_QEMU_OK formats=1 preflight=linux-i386 linux-i386=write+exit+enosys+sandbox probe=zenpkg install=1 run=1 fsck=1
+ZENPKG_FOREIGN_QEMU_OK formats=2 preflight=linux-i386+psx linux-i386=write+exit+enosys+sandbox psx=r3000a+delay+hle-console+budget+wipe+reuse probe=zenpkg install=1 run=1 fsck=1
 ```
 
-The Linux/i386 QEMU marker additionally proves the narrow console-only foreign fixture. The remaining markers prove recognition and native-path isolation; they do not prove that general foreign applications or games run.
+The QEMU markers prove the narrow Linux console fixture and that the PS1 text fixture can allocate, wipe, release and reuse its isolated RAM. They do not prove that general Linux applications or PlayStation games run.
 
 ## Staged roadmap within the 0.1.1 line
 
@@ -125,6 +126,7 @@ The Linux/i386 QEMU marker additionally proves the narrow console-only foreign f
 - Network mirrors and TLS repository download — not implemented.
 - General dependency solver, multi-architecture native packages and dynamic linking — not implemented.
 - Minimal static Linux/i386 console runtime — implemented.
+- Bounded PS-X EXE R3000A diagnostic runtime — implemented.
 - General Linux, Windows, macOS and console application/game runtimes — not implemented.
 
 The system version remains 0.1.1 while these changes harden and expand the same release line.

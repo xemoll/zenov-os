@@ -16,8 +16,6 @@ struct Result {
 };
 
 constexpr uint32_t pe_max_image_bytes = 512U * 1024U * 1024U;
-constexpr uint32_t psx_ram_base = 0x80000000U;
-constexpr uint32_t psx_ram_bytes = 2U * 1024U * 1024U;
 constexpr uint32_t ps2_user_limit = 32U * 1024U * 1024U;
 constexpr uint32_t xbe_max_image_bytes = 256U * 1024U * 1024U;
 
@@ -109,30 +107,6 @@ bool validate_pe32(const uint8_t* bytes, uint32_t size) {
             executable_entry = true;
     }
     return executable_entry;
-}
-
-bool validate_psx_exe(const uint8_t* bytes, uint32_t size) {
-    static const uint8_t magic[8] = {'P','S','-','X',' ','E','X','E'};
-    if (!bytes || size < 0x800U || !package_foreign::bytes_at(bytes, size, 0U, magic, 8U)) return false;
-    bool valid = false;
-    const uint32_t entry = read_u32(bytes, size, 0x10U, valid);
-    const uint32_t load = read_u32(bytes, size, 0x18U, valid);
-    const uint32_t payload = read_u32(bytes, size, 0x1cU, valid);
-    const uint32_t fill_start = read_u32(bytes, size, 0x28U, valid);
-    const uint32_t fill_size = read_u32(bytes, size, 0x2cU, valid);
-    const uint32_t stack_base = read_u32(bytes, size, 0x30U, valid);
-    const uint32_t stack_offset = read_u32(bytes, size, 0x34U, valid);
-    if (!valid || !payload || payload > size - 0x800U || (payload & 3U) ||
-        load < psx_ram_base || load - psx_ram_base >= psx_ram_bytes ||
-        payload > psx_ram_bytes - (load - psx_ram_base) || !range_contains(load, payload, entry)) return false;
-    if (fill_size && (fill_start < psx_ram_base || fill_start - psx_ram_base >= psx_ram_bytes ||
-        fill_size > psx_ram_bytes - (fill_start - psx_ram_base) ||
-        ranges_overlap(load, payload, fill_start, fill_size))) return false;
-    if (stack_base || stack_offset) {
-        if (stack_base < psx_ram_base || stack_base - psx_ram_base >= psx_ram_bytes ||
-            stack_offset > psx_ram_bytes - (stack_base - psx_ram_base)) return false;
-    }
-    return true;
 }
 
 bool validate_ps2_elf(const uint8_t* bytes, uint32_t size) {
@@ -248,11 +222,16 @@ Result check(const uint8_t* bytes, uint32_t size, const char* path) {
         case package_foreign::Format::playstation_psx_exe:
             result.platform = "PlayStation 1";
             result.recognized = true;
-            result.structurally_valid = validate_psx_exe(bytes, size);
+            {
+                ::psx_exe::Layout layout{};
+                result.structurally_valid = ::psx_exe::validate(bytes, size, layout);
+            }
+            result.runtime_ready = result.structurally_valid;
+            result.verdict = result.structurally_valid ? Verdict::runnable_sandbox : Verdict::blocked;
             result.reason = result.structurally_valid
-                ? "PS-X EXE load, entry, fill and stack ranges fit isolated two-MiB PS1 RAM"
+                ? "PS-X EXE fits isolated two-MiB RAM; bounded R3000A diagnostic runtime is available"
                 : "malformed or out-of-range PS-X EXE header and payload";
-            break;
+            return result;
         case package_foreign::Format::playstation_ps2_elf:
             result.platform = "PlayStation 2";
             result.recognized = true;

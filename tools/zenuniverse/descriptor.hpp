@@ -189,7 +189,7 @@ void validate_descriptor(const Descriptor& descriptor) {
         {"windows", {"wine", "proton", "qemu-system", "external"}},
         {"linux", {"linux-i386-minimal", "linux-abi", "qemu-user", "qemu-system", "external"}},
         {"macos", {"darling", "qemu-system", "external"}},
-        {"playstation1", {"duckstation", "external"}},
+        {"playstation1", {"duckstation", "psx-r3000a-diagnostic", "external"}},
         {"playstation-portable", {"ppsspp", "external"}},
         {"playstation2", {"pcsx2", "external"}},
         {"playstation3", {"rpcs3", "external"}},

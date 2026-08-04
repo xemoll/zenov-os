@@ -7,7 +7,7 @@ namespace zenuniverse {
 const StringSet& runtime_names() {
     static const StringSet values = {
         "native", "linux-i386-minimal", "linux-abi", "wine", "proton", "qemu-user", "qemu-system",
-        "darling", "duckstation", "ppsspp", "pcsx2", "rpcs3", "xemu", "xenia", "external"
+        "darling", "duckstation", "psx-r3000a-diagnostic", "ppsspp", "pcsx2", "rpcs3", "xemu", "xenia", "external"
     };
     return values;
 }
