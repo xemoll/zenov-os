@@ -134,14 +134,77 @@ bool self_test() {
         serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=deflate-bytes");
         return false;
     }
+
+    constexpr uint32_t expected_size = sizeof(expected) - 1U;
+    uint8_t gzip_vector[10U + sizeof(deflate_vector) + 8U]{};
+    gzip_vector[0] = 0x1FU;
+    gzip_vector[1] = 0x8BU;
+    gzip_vector[2] = 8U;
+    gzip_vector[9] = 0xFFU;
+    memcpy(gzip_vector + 10U, deflate_vector, sizeof(deflate_vector));
+    const uint32_t expected_crc = crc32(expected, expected_size);
+    const uint32_t gzip_footer = 10U + sizeof(deflate_vector);
+    gzip_vector[gzip_footer] = static_cast<uint8_t>(expected_crc);
+    gzip_vector[gzip_footer + 1U] = static_cast<uint8_t>(expected_crc >> 8U);
+    gzip_vector[gzip_footer + 2U] = static_cast<uint8_t>(expected_crc >> 16U);
+    gzip_vector[gzip_footer + 3U] = static_cast<uint8_t>(expected_crc >> 24U);
+    gzip_vector[gzip_footer + 4U] = static_cast<uint8_t>(expected_size);
+    gzip_vector[gzip_footer + 5U] = static_cast<uint8_t>(expected_size >> 8U);
+    gzip_vector[gzip_footer + 6U] = static_cast<uint8_t>(expected_size >> 16U);
+    gzip_vector[gzip_footer + 7U] = static_cast<uint8_t>(expected_size >> 24U);
+
+    result = {};
+    if (inspect_payload("<content-gzip-selftest>", gzip_vector, sizeof(gzip_vector),
+            0U, workspace_a, workspace_b, result) != InspectionResult::matched ||
+        result.verdict != security_guard::Verdict::infected) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=gzip");
+        return false;
+    }
+
+    uint8_t zlib_vector[2U + sizeof(deflate_vector) + 4U]{};
+    zlib_vector[0] = 0x78U;
+    zlib_vector[1] = 0x01U;
+    memcpy(zlib_vector + 2U, deflate_vector, sizeof(deflate_vector));
+    const uint32_t expected_adler = adler32(expected, expected_size);
+    const uint32_t zlib_footer = 2U + sizeof(deflate_vector);
+    zlib_vector[zlib_footer] = static_cast<uint8_t>(expected_adler >> 24U);
+    zlib_vector[zlib_footer + 1U] = static_cast<uint8_t>(expected_adler >> 16U);
+    zlib_vector[zlib_footer + 2U] = static_cast<uint8_t>(expected_adler >> 8U);
+    zlib_vector[zlib_footer + 3U] = static_cast<uint8_t>(expected_adler);
+
+    result = {};
+    if (inspect_payload("<content-zlib-selftest>", zlib_vector, sizeof(zlib_vector),
+            0U, workspace_a, workspace_b, result) != InspectionResult::matched ||
+        result.verdict != security_guard::Verdict::infected) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=zlib");
+        return false;
+    }
+
+    gzip_vector[gzip_footer] ^= 0x01U;
+    result = {};
+    if (inspect_payload("<content-gzip-corrupt-selftest>", gzip_vector, sizeof(gzip_vector),
+            0U, workspace_a, workspace_b, result) != InspectionResult::unsupported) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=gzip-integrity");
+        return false;
+    }
+    zlib_vector[zlib_footer + 3U] ^= 0x01U;
+    result = {};
+    if (inspect_payload("<content-zlib-corrupt-selftest>", zlib_vector, sizeof(zlib_vector),
+            0U, workspace_a, workspace_b, result) != InspectionResult::unsupported) {
+        serial::line("ZMID_CONTENT_SELFTEST_FAILED stage=zlib-integrity");
+        return false;
+    }
+
     clear_cache();
     serial::line("ZMID_CONTENT_SELFTEST_OK workspace=distinct stages=6 size-limit=closed");
+    serial::line("ZMID_WRAPPED_DEFLATE_SELFTEST_OK gzip=1 zlib=1 integrity=2");
     return true;
 }
 
 bool init() {
     if (!self_test()) return false;
     serial::line("ZMID_CONTENT_INSPECTION_OK base64=2 tokens=1 casefold=1 zip=2 eocd=1 sfx=1 sfx-prefix=1 alias-safe=1 deflate=1 depth=2 entries=16 expanded=65536 cache=16 cache-path=1 size-limit=closed");
+    serial::line("ZMID_WRAPPED_DEFLATE_OK gzip=members16 zlib=single crc32=1 adler32=1 depth=2 expanded=65536");
     return true;
 }
 
