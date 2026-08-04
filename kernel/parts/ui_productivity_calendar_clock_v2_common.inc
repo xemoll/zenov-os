@@ -12,12 +12,13 @@ void productivity_calendar_clock_v2_append_uint(char* output, uint32_t capacity,
                                                 uint32_t value, uint8_t minimum_digits = 0U) {
     if (!output || !capacity || length >= capacity) return;
     char reversed[11]{};
+    constexpr uint8_t reversed_capacity = static_cast<uint8_t>(sizeof(reversed));
     uint8_t count = 0U;
     do {
         reversed[count++] = static_cast<char>('0' + value % 10U);
         value /= 10U;
-    } while (value && count < sizeof(reversed));
-    while (count < minimum_digits && count < sizeof(reversed)) reversed[count++] = '0';
+    } while (value && count < reversed_capacity);
+    while (count < minimum_digits && count < reversed_capacity) reversed[count++] = '0';
     while (count) {
         if (length + 1U >= capacity) return;
         output[length++] = reversed[--count];
