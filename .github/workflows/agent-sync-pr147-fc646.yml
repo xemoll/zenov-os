@@ -2,7 +2,7 @@ name: Diagnose PR147 Latest Main Merge
 
 on:
   pull_request:
-    branches: [main]
+    branches: [agent/pr147-sync-trigger-base]
     paths:
       - '.github/workflows/agent-sync-pr147-fc646.yml'
   workflow_dispatch:
