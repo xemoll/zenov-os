@@ -52,7 +52,7 @@ jobs:
           g++ -std=c++17 -O2 -Wall -Wextra -Werror -Wpedantic \
             tests/productivity_utilities_model.cpp -o build/productivity-utilities-model/model-gcc
           build/productivity-utilities-model/model-gcc | tee build/productivity-utilities-model/model-gcc.log
-          grep -Fqx 'PRODUCTIVITY_UTILITIES_MODEL_OK calc=precedence+programmer+overflow date=gregorian reminders=canonical+bounded agenda=minute-order' \
+          grep -Fqx 'PRODUCTIVITY_UTILITIES_MODEL_OK calc=precedence+programmer+overflow date=gregorian reminders=v2+backward+recurrence+quick-add agenda=minute-order+seven-day' \
             build/productivity-utilities-model/model-gcc.log
 
       - name: Validate model with Clang sanitizers
@@ -67,7 +67,7 @@ jobs:
           ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
           UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
             build/productivity-utilities-model/model-clang | tee build/productivity-utilities-model/model-clang.log
-          grep -Fqx 'PRODUCTIVITY_UTILITIES_MODEL_OK calc=precedence+programmer+overflow date=gregorian reminders=canonical+bounded agenda=minute-order' \
+          grep -Fqx 'PRODUCTIVITY_UTILITIES_MODEL_OK calc=precedence+programmer+overflow date=gregorian reminders=v2+backward+recurrence+quick-add agenda=minute-order+seven-day' \
             build/productivity-utilities-model/model-clang.log
 
       - name: Validate freestanding 64-bit divmod ABI
@@ -103,16 +103,20 @@ jobs:
           set -euo pipefail
           grep -Fq '#include "ui_productivity_utilities.inc"' kernel/parts/graphics.inc
           grep -Fq '#define render_scene render_scene_tasks_base' kernel/parts/graphics.inc
+          grep -Fq 'graphics::background_tick();' kernel/parts/hardware.inc
           grep -Fq 'constexpr uint8_t productivity_reminder_capacity = 24U;' kernel/parts/ui_productivity_utilities_types.inc
-          grep -Fq 'extern "C" uint64_t __udivmoddi4' kernel/parts/div64_runtime.inc
+          grep -Fq 'enum class ProductivityReminderRepeat' kernel/parts/ui_productivity_utilities_types.inc
           grep -Fq 'storage::security_read_file("/reminders/reminders.db"' kernel/parts/ui_productivity_reminders_format.inc
           grep -Fq 'storage::guarded_write_file("/reminders/reminders.db"' kernel/parts/ui_productivity_reminders_format.inc
+          grep -Fq 'productivity_reminder_parse_quick' kernel/parts/ui_productivity_reminders_format.inc
+          grep -Fq 'UI_REMINDER_REPEAT_ADVANCE_OK' kernel/parts/ui_productivity_reminders_actions.inc
+          grep -Fq 'ProductivityReminderFilter::week' kernel/parts/ui_productivity_reminders_agenda.inc
           grep -Fq 'storage::guarded_write_file("/utilities/calculator.state"' kernel/parts/ui_productivity_calculator_state.inc
           grep -Fq 'productivity_launcher_query_is("calculator")' kernel/parts/ui_productivity_utilities_runtime.inc
           grep -Fq 'productivity_launcher_query_is("reminders")' kernel/parts/ui_productivity_utilities_runtime.inc
-          grep -Fq 'UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+alarms' kernel/parts/ui_productivity_utilities_runtime.inc
-          grep -Fq 'UI_REMINDER_ALARM_DUE' kernel/parts/ui_productivity_reminders_actions.inc
-          echo 'PRODUCTIVITY_UTILITIES_SOURCE_CONTRACT_OK calculator=bounded reminders=canonical agenda=integrated reads=guarded writes=guarded div64=link-closed'
+          grep -Fq 'UI_BACKGROUND_REMINDER_REFRESH_OK' kernel/parts/ui_productivity_utilities_runtime.inc
+          grep -Fq 'UI_PRODUCTIVITY_UTILITIES_READY calculator=standard+programmer+date+units reminders=smart+agenda+recurrence+quick-capture+background' kernel/parts/ui_productivity_utilities_runtime.inc
+          echo 'PRODUCTIVITY_UTILITIES_SOURCE_CONTRACT_OK calculator=bounded reminders=v2+backward+recurrence+quick-add+background agenda=integrated+seven-day reads=guarded writes=guarded div64=link-closed'
 
       - name: Exercise Calculator, Reminders and Agenda
         run: bash tests/qemu_productivity_utilities.sh build/zenov-os.img build/zenov-data.img build/qemu-productivity-utilities
@@ -123,17 +127,22 @@ jobs:
           set -euo pipefail
           build/zenovfs-verify build/qemu-productivity-utilities/zenov-data-utilities.img | tee build/qemu-productivity-utilities/zenovfs-verify.log
           build/zenovfs-productivity-utilities-verify build/qemu-productivity-utilities/zenov-data-utilities.img | tee build/qemu-productivity-utilities/utilities-verify.log
-          grep -Fq 'ZENOV_PRODUCTIVITY_UTILITIES_RUNTIME_IMAGE_OK calculator=history+memory reminders=canonical+done+snoozed reboot=persistent checksum=valid geometry=bounded' \
+          grep -Fq 'ZENOV_PRODUCTIVITY_UTILITIES_RUNTIME_IMAGE_OK calculator=history+memory reminders=v2+one-shot+daily recurrence=advanced reboot=persistent checksum=valid geometry=bounded' \
             build/qemu-productivity-utilities/utilities-verify.log
           grep -Fq 'UI_CALCULATOR_EVAL_OK' build/qemu-productivity-utilities/serial-phase1.log
           grep -Fq 'UI_REMINDER_ALARM_DUE' build/qemu-productivity-utilities/serial-phase1.log
+          grep -Fq 'UI_BACKGROUND_REMINDER_REFRESH_OK' build/qemu-productivity-utilities/serial-phase1.log
+          grep -Fq 'UI_REMINDER_REPEAT_ADVANCE_OK' build/qemu-productivity-utilities/serial-phase1.log
           grep -Fq 'UI_REMINDERS_LOAD_OK' build/qemu-productivity-utilities/serial-phase2.log
           test -s build/qemu-productivity-utilities/calculator-standard.ppm
           test -s build/qemu-productivity-utilities/calculator-programmer.ppm
           test -s build/qemu-productivity-utilities/calculator-date.ppm
           test -s build/qemu-productivity-utilities/calculator-units.ppm
-          test -s build/qemu-productivity-utilities/reminders-alarm.ppm
-          test -s build/qemu-productivity-utilities/reminders-persisted.ppm
+          test -s build/qemu-productivity-utilities/reminders-quick-add.ppm
+          test -s build/qemu-productivity-utilities/reminders-quick-add-recurring.ppm
+          test -s build/qemu-productivity-utilities/reminders-recurring-alarm.ppm
+          test -s build/qemu-productivity-utilities/reminders-week.ppm
+          test -s build/qemu-productivity-utilities/reminders-recurring-persisted.ppm
           test ! -s build/qemu-productivity-utilities/qemu-phase1.stderr
           test ! -s build/qemu-productivity-utilities/qemu-phase2.stderr
 
@@ -158,7 +167,10 @@ jobs:
             build/qemu-productivity-utilities/*.ppm
             kernel/parts/div64_runtime.inc
             kernel/parts/graphics.inc
+            kernel/parts/hardware.inc
             kernel/parts/ui_productivity_utilities*.inc
+            kernel/parts/ui_productivity_calculator*.inc
+            kernel/parts/ui_productivity_reminders*.inc
             tests/div64_runtime_test.cpp
             tests/productivity_utilities_model.cpp
             tests/productivity_utilities_model_*.inc
