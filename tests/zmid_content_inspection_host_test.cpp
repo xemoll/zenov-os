@@ -115,6 +115,163 @@ std::string encode_base64(const std::vector<std::uint8_t>& data, bool url_safe, 
     return output;
 }
 
+void append_le16(std::vector<std::uint8_t>& output, std::uint16_t value) {
+    output.push_back(static_cast<std::uint8_t>(value));
+    output.push_back(static_cast<std::uint8_t>(value >> 8U));
+}
+
+void append_le32(std::vector<std::uint8_t>& output, std::uint32_t value) {
+    output.push_back(static_cast<std::uint8_t>(value));
+    output.push_back(static_cast<std::uint8_t>(value >> 8U));
+    output.push_back(static_cast<std::uint8_t>(value >> 16U));
+    output.push_back(static_cast<std::uint8_t>(value >> 24U));
+}
+
+void append_be32(std::vector<std::uint8_t>& output, std::uint32_t value) {
+    output.push_back(static_cast<std::uint8_t>(value >> 24U));
+    output.push_back(static_cast<std::uint8_t>(value >> 16U));
+    output.push_back(static_cast<std::uint8_t>(value >> 8U));
+    output.push_back(static_cast<std::uint8_t>(value));
+}
+
+constexpr std::uint8_t kWrappedPayload[] = "ZENOV_RANSOMWARE_TEST_V1";
+constexpr std::uint8_t kRawDeflate[] = {
+    0x8B,0x72,0xF5,0xF3,0x0F,0x8B,0x0F,0x72,0xF4,0x0B,0xF6,0xF7,0x0D,
+    0x77,0x0C,0x72,0x8D,0x0F,0x71,0x0D,0x0E,0x89,0x0F,0x33,0x04,0x00
+};
+constexpr std::uint32_t kWrappedPayloadSize = sizeof(kWrappedPayload) - 1U;
+
+std::vector<std::uint8_t> make_gzip(bool optional_fields) {
+    const std::uint8_t flags = optional_fields ? 0x1EU : 0U;
+    std::vector<std::uint8_t> output = {
+        0x1FU, 0x8BU, 8U, flags, 0U, 0U, 0U, 0U, 0U, 0xFFU
+    };
+    if (optional_fields) {
+        append_le16(output, 4U);
+        output.insert(output.end(), {0x11U, 0x22U, 0x33U, 0x44U});
+        static constexpr char name[] = "payload.bin";
+        output.insert(output.end(), name, name + sizeof(name));
+        static constexpr char comment[] = "safe-fixture";
+        output.insert(output.end(), comment, comment + sizeof(comment));
+        const std::uint32_t header_crc = zmid::content_inspection::crc32(
+            output.data(), static_cast<std::uint32_t>(output.size()));
+        append_le16(output, static_cast<std::uint16_t>(header_crc));
+    }
+    output.insert(output.end(), std::begin(kRawDeflate), std::end(kRawDeflate));
+    append_le32(output, zmid::content_inspection::crc32(kWrappedPayload, kWrappedPayloadSize));
+    append_le32(output, kWrappedPayloadSize);
+    return output;
+}
+
+std::vector<std::uint8_t> make_zlib() {
+    std::vector<std::uint8_t> output = {0x78U, 0x01U};
+    output.insert(output.end(), std::begin(kRawDeflate), std::end(kRawDeflate));
+    append_be32(output, zmid::content_inspection::adler32(kWrappedPayload, kWrappedPayloadSize));
+    return output;
+}
+
+bool output_matches(const std::array<std::uint8_t, 64U * 1024U>& output,
+                    std::uint32_t size,
+                    std::uint32_t copies = 1U) {
+    if (size != kWrappedPayloadSize * copies) return false;
+    for (std::uint32_t copy = 0U; copy < copies; ++copy) {
+        if (std::memcmp(output.data() + copy * kWrappedPayloadSize,
+                        kWrappedPayload, kWrappedPayloadSize) != 0) return false;
+    }
+    return true;
+}
+
+int wrapped_deflate_property_test() {
+    using Result = zmid::content_inspection::WrappedDeflateResult;
+    std::array<std::uint8_t, 64U * 1024U> output{};
+    std::uint32_t output_size = 0U;
+
+    const auto basic = make_gzip(false);
+    if (zmid::content_inspection::decode_gzip(
+            basic.data(), static_cast<std::uint32_t>(basic.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::decoded ||
+        !output_matches(output, output_size)) return 20;
+
+    auto optional = make_gzip(true);
+    if (zmid::content_inspection::decode_gzip(
+            optional.data(), static_cast<std::uint32_t>(optional.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::decoded ||
+        !output_matches(output, output_size)) return 21;
+
+    std::vector<std::uint8_t> multi = basic;
+    multi.insert(multi.end(), basic.begin(), basic.end());
+    if (zmid::content_inspection::decode_gzip(
+            multi.data(), static_cast<std::uint32_t>(multi.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::decoded ||
+        !output_matches(output, output_size, 2U)) return 22;
+
+    std::vector<std::uint8_t> too_many;
+    for (std::uint32_t index = 0U;
+         index <= zmid::content_inspection::max_archive_entries; ++index) {
+        too_many.insert(too_many.end(), basic.begin(), basic.end());
+    }
+    if (zmid::content_inspection::decode_gzip(
+            too_many.data(), static_cast<std::uint32_t>(too_many.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::unsupported) return 23;
+
+    auto corrupt_crc = basic;
+    corrupt_crc[corrupt_crc.size() - 8U] ^= 0x01U;
+    if (zmid::content_inspection::decode_gzip(
+            corrupt_crc.data(), static_cast<std::uint32_t>(corrupt_crc.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::unsupported) return 24;
+
+    const std::size_t optional_header_end = optional.size() - sizeof(kRawDeflate) - 8U;
+    optional[optional_header_end - 2U] ^= 0x01U;
+    if (zmid::content_inspection::decode_gzip(
+            optional.data(), static_cast<std::uint32_t>(optional.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::unsupported) return 25;
+
+    auto trailing_gzip = basic;
+    trailing_gzip.push_back(0U);
+    if (zmid::content_inspection::decode_gzip(
+            trailing_gzip.data(), static_cast<std::uint32_t>(trailing_gzip.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::unsupported) return 26;
+
+    auto reserved_flags = basic;
+    reserved_flags[3] = 0x20U;
+    if (zmid::content_inspection::decode_gzip(
+            reserved_flags.data(), static_cast<std::uint32_t>(reserved_flags.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::unsupported) return 27;
+
+    const auto zlib = make_zlib();
+    if (zmid::content_inspection::decode_zlib(
+            zlib.data(), static_cast<std::uint32_t>(zlib.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::decoded ||
+        !output_matches(output, output_size)) return 28;
+
+    auto corrupt_adler = zlib;
+    corrupt_adler.back() ^= 0x01U;
+    if (zmid::content_inspection::decode_zlib(
+            corrupt_adler.data(), static_cast<std::uint32_t>(corrupt_adler.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::unsupported) return 29;
+
+    auto trailing_zlib = zlib;
+    trailing_zlib.push_back(0U);
+    if (zmid::content_inspection::decode_zlib(
+            trailing_zlib.data(), static_cast<std::uint32_t>(trailing_zlib.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::unsupported) return 30;
+
+    std::array<std::uint8_t, 6U> preset_dictionary{{0x78U, 0x20U, 0U, 0U, 0U, 0U}};
+    if (zmid::content_inspection::decode_zlib(
+            preset_dictionary.data(), static_cast<std::uint32_t>(preset_dictionary.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::unsupported) return 31;
+
+    std::array<std::uint8_t, 6U> bad_fcheck{{0x78U, 0x02U, 0U, 0U, 0U, 0U}};
+    if (zmid::content_inspection::decode_zlib(
+            bad_fcheck.data(), static_cast<std::uint32_t>(bad_fcheck.size()),
+            output.data(), static_cast<std::uint32_t>(output.size()), output_size) != Result::not_format) return 32;
+
+    std::cout << "ZMID_WRAPPED_DEFLATE_PROPERTY_OK gzip=basic+optional+multi"
+                 " integrity=crc32+isize+fhcrc zlib=header+adler"
+                 " dictionary=blocked members=16 trailing=blocked\n";
+    return 0;
+}
+
 std::vector<std::uint8_t> read_all(const char* path) {
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     if (!input) throw std::runtime_error(std::string("cannot open: ") + path);
@@ -185,6 +342,8 @@ int property_test() {
     result = {};
     if (zmid::classify("/cache/plain.txt", path_sensitive, sizeof(path_sensitive) - 1U, digest, result)) return 17;
 
+    const int wrapped_status = wrapped_deflate_property_test();
+    if (wrapped_status) return wrapped_status;
     std::cout << "ZMID_BASE64_PROPERTY_OK cases=" << cases
               << " invalid=" << std::size(invalid)
               << " selftest=1 cache-context=2\n";
@@ -239,6 +398,12 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         scratch.data(), alternate.data(), result);
     std::uint32_t decoded_size = 0U;
     (void)zmid::content_inspection::decode_base64(
+        data, static_cast<std::uint32_t>(size), scratch.data(),
+        static_cast<std::uint32_t>(scratch.size()), decoded_size);
+    (void)zmid::content_inspection::decode_gzip(
+        data, static_cast<std::uint32_t>(size), scratch.data(),
+        static_cast<std::uint32_t>(scratch.size()), decoded_size);
+    (void)zmid::content_inspection::decode_zlib(
         data, static_cast<std::uint32_t>(size), scratch.data(),
         static_cast<std::uint32_t>(scratch.size()), decoded_size);
     std::uint32_t expanded_size = 0U;

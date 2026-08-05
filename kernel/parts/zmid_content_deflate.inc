@@ -167,13 +167,17 @@ bool build_dynamic_tables(BitReader& reader,
         build_huffman(distances, lengths + literal_count, distance_count, true);
 }
 
-bool inflate_raw(const uint8_t* input,
-                 uint32_t input_size,
-                 uint8_t* output,
-                 uint32_t output_capacity,
-                 uint32_t& output_size) {
+bool inflate_raw_prefix(const uint8_t* input,
+                        uint32_t input_size,
+                        uint8_t* output,
+                        uint32_t output_capacity,
+                        uint32_t& output_size,
+                        uint32_t& input_consumed,
+                        uint32_t window_limit = 32768U) {
     output_size = 0U;
-    if ((!input && input_size) || !output || !output_capacity) return false;
+    input_consumed = 0U;
+    if ((!input && input_size) || !output || !output_capacity ||
+        !window_limit || window_limit > 32768U) return false;
     BitReader reader{input, input_size};
     bool final_block = false;
     uint32_t blocks = 0U;
@@ -229,14 +233,26 @@ bool inflate_raw(const uint8_t* input,
             if (distance_extra[distance_symbol] &&
                 !reader.read(distance_extra[distance_symbol], extra)) return false;
             const uint32_t distance = distance_base[distance_symbol] + extra;
-            if (!distance || distance > output_size || length > output_capacity - output_size) return false;
+            if (!distance || distance > output_size || distance > window_limit ||
+                length > output_capacity - output_size) return false;
             for (uint32_t i = 0U; i < length; ++i) {
                 output[output_size] = output[output_size - distance];
                 ++output_size;
             }
         }
     }
-    return reader.offset == input_size;
+    input_consumed = reader.offset;
+    return true;
+}
+
+bool inflate_raw(const uint8_t* input,
+                 uint32_t input_size,
+                 uint8_t* output,
+                 uint32_t output_capacity,
+                 uint32_t& output_size) {
+    uint32_t input_consumed = 0U;
+    return inflate_raw_prefix(input, input_size, output, output_capacity,
+        output_size, input_consumed) && input_consumed == input_size;
 }
 
 uint32_t crc32(const uint8_t* data, uint32_t size) {
