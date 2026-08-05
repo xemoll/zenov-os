@@ -1,0 +1,307 @@
+name: Cross-platform Zen Apps
+
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-apps.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-apps.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: ${{ matrix.artifact }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: linux-ubuntu
+          - os: windows-2022
+            artifact: windows
+          - os: macos-15-intel
+            artifact: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Verify standalone source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f desktop/CMakeLists.txt
+          test -f desktop/src/main.cpp
+          test -f desktop/src/core/workspace.cpp
+          test -f desktop/tests/core_tests.cpp
+          test "$(find desktop/packaging/linux -name 'zen-*.desktop' | wc -l)" -eq 6
+          ! grep -R -nE 'setApplicationVersion|About Zen|Version [0-9]' desktop/src
+          echo 'ZEN_APPS_SOURCE_CONTRACT_OK apps=6 shell=standalone visible_versions=0'
+
+      - name: Install Ubuntu Qt
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build qt6-base-dev qt6-base-dev-tools libqt6sql6-sqlite \
+            libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 xvfb
+          qmake6 -query QT_VERSION
+
+      - name: Install Qt on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check "aqtinstall==3.3.0" "py7zr==1.0.0"
+          python -m aqt install-qt -O "$env:GITHUB_WORKSPACE\Qt" windows desktop 6.8.3 win64_msvc2022_64
+          $config = Get-ChildItem -Path "$env:GITHUB_WORKSPACE\Qt" -Recurse -Filter Qt6Config.cmake | Select-Object -First 1
+          if (-not $config) { throw 'Qt6Config.cmake was not installed' }
+          $prefix = $config.Directory.Parent.Parent.Parent.FullName
+          "QT_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "$prefix\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "QT_PREFIX=$prefix"
+
+      - name: Install Qt on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/zen-apps-aqt"
+          source "$RUNNER_TEMP/zen-apps-aqt/bin/activate"
+          python -m pip install --disable-pip-version-check 'aqtinstall==3.3.0' 'py7zr==1.0.0'
+          python -m aqt install-qt -O "$GITHUB_WORKSPACE/Qt" mac desktop 6.8.3 clang_64
+          qt_config="$(find "$GITHUB_WORKSPACE/Qt" -path '*/lib/cmake/Qt6/Qt6Config.cmake' -print -quit)"
+          test -n "$qt_config"
+          qt_prefix="$(cd "$(dirname "$qt_config")/../../.." && pwd)"
+          echo "QT_PREFIX=$qt_prefix" >> "$GITHUB_ENV"
+          echo "$qt_prefix/bin" >> "$GITHUB_PATH"
+          echo "QT_PREFIX=$qt_prefix"
+
+      - name: Configure Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cmake -S desktop -B build/desktop -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/install" \
+            -DBUILD_TESTING=ON \
+            -DZEN_APPS_WARNINGS_AS_ERRORS=ON
+
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S desktop -B build/desktop -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_PREFIX_PATH="$env:QT_PREFIX" `
+            -DCMAKE_INSTALL_PREFIX="$env:GITHUB_WORKSPACE/build/install" `
+            -DBUILD_TESTING=ON `
+            -DZEN_APPS_WARNINGS_AS_ERRORS=ON
+
+      - name: Configure macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cmake -S desktop -B build/desktop -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/install" \
+            -DBUILD_TESTING=ON \
+            -DZEN_APPS_WARNINGS_AS_ERRORS=ON
+
+      - name: Build Linux and macOS
+        if: runner.os != 'Windows'
+        run: cmake --build build/desktop --parallel 2
+
+      - name: Build Windows
+        if: runner.os == 'Windows'
+        run: cmake --build build/desktop --config Release --parallel 2
+
+      - name: Test Linux and macOS core
+        if: runner.os != 'Windows'
+        run: ctest --test-dir build/desktop --output-on-failure -R '^zenapps-core$'
+
+      - name: Test Windows core
+        if: runner.os == 'Windows'
+        run: ctest --test-dir build/desktop -C Release --output-on-failure -R '^zenapps-core$'
+
+      - name: Exercise and capture Linux applications
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/runtime-data build/screenshots
+          export QT_QPA_PLATFORM=offscreen
+          for app in notes tasks calendar clock calculator reminders; do
+            "build/desktop/zen-$app" --smoke-test --data-dir "$GITHUB_WORKSPACE/build/runtime-data"
+            "build/desktop/zen-$app" --data-dir "$GITHUB_WORKSPACE/build/runtime-data" \
+              --screenshot "$GITHUB_WORKSPACE/build/screenshots/zen-$app.png"
+            test -s "build/screenshots/zen-$app.png"
+          done
+          test -s build/runtime-data/workspace.sqlite
+          echo 'ZEN_APPS_RUNTIME_OK platform=linux apps=6 sqlite=shared screenshots=6'
+
+      - name: Exercise and capture Windows applications
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build/runtime-data, build/screenshots | Out-Null
+          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+          $env:QT_PLUGIN_PATH = "$env:QT_PREFIX\plugins"
+          $data = "$env:GITHUB_WORKSPACE\build\runtime-data"
+          foreach ($app in @('notes','tasks','calendar','clock','calculator','reminders')) {
+            $exe = "$env:GITHUB_WORKSPACE\build\desktop\Release\zen-$app.exe"
+            $smoke = Start-Process -FilePath $exe -ArgumentList @('--smoke-test','--data-dir',$data) -Wait -PassThru
+            if ($smoke.ExitCode -ne 0) { throw "Smoke test failed: $app exit=$($smoke.ExitCode)" }
+            $shot = "$env:GITHUB_WORKSPACE\build\screenshots\zen-$app.png"
+            $capture = Start-Process -FilePath $exe -ArgumentList @('--data-dir',$data,'--screenshot',$shot) -Wait -PassThru
+            if ($capture.ExitCode -ne 0 -or -not (Test-Path $shot)) { throw "Screenshot failed: $app exit=$($capture.ExitCode)" }
+          }
+          if (-not (Test-Path build/runtime-data/workspace.sqlite)) { throw 'Shared SQLite workspace missing' }
+          Write-Host 'ZEN_APPS_RUNTIME_OK platform=windows apps=6 sqlite=shared screenshots=6'
+
+      - name: Exercise and capture macOS applications
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/runtime-data build/screenshots
+          export QT_QPA_PLATFORM=offscreen
+          for app in notes tasks calendar clock calculator reminders; do
+            exe="build/desktop/zen-$app.app/Contents/MacOS/zen-$app"
+            "$exe" --smoke-test --data-dir "$GITHUB_WORKSPACE/build/runtime-data"
+            "$exe" --data-dir "$GITHUB_WORKSPACE/build/runtime-data" \
+              --screenshot "$GITHUB_WORKSPACE/build/screenshots/zen-$app.png"
+            test -s "build/screenshots/zen-$app.png"
+          done
+          test -s build/runtime-data/workspace.sqlite
+          echo 'ZEN_APPS_RUNTIME_OK platform=macos apps=6 sqlite=shared screenshots=6'
+
+      - name: Install Linux and macOS tree
+        if: runner.os != 'Windows'
+        run: cmake --install build/desktop
+
+      - name: Install Windows tree
+        if: runner.os == 'Windows'
+        run: cmake --install build/desktop --config Release
+
+      - name: Deploy Windows Qt runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($app in @('notes','tasks','calendar','clock','calculator','reminders')) {
+            windeployqt --release --no-translations --dir build/install/bin "build/install/bin/zen-$app.exe"
+            if ($LASTEXITCODE -ne 0) { throw "windeployqt failed: $app" }
+          }
+          if (-not (Test-Path build/install/bin/platforms/qwindows.dll)) { throw 'Windows platform plugin missing' }
+          if (-not (Test-Path build/install/bin/sqldrivers/qsqlite.dll)) { throw 'Windows SQLite plugin missing' }
+          Compress-Archive -Path build/install/* -DestinationPath build/zen-apps-windows.zip -Force
+
+      - name: Deploy macOS Qt runtime
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in notes tasks calendar clock calculator reminders; do
+            macdeployqt "build/install/zen-$app.app" -always-overwrite
+            test -x "build/install/zen-$app.app/Contents/MacOS/zen-$app"
+          done
+          test -d build/install/zen-notes.app/Contents/PlugIns/sqldrivers
+          ditto -c -k --sequesterRsrc --keepParent build/install build/zen-apps-macos.zip
+
+      - name: Build Linux relocation packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build/desktop --target package
+          test "$(find build/desktop -maxdepth 1 -name 'zen-apps-*.tar.gz' | wc -l)" -eq 1
+          test "$(find build/desktop -maxdepth 1 -name 'zen-apps-*.zip' | wc -l)" -eq 1
+
+      - name: Upload platform binaries and screenshots
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zen-apps-${{ matrix.artifact }}-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            build/install/**
+            build/screenshots/*.png
+            build/runtime-data/workspace.sqlite
+            build/desktop/zen-apps-*.tar.gz
+            build/desktop/zen-apps-*.zip
+            build/zen-apps-windows.zip
+            build/zen-apps-macos.zip
+
+  arch-package:
+    name: arch-linux-package
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base-devel
+    timeout-minutes: 45
+
+    steps:
+      - name: Install Arch build dependencies
+        shell: bash
+        run: pacman -Syu --noconfirm git cmake ninja qt6-base
+
+      - name: Check out exact source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Build and test on Arch Linux
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S desktop -B build/arch -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_TESTING=ON \
+            -DZEN_APPS_WARNINGS_AS_ERRORS=ON
+          cmake --build build/arch --parallel 2
+          QT_QPA_PLATFORM=offscreen ctest --test-dir build/arch --output-on-failure
+          mkdir -p build/arch-root build/arch-screenshots build/arch-data
+          DESTDIR="$GITHUB_WORKSPACE/build/arch-root" cmake --install build/arch
+          export QT_QPA_PLATFORM=offscreen
+          for app in notes tasks calendar clock calculator reminders; do
+            "build/arch/zen-$app" --data-dir "$GITHUB_WORKSPACE/build/arch-data" \
+              --screenshot "$GITHUB_WORKSPACE/build/arch-screenshots/zen-$app.png"
+            test -s "build/arch-screenshots/zen-$app.png"
+          done
+          test -x build/arch-root/usr/bin/zen-notes
+          test -f build/arch-root/usr/share/applications/zen-notes.desktop
+          test -s build/arch-data/workspace.sqlite
+          echo 'ZEN_APPS_ARCH_RUNTIME_OK apps=6 launchers=6 sqlite=shared screenshots=6'
+
+      - name: Build exact-head Arch package with makepkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          useradd -m builder
+          mkdir -p /home/builder/source /home/builder/package
+          cp -a "$GITHUB_WORKSPACE/." /home/builder/source/zenov-os
+          cp desktop/packaging/arch/PKGBUILD /home/builder/package/PKGBUILD
+          sed -i 's|source=("git+https://github.com/xemoll/zenov-os.git")|source=("zenov-os::git+file:///home/builder/source/zenov-os")|' /home/builder/package/PKGBUILD
+          chown -R builder:builder /home/builder/source /home/builder/package
+          su builder -c 'cd /home/builder/package && makepkg --noconfirm --cleanbuild'
+          cp /home/builder/package/*.pkg.tar.zst build/
+          test "$(find build -maxdepth 1 -name 'zen-apps-*.pkg.tar.zst' | wc -l)" -eq 1
+          echo 'ZEN_APPS_ARCH_PACKAGE_OK makepkg=exact-head'
+
+      - name: Upload Arch package and screenshots
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: zen-apps-arch-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            build/zen-apps-*.pkg.tar.zst
+            build/arch-screenshots/*.png
+            build/arch-data/workspace.sqlite

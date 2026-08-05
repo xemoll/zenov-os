@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Tasks
+Comment=Priorities, due dates and source links
+Exec=zen-tasks
+Icon=zen-tasks
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true

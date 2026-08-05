@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Calculator
+Comment=Safe expressions and reusable results
+Exec=zen-calculator
+Icon=zen-calculator
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true
