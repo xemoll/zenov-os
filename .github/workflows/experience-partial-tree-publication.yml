@@ -1,0 +1,195 @@
+name: Export verified ZenovOS experience partial tree
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  export-partial-tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TESTED_MAIN: c21f3d65b0ba671f2cd4e25f6a57a7cfcc82f038
+      EXPECTED_DIFF_SHA256: 5666bcc1c8f3ba1f5fa2d08d82d31b22c5013b9fc937d59e9f882839e3da6872
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reconstruct exact verified tree
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin "$TESTED_MAIN"
+          test "$(git rev-parse FETCH_HEAD)" = "$TESTED_MAIN"
+          git merge --no-edit --no-ff "$TESTED_MAIN"
+          test "$(git merge-base HEAD "$TESTED_MAIN")" = "$TESTED_MAIN"
+
+          python3 .github/scripts/experience_prepare.py
+          python3 .github/scripts/experience_pass.py
+          python3 .github/scripts/experience_audio_post.py
+          python3 .github/scripts/experience_focus_post.py
+          python3 .github/scripts/experience_responsiveness_post.py
+          python3 .github/scripts/experience_mouse_regression_post.py
+          python3 .github/scripts/experience_marker_cleanup_post.py
+
+          rm -f \
+            .github/scripts/experience_pass.py \
+            .github/scripts/experience_prepare.py \
+            .github/scripts/experience_audio_post.py \
+            .github/scripts/experience_focus_post.py \
+            .github/scripts/experience_responsiveness_post.py \
+            .github/scripts/experience_mouse_regression_post.py \
+            .github/scripts/experience_marker_cleanup_post.py \
+            .github/workflows/experience-integration.yml \
+            .github/workflows/experience-integration-v2.yml \
+            .github/workflows/experience-publication.yml \
+            .github/workflows/experience-base-tree-export.yml \
+            .github/workflows/experience-partial-tree-publication.yml
+
+          paths=(
+            .github/workflows/adaptive-display.yml
+            docs/UX_EXPERIENCE_0.1.1.md
+            kernel/kernel.cpp
+            kernel/parts/graphics_mapping.inc
+            kernel/parts/hardware.inc
+            kernel/parts/mouse_regression.inc
+            kernel/parts/system_sound.inc
+            kernel/parts/ui_apps.inc
+            kernel/parts/ui_files.inc
+            kernel/parts/ui_files_runtime.inc
+            kernel/parts/ui_font.inc
+            kernel/parts/ui_graphics_base.inc
+            kernel/parts/ui_runtime.inc
+            kernel/parts/ui_scaler.inc
+            kernel/parts/ui_shell.inc
+            kernel/parts/ui_theme.inc
+            tests/qemu_display_ui.sh
+            tests/qemu_zenpkg.sh
+            third_party/inter/OFL.txt
+          )
+          mapfile -t actual < <(git diff "$TESTED_MAIN" --name-only | sort)
+          mapfile -t expected < <(printf '%s\n' "${paths[@]}" | sort)
+          diff -u <(printf '%s\n' "${expected[@]}") <(printf '%s\n' "${actual[@]}")
+          git diff --check "$TESTED_MAIN"
+          git diff --stat "$TESTED_MAIN" -- "${paths[@]}" | tee publication-source-stat.txt
+          git diff --binary "$TESTED_MAIN" -- "${paths[@]}" > publication-source.diff
+          printf '%s  %s\n' "$EXPECTED_DIFF_SHA256" publication-source.diff | sha256sum -c -
+
+      - name: Create verified non-workflow tree object
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import stat
+          import subprocess
+          import urllib.request
+
+          token = os.environ["GH_TOKEN"]
+          repository = os.environ["GH_REPOSITORY"]
+          tested_main = os.environ["TESTED_MAIN"]
+          expected_diff = os.environ["EXPECTED_DIFF_SHA256"]
+          paths = [
+              "docs/UX_EXPERIENCE_0.1.1.md",
+              "kernel/kernel.cpp",
+              "kernel/parts/graphics_mapping.inc",
+              "kernel/parts/hardware.inc",
+              "kernel/parts/mouse_regression.inc",
+              "kernel/parts/system_sound.inc",
+              "kernel/parts/ui_apps.inc",
+              "kernel/parts/ui_files.inc",
+              "kernel/parts/ui_files_runtime.inc",
+              "kernel/parts/ui_font.inc",
+              "kernel/parts/ui_graphics_base.inc",
+              "kernel/parts/ui_runtime.inc",
+              "kernel/parts/ui_scaler.inc",
+              "kernel/parts/ui_shell.inc",
+              "kernel/parts/ui_theme.inc",
+              "tests/qemu_display_ui.sh",
+              "tests/qemu_zenpkg.sh",
+              "third_party/inter/OFL.txt",
+          ]
+
+          actual_diff = hashlib.sha256(pathlib.Path("publication-source.diff").read_bytes()).hexdigest()
+          if actual_diff != expected_diff:
+              raise SystemExit(f"source diff changed: {actual_diff} != {expected_diff}")
+
+          def api(endpoint, payload):
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{repository}{endpoint}",
+                  data=json.dumps(payload).encode("utf-8"),
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "Content-Type": "application/json",
+                  },
+                  method="POST",
+              )
+              with urllib.request.urlopen(request) as response:
+                  return json.load(response)
+
+          entries = []
+          files = []
+          for relative in paths:
+              path = pathlib.Path(relative)
+              data = path.read_bytes()
+              blob = api("/git/blobs", {
+                  "content": base64.b64encode(data).decode("ascii"),
+                  "encoding": "base64",
+              })
+              mode = "100755" if path.stat().st_mode & stat.S_IXUSR else "100644"
+              entries.append({"path": relative, "mode": mode, "type": "blob", "sha": blob["sha"]})
+              files.append({
+                  "path": relative,
+                  "mode": mode,
+                  "blob_sha": blob["sha"],
+                  "sha256": hashlib.sha256(data).hexdigest(),
+                  "bytes": len(data),
+              })
+
+          base_tree = subprocess.check_output(
+              ["git", "rev-parse", f"{tested_main}^{{tree}}"], text=True).strip()
+          tree = api("/git/trees", {"base_tree": base_tree, "tree": entries})
+          retained = api("/git/commits", {
+              "message": "ci: retain verified ZenovOS experience partial tree",
+              "tree": tree["sha"],
+              "parents": [tested_main],
+          })
+          metadata = {
+              "partial_commit_sha": retained["sha"],
+              "partial_tree_sha": tree["sha"],
+              "base_tree_sha": base_tree,
+              "parent_sha": tested_main,
+              "source_diff_sha256": actual_diff,
+              "files": files,
+          }
+          pathlib.Path("publication-partial-tree.json").write_text(
+              json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          print(json.dumps(metadata, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload partial tree metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zenov-os-experience-partial-tree-${{ github.run_id }}
+          if-no-files-found: error
+          compression-level: 9
+          path: |
+            publication-partial-tree.json
+            publication-source.diff
+            publication-source-stat.txt
