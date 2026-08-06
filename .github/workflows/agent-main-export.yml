@@ -1,0 +1,144 @@
+name: Sync Scheduler Branch From Current Main
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/agent-main-export.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-scheduler-from-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: agent/kernel-preemptive-scheduler-0.1.1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Merge exact main, publish, and retain diagnostics
+        shell: bash
+        env:
+          MAIN_SHA: 08ad8e6caec8f4818147b7961c809afdc9911558
+          DIAG_BRANCH: agent/main-08ad-source-export
+        run: |
+          set -u -o pipefail
+          log=/tmp/scheduler-sync.log
+          : > "$log"
+          exec > >(tee -a "$log") 2>&1
+
+          result=success
+          failure='none'
+          conflicts='none'
+          scheduler_before="$(git rev-parse HEAD)"
+          scheduler_after="$scheduler_before"
+
+          git config user.name 'ZenovOS Kernel Agent'
+          git config user.email 'actions@users.noreply.github.com'
+          git fetch origin main "$DIAG_BRANCH"
+
+          if [[ "$(git rev-parse origin/main)" != "$MAIN_SHA" ]]; then
+            result=failure
+            failure=main-sha-moved
+          fi
+
+          if [[ "$result" == success ]]; then
+            git merge --no-ff --no-commit "$MAIN_SHA"
+            merge_rc=$?
+            if ((merge_rc != 0)); then
+              conflicts="$(git diff --name-only --diff-filter=U | paste -sd, -)"
+              if [[ "$conflicts" != 'kernel/parts/hardware.inc' ]]; then
+                result=failure
+                failure=unexpected-conflicts
+              else
+                git checkout --ours kernel/parts/hardware.inc
+                python3 - <<'PY'
+from pathlib import Path
+path = Path('kernel/parts/hardware.inc')
+text = path.read_text()
+old_namespace = 'namespace graphics { void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons); }'
+new_namespace = '''namespace graphics {
+void on_mouse_packet(int32_t delta_x, int32_t delta_y, uint8_t buttons);
+void background_tick();
+}'''
+old_wait = '''uint16_t key_pop_blocking() {
+    for (;;) { disable_interrupts(); if (key_tail != key_head) { const uint16_t key = key_queue[key_tail]; key_tail = (key_tail + 1) % key_queue_capacity; enable_interrupts(); return key; } asm volatile("sti; hlt; cli"); }
+}'''
+new_wait = '''uint16_t key_pop_blocking() {
+    for (;;) {
+        disable_interrupts();
+        if (key_tail != key_head) {
+            const uint16_t key = key_queue[key_tail];
+            key_tail = (key_tail + 1) % key_queue_capacity;
+            enable_interrupts();
+            return key;
+        }
+        asm volatile("sti; hlt; cli");
+        enable_interrupts();
+        graphics::background_tick();
+    }
+}'''
+if old_namespace not in text or old_wait not in text:
+    raise SystemExit('expected hardware merge anchors are missing')
+path.write_text(text.replace(old_namespace, new_namespace).replace(old_wait, new_wait))
+PY
+                python_rc=$?
+                if ((python_rc != 0)); then
+                  result=failure
+                  failure=hardware-resolution-failed
+                else
+                  git add kernel/parts/hardware.inc
+                fi
+              fi
+            fi
+          fi
+
+          if [[ "$result" == success ]]; then
+            if [[ -n "$(git diff --name-only --diff-filter=U)" ]]; then
+              result=failure
+              failure=unresolved-conflicts
+            fi
+          fi
+
+          if [[ "$result" == success ]]; then
+            grep -Fq 'uint32_t timer_interrupt(InterruptFrame* frame);' kernel/parts/hardware.inc || { result=failure; failure=missing-timer-dispatch; }
+            grep -Fq 'return process::timer_interrupt(frame);' kernel/parts/hardware.inc || { result=failure; failure=missing-timer-call; }
+            grep -Fq 'return process::user_exception(frame);' kernel/parts/hardware.inc || { result=failure; failure=missing-fault-isolation; }
+            grep -Fq 'graphics::background_tick();' kernel/parts/hardware.inc || { result=failure; failure=missing-reminder-background-tick; }
+          fi
+
+          if [[ "$result" == success ]]; then
+            git restore --source="$scheduler_before" --staged --worktree -- .github/workflows
+            git diff --cached --check || { result=failure; failure=diff-check; }
+          fi
+
+          if [[ "$result" == success ]]; then
+            git commit -m 'merge: synchronize preemptive scheduler with current main' || { result=failure; failure=merge-commit; }
+          fi
+          if [[ "$result" == success ]]; then
+            scheduler_after="$(git rev-parse HEAD)"
+            git push origin HEAD:refs/heads/agent/kernel-preemptive-scheduler-0.1.1 || { result=failure; failure=push; }
+          fi
+
+          printf 'result=%s\nfailure=%s\nmain=%s\nscheduler_before=%s\nscheduler_after=%s\nconflicts=%s\n' \
+            "$result" "$failure" "$MAIN_SHA" "$scheduler_before" "$scheduler_after" "$conflicts" \
+            > /tmp/sync-result.txt
+          printf '\n--- log ---\n' >> /tmp/sync-result.txt
+          cat "$log" >> /tmp/sync-result.txt
+
+          git merge --abort >/dev/null 2>&1 || true
+          rm -rf /tmp/diag
+          git worktree add --detach /tmp/diag "origin/$DIAG_BRANCH"
+          cp /tmp/sync-result.txt /tmp/diag/sync-result.txt
+          git -C /tmp/diag add sync-result.txt
+          git -C /tmp/diag commit -m 'ci: retain scheduler-main synchronization result'
+          git -C /tmp/diag push origin HEAD:refs/heads/$DIAG_BRANCH
+
+          [[ "$result" == success ]]

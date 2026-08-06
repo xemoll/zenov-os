@@ -1,0 +1,405 @@
+diff --git a/Makefile b/Makefile
+index 822f0bf..c0ee84a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -264,12 +264,15 @@ $(BUILD)/interrupts.o: kernel/interrupts.S | $(BUILD)
+ $(BUILD)/user-runtime.o: kernel/user.S | $(BUILD)
+ 	$(AS) --32 $< -o $@
+ 
++$(BUILD)/scheduler-probe.o: kernel/scheduler_probe.S | $(BUILD)
++	$(AS) --32 $< -o $@
++
+ $(BUILD)/kernel.o: kernel/kernel.cpp $(KERNEL_PARTS) security/zgdb_crypto_material.hpp security/zcap_crypto_material.hpp security/zmid_crypto_material.hpp security/zrwp_crypto_material.hpp security/zvrt_crypto_material.hpp $(BUILD)/generated/zenov_config.hpp | $(BUILD)
+ 	$(HOST_CXX) $(KERNEL_FLAGS) -c $< -o $@
+ 
+-$(BUILD)/kernel.elf: $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/kernel.o kernel/linker.ld
++$(BUILD)/kernel.elf: $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/scheduler-probe.o $(BUILD)/kernel.o kernel/linker.ld
+ 	$(LD) -m elf_i386 -T kernel/linker.ld -Map=$(BUILD)/kernel.map \
+-	  -o $@ $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/kernel.o
++	  -o $@ $(BUILD)/entry.o $(BUILD)/interrupts.o $(BUILD)/user-runtime.o $(BUILD)/scheduler-probe.o $(BUILD)/kernel.o
+ 	@test -z "$$(nm -u $@)"
+ 
+ $(BUILD)/KERNEL.BIN: $(BUILD)/kernel.elf
+diff --git a/docs/SCHEDULER_0.1.1.md b/docs/SCHEDULER_0.1.1.md
+index 5a025f2..ee74710 100644
+--- a/docs/SCHEDULER_0.1.1.md
++++ b/docs/SCHEDULER_0.1.1.md
+@@ -61,3 +61,19 @@ The scheduler is uniprocessor. Console input remains a kernel-blocking operation
+ there is no process tree, signals, handles, user-space services, SMP balancing,
+ demand paging or persistent process state. The shell launches a foreground batch
+ with `run APP args & APP args`; it regains control after all tasks exit or fault.
++
++## Trust-preserving preemption diagnostic
++
++The `schedtest` command does not modify or replace a signed ZenovFS application.
++It copies a bounded position-independent workload from kernel read-only storage
++into two fresh PMM-backed ring-3 address spaces. Each task receives only the
++`console-write` capability. The diagnostic therefore proves timer preemption and
++per-task mappings without expanding the signed application trust set.
++
++Required runtime evidence:
++
++- `SCHED_PROBE_TRUST_BOUNDARY_OK ... filesystem=unmodified`
++- two `/kernel/scheduler-probe-*` task creation records
++- task B starts before task A completes
++- at least one `reason=timer` context switch
++- a successful batch with non-zero preemptions
+diff --git a/kernel/parts/commands.inc b/kernel/parts/commands.inc
+index 5cb6f04..cd61c4a 100644
+--- a/kernel/parts/commands.inc
++++ b/kernel/parts/commands.inc
+@@ -82,7 +82,7 @@ void command_help() {
+     console::line("  Navigation   home  help  clear  pwd  cd <path>");
+     console::line("  Storage      ls  mkdir  touch  write  append  rm  fsck  sync");
+     console::line("  File tools   cat  cp  mv  stat  mount  df");
+-    console::line("  Applications apps  run <app> [& <app>...]  ps");
++    console::line("  Applications apps  run <app> [& <app>...]  ps  schedtest");
+     console::line("  Memory       mem  pmm  vm  memmap");
+     console::line("  System       info  status  devices  disk  cpu");
+     console::line("  Session      uptime  date  time  history  bootlog");
+@@ -369,6 +369,9 @@ void execute(char* line) {
+         begin_view("TASK SCHEDULER");
+         process::print_scheduler_status();
+     }
++    else if (string_equal(command, "schedtest")) {
++        if (!process::run_scheduler_probe()) console::warning("Scheduler diagnostic could not start.");
++    }
+     else if (string_equal(command, "history")) command_history();
+     else if (string_equal(command, "bootlog")) command_bootlog();
+     else if (string_equal(command, "clear") || string_equal(command, "cls")) console::clear_content();
+diff --git a/kernel/parts/scheduler.inc b/kernel/parts/scheduler.inc
+index e5ebd43..bf48ab9 100644
+--- a/kernel/parts/scheduler.inc
++++ b/kernel/parts/scheduler.inc
+@@ -1,5 +1,8 @@
+ #include "scheduler_policy.inc"
+ 
++extern "C" const uint8_t scheduler_probe_start[];
++extern "C" const uint8_t scheduler_probe_end[];
++
+ namespace process {
+ enum class TaskState : uint8_t { unused, ready, running, sleeping, zombie };
+ 
+@@ -267,6 +270,85 @@ void reset_task_table() {
+     scheduler_ending = false;
+ }
+ 
++bool configure_task(uint32_t slot, paging::AddressSpace space, uint32_t entry,
++                    uint32_t initial_stack, uint32_t initial_eax,
++                    const ActiveCapabilityProfile& capabilities,
++                    const char* path, const char* format) {
++    if (slot >= task_capacity || !space.table_physical || !path || !format) return false;
++    char normalized_path[sizeof(Task::path)]{};
++    if (!storage::path_copy(normalized_path, path, sizeof(normalized_path))) return false;
++    Task& task = tasks[slot];
++    task = Task{};
++    task.state = TaskState::ready;
++    task.pid = next_pid++;
++    task.base_priority = scheduler_policy::default_priority;
++    task.dynamic_priority = task.base_priority;
++    task.quantum_remaining = scheduler_policy::quantum_ticks(task.dynamic_priority);
++    task.context.gs = task.context.fs = task.context.es = task.context.ds = 0x23U;
++    task.context.eax = initial_eax;
++    task.context.eip = entry;
++    task.context.cs = 0x1BU;
++    task.context.eflags = 0x202U;
++    task.context.useresp = initial_stack;
++    task.context.ss = 0x23U;
++    task.address_space = space;
++    task.capabilities = capabilities;
++    storage::path_copy(task.path, normalized_path, sizeof(task.path));
++    string_copy(task.format, format, sizeof(task.format));
++    memset(reinterpret_cast<void*>(task_stack_bottom(slot)), 0,
++           supervisor_layout::task_stack_bytes);
++    return true;
++}
++
++void log_task_created(const Task& task) {
++    serial::write("TASK_CREATED pid="); serial_u32(task.pid);
++    serial::write(" app="); serial::write(task.path);
++    serial::write(" pages="); serial_u32(task.address_space.mapped_pages);
++    serial::write(" priority="); serial_u32(task.base_priority);
++    serial::write("\r\n");
++}
++
++bool prepare_scheduler_probe_task(uint32_t slot, uint32_t variant) {
++    const uint32_t image_size = static_cast<uint32_t>(scheduler_probe_end - scheduler_probe_start);
++    if (slot >= task_capacity || image_size == 0U || image_size >= stack_base) return false;
++    paging::AddressSpace space{};
++    if (!paging::address_space_create(space) || !paging::address_space_activate(&space)) {
++        paging::address_space_destroy(space);
++        return false;
++    }
++    const bool mapped = paging::map_user(0U, image_size, true) && map_stack();
++    if (mapped) {
++        memcpy(reinterpret_cast<void*>(user_base), scheduler_probe_start, image_size);
++    }
++    const bool protected_image = mapped && paging::protect_user(0U, image_size, false);
++    if (!protected_image) {
++        paging::address_space_activate(nullptr);
++        paging::address_space_destroy(space);
++        return false;
++    }
++
++    ActiveCapabilityProfile capabilities{};
++    capabilities.valid = true;
++    capabilities.mask = capability_console_write;
++    const char* const path = variant == 0U ?
++        "/kernel/scheduler-probe-a" : "/kernel/scheduler-probe-b";
++    if (!storage::path_copy(capabilities.path, path, sizeof(capabilities.path))) {
++        paging::address_space_activate(nullptr);
++        paging::address_space_destroy(space);
++        return false;
++    }
++    security_guard::sha256(scheduler_probe_start, image_size, capabilities.digest);
++    const bool configured = configure_task(slot, space, 0U, stack_top, variant,
++                                            capabilities, path, "KPROBE");
++    paging::address_space_activate(nullptr);
++    if (!configured) {
++        paging::address_space_destroy(space);
++        return false;
++    }
++    log_task_created(tasks[slot]);
++    return true;
++}
++
+ bool prepare_task(uint32_t slot, char* command) {
+     if (slot >= task_capacity || !command || !*command) return false;
+     char* arguments[max_arguments]{};
+@@ -292,32 +374,16 @@ bool prepare_task(uint32_t slot, char* command) {
+         clear_capability_profile();
+         return false;
+     }
+-    Task& task = tasks[slot];
+-    task = Task{};
+-    task.state = TaskState::ready;
+-    task.pid = next_pid++;
+-    task.base_priority = scheduler_policy::default_priority;
+-    task.dynamic_priority = task.base_priority;
+-    task.quantum_remaining = scheduler_policy::quantum_ticks(task.dynamic_priority);
+-    task.context.gs = task.context.fs = task.context.es = task.context.ds = 0x23U;
+-    task.context.eip = entry;
+-    task.context.cs = 0x1BU;
+-    task.context.eflags = 0x202U;
+-    task.context.useresp = initial_stack;
+-    task.context.ss = 0x23U;
+-    task.address_space = space;
+-    task.capabilities = capability_snapshot;
+-    storage::path_copy(task.path, requested, sizeof(task.path));
+-    string_copy(task.format, zex ? "ZEX1" : "ELF32", sizeof(task.format));
+-    memset(reinterpret_cast<void*>(task_stack_bottom(slot)), 0,
+-           supervisor_layout::task_stack_bytes);
++    const bool configured = configure_task(slot, space, entry, initial_stack, 0U,
++                                           capability_snapshot, requested,
++                                           zex ? "ZEX1" : "ELF32");
+     paging::address_space_activate(nullptr);
+     clear_capability_profile();
+-    serial::write("TASK_CREATED pid="); serial_u32(task.pid);
+-    serial::write(" app="); serial::write(task.path);
+-    serial::write(" pages="); serial_u32(task.address_space.mapped_pages);
+-    serial::write(" priority="); serial_u32(task.base_priority);
+-    serial::write("\r\n");
++    if (!configured) {
++        paging::address_space_destroy(space);
++        return false;
++    }
++    log_task_created(tasks[slot]);
+     return true;
+ }
+ 
+@@ -366,6 +432,10 @@ bool run_task_batch(char* input) {
+     const int32_t first = select_ready(-1);
+     if (first < 0 || !activate_task(static_cast<uint32_t>(first))) {
+         scheduler_running = false;
++        paging::address_space_activate(nullptr);
++        for (uint32_t i = 0U; i < task_capacity; ++i) destroy_task_address_space(i);
++        reset_task_table();
++        serial::line("SCHED_BATCH_START_FAILED");
+         return false;
+     }
+     serial::write("SCHED_BATCH_START tasks="); serial_u32(batch_task_count);
+@@ -374,6 +444,32 @@ bool run_task_batch(char* input) {
+     return true;
+ }
+ 
++bool run_scheduler_probe() {
++    if (!scheduler_ready || scheduler_running) return false;
++    reset_task_table();
++    if (!prepare_scheduler_probe_task(0U, 0U) ||
++        !prepare_scheduler_probe_task(1U, 1U)) {
++        paging::address_space_activate(nullptr);
++        for (uint32_t i = 0U; i < task_capacity; ++i) destroy_task_address_space(i);
++        reset_task_table();
++        serial::line("SCHED_PROBE_CREATE_FAILED");
++        return false;
++    }
++    batch_task_count = 2U;
++    scheduler_running = true;
++    const int32_t first = select_ready(-1);
++    if (first < 0 || !activate_task(static_cast<uint32_t>(first))) {
++        scheduler_running = false;
++        for (uint32_t i = 0U; i < task_capacity; ++i) destroy_task_address_space(i);
++        reset_task_table();
++        return false;
++    }
++    serial::line("SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata capabilities=console-write filesystem=unmodified");
++    serial::write("SCHED_BATCH_START tasks=2 policy=priority-rr quantum=3-6 aging=50 kind=kernel-probe\r\n");
++    user_enter(tasks[first].context.eip, tasks[first].context.useresp);
++    return true;
++}
++
+ void scheduler_init() {
+     reset_task_table();
+     scheduler_ready = paging::enabled && pmm::initialized;
+diff --git a/tests/qemu_scheduler.sh b/tests/qemu_scheduler.sh
+index fe89f91..22c6ddf 100755
+--- a/tests/qemu_scheduler.sh
++++ b/tests/qemu_scheduler.sh
+@@ -44,9 +44,10 @@ controller() {
+   wait_for "USER_HIGH_HALF_WINDOW_OK base=0x40000000 bytes=1048576" || { echo quit; return 1; }
+   wait_for "ZENOVOS_UI_READY" || { echo quit; return 1; }
+   wait_for "zenov> " || { echo quit; return 1; }
+-  send_command "run HELLO preempt-a & HELLO preempt-b"
+-  wait_for "TASK_CREATED pid=1 app=/apps/hello.zex" || { echo quit; return 1; }
+-  wait_for "TASK_CREATED pid=2 app=/apps/hello.zex" || { echo quit; return 1; }
++  send_command "schedtest"
++  wait_for "SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata capabilities=console-write filesystem=unmodified" || { echo quit; return 1; }
++  wait_for "TASK_CREATED pid=1 app=/kernel/scheduler-probe-a" || { echo quit; return 1; }
++  wait_for "TASK_CREATED pid=2 app=/kernel/scheduler-probe-b" || { echo quit; return 1; }
+   wait_for "SCHED_BATCH_START tasks=2" || { echo quit; return 1; }
+   wait_for "PREEMPT_A_START" || { echo quit; return 1; }
+   wait_for "PREEMPT_B_START" || { echo quit; return 1; }
+@@ -82,4 +83,6 @@ grep -Eq 'SCHED_BATCH_COMPLETE tasks=2 completed=2 faulted=0 switches=[1-9][0-9]
+ grep -Fq 'SCHED_CONTEXT_SWITCH from=1 to=2 reason=timer' "$SERIAL"
+ ! grep -Fq 'ZENOVOS KERNEL PANIC' "$SERIAL"
+ ! grep -Fq 'SCHED_BATCH_CREATE_FAILED' "$SERIAL"
++! grep -Fq 'SCHED_PROBE_CREATE_FAILED' "$SERIAL"
++! grep -Fq 'ZENOV_GUARD_TRUST_BASELINE_FAILED' "$SERIAL"
+ printf 'qemu-scheduler: OK tasks=2 policy=priority-rr preemption=timer address-space=per-task\n'
+diff --git a/tests/qemu_smoke.sh b/tests/qemu_smoke.sh
+index d00f6fc..b86f8c5 100755
+--- a/tests/qemu_smoke.sh
++++ b/tests/qemu_smoke.sh
+@@ -144,7 +144,10 @@ controller_first() {
+   send_command "echo $long_payload"; wait_for_serial "$serial" "$LONG_INPUT_MARKER" || { echo quit; return 1; }
+   send_command "write PERSIST.TXT PERSISTENCE_0_1_1_OK"; wait_for_count "$serial" "WRITE_OK" 2 || { echo quit; return 1; }
+   send_command "run HELLO"; wait_for_serial "$serial" "HELLO_ZEX_0_1_1_OK" || { echo quit; return 1; }
+-  send_command "run HELLO preempt-a & HELLO preempt-b"
++  send_command "schedtest"
++  wait_for_serial "$serial" "SCHED_PROBE_TRUST_BOUNDARY_OK source=kernel-rodata capabilities=console-write filesystem=unmodified" || { echo quit; return 1; }
++  wait_for_serial "$serial" "TASK_CREATED pid=1 app=/kernel/scheduler-probe-a" || { echo quit; return 1; }
++  wait_for_serial "$serial" "TASK_CREATED pid=2 app=/kernel/scheduler-probe-b" || { echo quit; return 1; }
+   wait_for_serial "$serial" "SCHED_BATCH_START tasks=2" || { echo quit; return 1; }
+   wait_for_serial "$serial" "PREEMPT_A_START" || { echo quit; return 1; }
+   wait_for_serial "$serial" "PREEMPT_B_START" || { echo quit; return 1; }
+diff --git a/user/hello.S b/user/hello.S
+index fe3440f..bac5021 100644
+--- a/user/hello.S
++++ b/user/hello.S
+@@ -2,103 +2,25 @@
+ .section .text,"ax"
+ .code32
+ .global _start
+-.equ SYS_EXIT, 0
+-.equ SYS_WRITE, 1
+-.equ SYS_YIELD, 9
+-.equ SYS_GETPID, 11
+ 
+ _start:
+-    cld
+-    cmp dword ptr [esp], 2
+-    jb .default
+-    mov edi, [esp + 4]
+-    mov esi, [edi + 4]
+-    mov edi, OFFSET FLAT:mode_a
+-    mov ecx, mode_a_end - mode_a
+-    repe cmpsb
+-    je .preempt_a
+-    mov edi, OFFSET FLAT:mode_b
+-    mov ecx, mode_b_end - mode_b
+-    mov esi, [esp + 4]
+-    mov esi, [esi + 4]
+-    repe cmpsb
+-    je .preempt_b
+-
+-.default:
++    mov eax, 1
+     mov ebx, OFFSET FLAT:message
+     mov ecx, message_end - message
+-    call .write
+-    xor ebx, ebx
+-    jmp .exit
+-
+-.preempt_a:
+-    mov ebx, OFFSET FLAT:a_start
+-    mov ecx, a_start_end - a_start
+-    call .write
+-    mov eax, SYS_GETPID
+     int 0x80
+-    call .cpu_burn
+-    mov ebx, OFFSET FLAT:a_done
+-    mov ecx, a_done_end - a_done
+-    call .write
+-    xor ebx, ebx
+-    jmp .exit
+ 
+-.preempt_b:
+-    mov ebx, OFFSET FLAT:b_start
+-    mov ecx, b_start_end - b_start
+-    call .write
+-    mov eax, SYS_YIELD
+-    int 0x80
+-    call .cpu_burn
+-    mov ebx, OFFSET FLAT:b_done
+-    mov ecx, b_done_end - b_done
+-    call .write
+     xor ebx, ebx
+-
+-.exit:
+-    mov eax, SYS_EXIT
++    xor eax, eax
+     int 0x80
++
+ .hang:
+     ud2
+     jmp .hang
+ 
+-.write:
+-    mov eax, SYS_WRITE
+-    int 0x80
+-    ret
+-
+-.cpu_burn:
+-    push ecx
+-    push edx
+-    mov edx, 16
+-.outer:
+-    mov ecx, 0x00200000
+-.inner:
+-    dec ecx
+-    jnz .inner
+-    dec edx
+-    jnz .outer
+-    pop edx
+-    pop ecx
+-    ret
+-
+ .section .rodata,"a"
+-mode_a: .asciz "preempt-a"
+-mode_a_end:
+-mode_b: .asciz "preempt-b"
+-mode_b_end:
+ message:
+     .ascii "HELLO_ZEX_0_1_1_OK\n"
+     .ascii "ZenovOS native ZEX1 application returned through INT 0x80.\n"
+ message_end:
+-a_start: .ascii "PREEMPT_A_START\n"
+-a_start_end:
+-a_done: .ascii "PREEMPT_A_DONE\n"
+-a_done_end:
+-b_start: .ascii "PREEMPT_B_START\n"
+-b_start_end:
+-b_done: .ascii "PREEMPT_B_DONE\n"
+-b_done_end:
+ 
+ .section .note.GNU-stack,"",@progbits
